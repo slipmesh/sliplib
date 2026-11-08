@@ -1,0 +1,2 @@
+# Error messages are wording, which no test pins; their mutants would only ever be missed.
+exclude_re = ["impl fmt::Display for KeyError"]
