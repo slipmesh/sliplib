@@ -5,7 +5,7 @@ generator, the RouterOS tool and the Kubernetes operators.
 
 | crate | what it gives |
 | --- | --- |
-| [`sliplib-secrets`](secrets) | WireGuard keys: decoding, generation, the public key, and a private key `Debug` never prints |
+| [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 
 The crates are one workspace with one version and one tag. A change to one crate moves the tag for
 all of them; for a consumer of another crate that update changes nothing.
@@ -21,10 +21,13 @@ sliplib-secrets = { git = "https://github.com/slipmesh/sliplib", tag = "v0.1.0" 
 
 ### `sliplib-secrets`
 
-A key is the base64 text of 32 bytes, the form configs and RouterOS carry it in. `PrivateKey` keeps
-that text as given, so it is written back unchanged, and prints as `<redacted>` through `Debug`:
-a structure that holds one can be logged or shown in a diff without leaking it. The text leaves
-through `expose()`, and through serde into the config it is written to.
+`Secret` holds a secret as the text it was given, a password or AmneziaWG's header protection key,
+so it is written back unchanged, and prints as `<redacted>` through `Debug`: a structure that holds
+one can be logged or shown in a diff without leaking it. The text leaves through `expose()`, and
+through serde into the config it is written to.
+
+A WireGuard key is the base64 text of 32 bytes, the form configs and RouterOS carry it in.
+`wireguard::PrivateKey` is a private key kept the way a `Secret` is:
 
 ```rust
 use sliplib_secrets::wireguard::{PrivateKey, decode_key};
