@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["secrets"]
+# As a member it would build libFuzzer's C++ into every workspace build; CI checks it on its own.
+exclude = ["fuzz"]
+
+# One version and one tag for every crate: the shared release flow releases one version per
+# repository.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["slipmesh"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/slipmesh/sliplib"
+
+[workspace.dependencies]
+base64 = "0.23.1"
+# The version x25519-dalek builds on, for its clamping alone.
+curve25519-dalek = { version = "5.0.0", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+# `static_secrets` for a key that outlives one handshake, `getrandom` to generate one.
+x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
