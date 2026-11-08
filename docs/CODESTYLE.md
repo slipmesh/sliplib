@@ -20,10 +20,10 @@
 
 ## Naming
 
-- Types and functions say what they are for, not how: `PrivateKey::is_same_key`, not
-  `compare_clamped`.
+- Types and functions say what they are for, not how: `PrivateKey::public_key`, not
+  `derive_x25519`.
 - Tests are named for the behaviour they pin, as a sentence:
-  `a_key_is_the_same_key_as_its_clamped_form`.
+  `a_key_equals_its_clamped_form`.
 
 ## Error handling
 

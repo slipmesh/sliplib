@@ -1,6 +1,8 @@
-//! WireGuard keys in the form configs and RouterOS carry them: the base64 text of 32 bytes. The
-//! same form holds every X25519 key - private, public, and AmneziaWG's header protection key.
+//! WireGuard keys in the form configs and RouterOS carry them: the base64 text of 32 bytes.
+//! AmneziaWG's header protection key takes the same form but is a key both peers share, not an
+//! X25519 one: it is a [`Secret`].
 
+use crate::Secret;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use curve25519_dalek::scalar::clamp_integer;
@@ -45,13 +47,10 @@ pub fn encode_key(bytes: &[u8; 32]) -> String {
     STANDARD.encode(bytes)
 }
 
-/// A private key, kept as the text it was given so that it is written back unchanged.
+/// A WireGuard private key, kept as the text it was given so that it is written back unchanged.
 ///
-/// It stays out of printed output: `Debug` prints `<redacted>` and there is no `Display`. It leaves
-/// through [`Self::expose`] and through `Serialize`, which writes it into a config, so a structure
-/// holding one is serialized only where the key is meant to go. Only the stored text is wiped when
-/// it is dropped; every copy made from it is not, including those decoded on the way to
-/// [`Self::public_key`] or a comparison.
+/// It stays out of printed output and leaves only where it is meant to go, as a [`Secret`] does. The
+/// copies decoded from it on the way to [`Self::public_key`] or a comparison are not wiped.
 ///
 /// Two keys are equal when they are the same key, whatever form each is in. WireGuard clamps a
 /// private key when it loads one and RouterOS hands back the clamped form, while a generated key is
@@ -60,26 +59,26 @@ pub fn encode_key(bytes: &[u8; 32]) -> String {
 /// this does not understand.
 #[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
 #[serde(transparent)]
-pub struct PrivateKey(String);
+pub struct PrivateKey(Secret);
 
 impl PrivateKey {
     pub fn generate() -> Self {
-        Self(encode_key(&StaticSecret::random().to_bytes()))
+        Self(encode_key(&StaticSecret::random().to_bytes()).into())
     }
 
     pub fn expose(&self) -> &str {
-        &self.0
+        self.0.expose()
     }
 
     pub fn public_key(&self) -> Result<String, KeyError> {
-        let secret = StaticSecret::from(decode_key(&self.0)?);
+        let secret = StaticSecret::from(decode_key(self.expose())?);
         Ok(encode_key(PublicKey::from(&secret).as_bytes()))
     }
 }
 
 impl PartialEq for PrivateKey {
     fn eq(&self, other: &Self) -> bool {
-        match (clamped(&self.0), clamped(&other.0)) {
+        match (clamped(self.expose()), clamped(other.expose())) {
             (Some(a), Some(b)) => a == b,
             _ => self.0 == other.0,
         }
@@ -94,19 +93,19 @@ fn clamped(b64: &str) -> Option<[u8; 32]> {
 
 impl fmt::Debug for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("<redacted>")
+        self.0.fmt(f)
     }
 }
 
 impl From<String> for PrivateKey {
     fn from(b64: String) -> Self {
-        Self(b64)
+        Self(b64.into())
     }
 }
 
 impl From<&str> for PrivateKey {
     fn from(b64: &str) -> Self {
-        Self(b64.to_owned())
+        Self(b64.into())
     }
 }
 
