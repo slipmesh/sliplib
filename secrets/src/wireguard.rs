@@ -44,9 +44,12 @@ pub fn encode_key(bytes: &[u8; 32]) -> String {
     STANDARD.encode(bytes)
 }
 
-/// A private key, kept as the text it was given so that it is written back unchanged. `Debug`
-/// prints `<redacted>` and there is no `Display`: the key leaves only through [`Self::expose`], at
-/// the place it is meant to go.
+/// A private key, kept as the text it was given so that it is written back unchanged.
+///
+/// It stays out of printed output: `Debug` prints `<redacted>` and there is no `Display`. It leaves
+/// through [`Self::expose`] and through `Serialize`, which writes it into a config, so a structure
+/// holding one is serialized only where the key is meant to go. Its memory is not wiped on drop:
+/// every config written with the key holds a copy of it anyway.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PrivateKey(String);

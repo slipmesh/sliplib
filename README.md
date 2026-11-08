@@ -23,8 +23,8 @@ sliplib-secrets = { git = "https://github.com/slipmesh/sliplib", tag = "v0.1.0" 
 
 A key is the base64 text of 32 bytes, the form configs and RouterOS carry it in. `PrivateKey` keeps
 that text as given, so it is written back unchanged, and prints as `<redacted>` through `Debug`:
-a structure that holds one can be logged or shown in a diff without leaking it. The text leaves only
-through `expose()`.
+a structure that holds one can be logged or shown in a diff without leaking it. The text leaves
+through `expose()`, and through serde into the config it is written to.
 
 ```rust
 use sliplib_secrets::wireguard::{PrivateKey, decode_key};
