@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-11-08
+
+### Added ✨
+
+- Add the tracing setup every daemon and tool shares (#8)
+
+### CI/CD ⚙️
+
+- Check licenses through slipmesh/.github@v3.1.0 (#7)
+
 ## [0.2.0] - 2026-11-08
 
 ### Added ✨
