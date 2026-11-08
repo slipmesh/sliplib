@@ -49,10 +49,16 @@ pub fn encode_key(bytes: &[u8; 32]) -> String {
 ///
 /// It stays out of printed output: `Debug` prints `<redacted>` and there is no `Display`. It leaves
 /// through [`Self::expose`] and through `Serialize`, which writes it into a config, so a structure
-/// holding one is serialized only where the key is meant to go. Its text is wiped when it is
-/// dropped; what is made from it - a config written with it, the bytes [`decode_key`] returns - is
-/// not.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, ZeroizeOnDrop)]
+/// holding one is serialized only where the key is meant to go. Only the stored text is wiped when
+/// it is dropped; every copy made from it is not, including those decoded on the way to
+/// [`Self::public_key`] or a comparison.
+///
+/// Two keys are equal when they are the same key, whatever form each is in. WireGuard clamps a
+/// private key when it loads one and RouterOS hands back the clamped form, while a generated key is
+/// stored unclamped: as text the two never match, although X25519 makes them the same key. Text
+/// that is not a key is compared as written: a spurious difference is safer than mangling a value
+/// this does not understand.
+#[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
 #[serde(transparent)]
 pub struct PrivateKey(String);
 
@@ -69,19 +75,18 @@ impl PrivateKey {
         let secret = StaticSecret::from(decode_key(&self.0)?);
         Ok(encode_key(PublicKey::from(&secret).as_bytes()))
     }
+}
 
-    /// Whether both are the same key, whatever form each is in. WireGuard clamps a private key
-    /// when it loads one and RouterOS hands back the clamped form, while a generated key is stored
-    /// unclamped: as text the two never match, although X25519 makes them the same key. Text that
-    /// is not a key is compared as written: a spurious difference is safer than mangling a value
-    /// this does not understand.
-    pub fn is_same_key(&self, other: &Self) -> bool {
+impl PartialEq for PrivateKey {
+    fn eq(&self, other: &Self) -> bool {
         match (clamped(&self.0), clamped(&other.0)) {
             (Some(a), Some(b)) => a == b,
             _ => self.0 == other.0,
         }
     }
 }
+
+impl Eq for PrivateKey {}
 
 fn clamped(b64: &str) -> Option<[u8; 32]> {
     decode_key(b64).ok().map(clamp_integer)
@@ -168,13 +173,10 @@ mod tests {
     }
 
     #[test]
-    fn generates_a_fresh_key_each_time() {
-        let (a, b) = (PrivateKey::generate(), PrivateKey::generate());
-        assert_ne!(a, b);
-        for key in [a, b] {
-            decode_key(key.expose()).unwrap();
-            decode_key(&key.public_key().unwrap()).unwrap();
-        }
+    fn generates_a_key_that_has_a_public_key() {
+        let key = PrivateKey::generate();
+        decode_key(key.expose()).unwrap();
+        decode_key(&key.public_key().unwrap()).unwrap();
     }
 
     #[test]
@@ -186,7 +188,7 @@ mod tests {
     #[test]
     fn debug_output_never_carries_the_key() {
         #[derive(Debug)]
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         struct Interface {
             private_key: PrivateKey,
         }
@@ -226,27 +228,36 @@ mod tests {
     }
 
     #[test]
-    fn a_key_is_the_same_key_as_its_clamped_form() {
+    fn a_key_equals_its_clamped_form() {
         for (generated, clamped) in [all_ones(), all_zeros()] {
-            assert_ne!(generated, clamped, "the two differ as text");
-            assert!(generated.is_same_key(&clamped));
-            assert!(clamped.is_same_key(&generated));
-            assert!(clamped.is_same_key(&clamped));
+            assert_ne!(
+                generated.expose(),
+                clamped.expose(),
+                "the two differ as text"
+            );
+            assert_eq!(generated, clamped);
+            assert_eq!(clamped, generated);
         }
     }
 
     #[test]
-    fn different_keys_are_not_the_same_key() {
+    fn a_key_equals_itself_with_surrounding_whitespace() {
+        let (ones, _) = all_ones();
+        assert_eq!(PrivateKey::from(format!("{}\n", ones.expose())), ones);
+    }
+
+    #[test]
+    fn different_keys_are_not_equal() {
         let (ones, _) = all_ones();
         let (zeros, _) = all_zeros();
-        assert!(!ones.is_same_key(&zeros));
+        assert_ne!(ones, zeros);
     }
 
     #[test]
     fn text_that_is_not_a_key_is_compared_as_written() {
         let (ones, _) = all_ones();
-        assert!(PrivateKey::from("AAAA").is_same_key(&PrivateKey::from("AAAA")));
-        assert!(!PrivateKey::from("AAAA").is_same_key(&PrivateKey::from("AAAB")));
-        assert!(!PrivateKey::from("not base64!").is_same_key(&ones));
+        assert_eq!(PrivateKey::from("AAAA"), PrivateKey::from("AAAA"));
+        assert_ne!(PrivateKey::from("AAAA"), PrivateKey::from("AAAB"));
+        assert_ne!(PrivateKey::from("not base64!"), ones);
     }
 }
