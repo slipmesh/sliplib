@@ -53,17 +53,14 @@ cargo test
 CI runs the same on every pull request and push, for the x86-64 and arm64 musl targets, and
 `cargo audit`, which also runs weekly. Code style: [docs/CODESTYLE.md](docs/CODESTYLE.md).
 
-Before a pull request, two more checks run locally; they take longer than CI should:
+Before a pull request, mutation testing runs locally; it takes longer than CI should:
 
 ```bash
 cargo mutants
-cargo +nightly fuzz run decode_key -- -max_total_time=300
 ```
 
 [`cargo-mutants`](https://mutants.rs) changes the code one place at a time and expects a test to
 fail each time; [`.cargo/mutants.toml`](.cargo/mutants.toml) lists what it skips and why.
-[`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz) runs the targets in
-[`fuzz/fuzz_targets`](fuzz/fuzz_targets), each for five minutes; `cargo +nightly fuzz list` names them.
 
 ## Releasing
 

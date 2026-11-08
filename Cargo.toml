@@ -1,8 +1,6 @@
 [workspace]
 resolver = "3"
 members = ["secrets"]
-# As a member it would build libFuzzer's C++ into every workspace build.
-exclude = ["fuzz"]
 
 # One version and one tag for every crate: the shared release flow releases one version per
 # repository.

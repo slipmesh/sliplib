@@ -29,7 +29,7 @@
 
 - A public function returns a typed error of the crate's own, with `Display` and `source()`: no
   `anyhow` in a public signature, so the caller adds the context it knows.
-- `unwrap`/`expect` only in tests and fuzz targets.
+- `unwrap`/`expect` only in tests.
 
 ## Tests
 
@@ -37,8 +37,9 @@
   wording, nothing that holds by construction.
 - `cargo mutants` leaves no viable mutant missed; what it may skip is listed with the reason in
   [`.cargo/mutants.toml`](../.cargo/mutants.toml).
-- Code that takes outside input has a fuzz target that asserts a property, not only the absence of
-  a panic.
+- A parser of outside input written here, not one a dependency provides, gets a
+  [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz) target that asserts a property, not only
+  the absence of a panic.
 
 ## Comments
 
