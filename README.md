@@ -26,11 +26,6 @@ sliplib-secrets = { git = "https://github.com/slipmesh/sliplib", tag = "v0.1.0" 
 colour: Talos's service log and the container runtime stamp every line themselves and store it as text.
 Call it once, first thing in `main`.
 
-```toml
-[dependencies]
-sliplib-runtime = { git = "https://github.com/slipmesh/sliplib", tag = "v0.3.0" }
-```
-
 Shutdown on SIGTERM is not here: the daemons take
 [`tokio-graceful-shutdown`](https://crates.io/crates/tokio-graceful-shutdown), which installs the handler
 when its `Toplevel` is created and runs each task as a subsystem that is told to stop.
