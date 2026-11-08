@@ -5,6 +5,7 @@ generator, the RouterOS tool and the Kubernetes operators.
 
 | crate | what it gives |
 | --- | --- |
+| [`sliplib-runtime`](runtime) | Logging set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 
 The crates are one workspace with one version and one tag. A change to one crate moves the tag for
@@ -18,6 +19,21 @@ Depend on the crates you need by git tag; nothing is published to crates.io:
 [dependencies]
 sliplib-secrets = { git = "https://github.com/slipmesh/sliplib", tag = "v0.1.0" }
 ```
+
+### `sliplib-runtime`
+
+`init_tracing()` logs to stdout through `tracing`, filtered by `RUST_LOG`, with no timestamp and no
+colour: Talos's service log and the container runtime stamp every line themselves and store it as text.
+Call it once, first thing in `main`.
+
+```toml
+[dependencies]
+sliplib-runtime = { git = "https://github.com/slipmesh/sliplib", tag = "v0.3.0" }
+```
+
+Shutdown on SIGTERM is not here: the daemons take
+[`tokio-graceful-shutdown`](https://crates.io/crates/tokio-graceful-shutdown), which installs the handler
+when its `Toplevel` is created and runs each task as a subsystem that is told to stop.
 
 ### `sliplib-secrets`
 
