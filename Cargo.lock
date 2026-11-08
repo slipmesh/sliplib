@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "sliplib-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "tracing",
  "tracing-subscriber",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "sliplib-secrets"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64",
  "curve25519-dalek",
