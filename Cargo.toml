@@ -20,3 +20,4 @@ curve25519-dalek = { version = "5.0.0", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 # `static_secrets` for a key that outlives one handshake, `getrandom` to generate one.
 x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
+zeroize = { version = "1.9.1", features = ["derive"] }

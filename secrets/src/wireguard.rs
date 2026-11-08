@@ -7,6 +7,7 @@ use curve25519_dalek::scalar::clamp_integer;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use x25519_dalek::{PublicKey, StaticSecret};
+use zeroize::ZeroizeOnDrop;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyError {
@@ -48,9 +49,10 @@ pub fn encode_key(bytes: &[u8; 32]) -> String {
 ///
 /// It stays out of printed output: `Debug` prints `<redacted>` and there is no `Display`. It leaves
 /// through [`Self::expose`] and through `Serialize`, which writes it into a config, so a structure
-/// holding one is serialized only where the key is meant to go. Its memory is not wiped on drop:
-/// every config written with the key holds a copy of it anyway.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// holding one is serialized only where the key is meant to go. Its text is wiped when it is
+/// dropped; what is made from it - a config written with it, the bytes [`decode_key`] returns - is
+/// not.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, ZeroizeOnDrop)]
 #[serde(transparent)]
 pub struct PrivateKey(String);
 
@@ -173,6 +175,12 @@ mod tests {
             decode_key(key.expose()).unwrap();
             decode_key(&key.public_key().unwrap()).unwrap();
         }
+    }
+
+    #[test]
+    fn wipes_its_text_when_dropped() {
+        fn wiped_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+        wiped_on_drop::<PrivateKey>();
     }
 
     #[test]
