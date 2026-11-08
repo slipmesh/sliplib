@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = ["runtime"]
+
+# One version and one tag for every crate: the shared release flow releases one version per
+# repository.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["slipmesh"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/slipmesh/sliplib"
+
+[workspace.dependencies]
+nix = { version = "0.31.3", default-features = false, features = ["signal"] }
+tokio = "1.54.1"

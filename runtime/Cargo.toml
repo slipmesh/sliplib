@@ -1,0 +1,15 @@
+[package]
+name = "sliplib-runtime"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Process plumbing shared by the slipmesh daemons: waiting for SIGTERM"
+
+[dependencies]
+tokio = { workspace = true, features = ["signal"] }
+
+[dev-dependencies]
+nix.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
