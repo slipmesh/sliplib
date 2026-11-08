@@ -51,10 +51,12 @@ X25519 reduces it to, which differs as text from the key as generated, and the t
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
+cargo deny --locked check licenses bans sources
 ```
 
 CI runs the same on every pull request and every push to `main`, for the x86-64 and arm64 musl
-targets, and `cargo audit`, which also runs weekly. Code style: [docs/CODESTYLE.md](docs/CODESTYLE.md).
+targets, and `cargo audit`, which also runs weekly. The licenses and sources a dependency may come
+with are the ones [`deny.toml`](deny.toml) allows. Code style: [docs/CODESTYLE.md](docs/CODESTYLE.md).
 
 Before a pull request, mutation testing runs locally; it takes longer than CI should:
 
