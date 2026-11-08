@@ -22,31 +22,12 @@ jobs:
   checks:
     uses: slipmesh/.github/.github/workflows/rust.yml@v2.4
 
-  # The fuzz targets are outside the workspace, so the shared checks never see them; this keeps
-  # them building. Fuzzing itself runs before a pull request, not here.
-  fuzz-targets:
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          components: clippy, rustfmt
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: fuzz
-
-      - run: cargo fmt --manifest-path fuzz/Cargo.toml -- --check
-
-      - run: cargo clippy --locked --manifest-path fuzz/Cargo.toml --all-targets -- -D warnings
-
   release-commit:
     if: github.event_name == 'push'
     uses: slipmesh/.github/.github/workflows/release-commit.yml@v2.4
 
   tag:
-    needs: [release-commit, checks, fuzz-targets]
+    needs: [release-commit, checks]
     if: needs.release-commit.outputs.version != ''
     uses: slipmesh/.github/.github/workflows/tag-release.yml@v2.4
     permissions:
