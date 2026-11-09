@@ -53,6 +53,9 @@ async fn run() -> anyhow::Result<()> {
 }
 ```
 
+`serve` is the default `serve` feature. A tool that only logs takes the crate with
+`default-features = false`, and none of the shutdown dependencies come with it.
+
 ### `sliplib-secrets`
 
 `Secret` holds a secret as the text it was given, a password or AmneziaWG's header protection key,
