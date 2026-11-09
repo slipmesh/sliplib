@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "sliplib-runtime"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "tokio",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "sliplib-secrets"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "base64",
  "curve25519-dalek",

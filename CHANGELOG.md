@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-11-09
+
+### Added ✨
+
+- Put serve behind a default feature (#12)
+
 ## [0.4.0] - 2026-11-09
 
 ### Added ✨
