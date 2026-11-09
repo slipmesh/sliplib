@@ -344,14 +344,14 @@ dependencies = [
 
 [[package]]
 name = "sliplib-net"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "ipnet",
 ]
 
 [[package]]
 name = "sliplib-runtime"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "tokio",
@@ -363,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "sliplib-secrets"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "base64",
  "curve25519-dalek",
