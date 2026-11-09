@@ -5,7 +5,7 @@ members = ["runtime", "secrets"]
 # One version and one tag for every crate: the shared release flow releases one version per
 # repository.
 [workspace.package]
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 authors = ["slipmesh"]
 license = "MIT OR Apache-2.0"
