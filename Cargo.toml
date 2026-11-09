@@ -12,11 +12,16 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/slipmesh/sliplib"
 
 [workspace.dependencies]
+anyhow = "1.0.104"
 base64 = "0.23.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # The version x25519-dalek builds on, for its clamping alone.
 curve25519-dalek = { version = "5.0.0", default-features = false }
+tokio = { version = "1.54.1", default-features = false }
+tokio-graceful-shutdown = "0.20.0"
+# The shutdown token tokio-graceful-shutdown hands out, at the version it builds on.
+tokio-util = { version = "0.7.20", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 # `static_secrets` for a key that outlives one handshake, `getrandom` to generate one.
 x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
