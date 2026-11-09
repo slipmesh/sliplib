@@ -5,10 +5,16 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Logging set up the same way for every slipmesh daemon and tool"
+description = "Logging and shutdown set up the same way for every slipmesh daemon and tool"
 
 [dependencies]
+anyhow.workspace = true
+tokio-graceful-shutdown.workspace = true
+tokio-util.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tracing.workspace = true
+tracing-subscriber.workspace = true

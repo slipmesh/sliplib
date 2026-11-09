@@ -5,7 +5,7 @@ generator, the RouterOS tool and the Kubernetes operators.
 
 | crate | what it gives |
 | --- | --- |
-| [`sliplib-runtime`](runtime) | Logging set up the same way for every daemon and tool |
+| [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 
 The crates are one workspace with one version and one tag. A change to one crate moves the tag for
@@ -26,9 +26,32 @@ sliplib-secrets = { git = "https://github.com/slipmesh/sliplib", tag = "v0.1.0" 
 colour: Talos's service log and the container runtime stamp every line themselves and store it as text.
 Call it once, first thing in `main`.
 
-Shutdown on SIGTERM is not here: the daemons take
-[`tokio-graceful-shutdown`](https://crates.io/crates/tokio-graceful-shutdown), which installs the handler
-when its `Toplevel` is created and runs each task as a subsystem that is told to stop.
+`serve(name, shutdown_timeout, work)` runs a daemon's work under
+[`tokio-graceful-shutdown`](https://crates.io/crates/tokio-graceful-shutdown). It installs the SIGTERM
+and SIGINT handlers before the work starts, and the work gets a `Shutdown` whose `requested()`
+completes on either signal. Work that has not returned `shutdown_timeout` after that is dropped and
+`serve` fails, so the timeout is set below what the sender of the signal waits before SIGKILL. A
+failed work is logged with its whole `anyhow` chain:
+
+```rust,no_run
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    sliplib_runtime::init_tracing();
+    sliplib_runtime::serve("daemon", Duration::from_secs(5), async |shutdown| {
+        tokio::select! {
+            result = run() => result,
+            () = shutdown.requested() => Ok(()),
+        }
+    })
+    .await
+}
+
+async fn run() -> anyhow::Result<()> {
+    std::future::pending().await
+}
+```
 
 ### `sliplib-secrets`
 
