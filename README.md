@@ -5,6 +5,7 @@ generator, the RouterOS tool and the Kubernetes operators.
 
 | crate | what it gives |
 | --- | --- |
+| [`sliplib-net`](net) | CIDR parsing and arithmetic on `ipnet`'s types |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 
@@ -19,6 +20,18 @@ Depend on the crates you need by git tag; nothing is published to crates.io:
 [dependencies]
 sliplib-secrets = { git = "https://github.com/slipmesh/sliplib", tag = "v0.1.0" }
 ```
+
+### `sliplib-net`
+
+CIDR for every component, on the types of [`ipnet`](https://crates.io/crates/ipnet), which this
+crate re-exports: a component takes `IpNet`, `Ipv4Net` and `Ipv6Net` from here rather than from
+`ipnet` itself, so one change of the version reaches all of them. Containment, masks and
+aggregation are `ipnet`'s own methods. On top of them:
+
+- `parse`, `parse_ipv4` and `parse_ipv6` read `"<address>/<prefix length>"` as a config writes it, keeping the
+  host bits, with errors that name the input;
+- `exclude(net, excluded)` is what `ipnet` lacks: the rest of `net` without `excluded`, as the fewest
+  networks, in address order.
 
 ### `sliplib-runtime`
 
