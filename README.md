@@ -24,6 +24,8 @@ sliplib-secrets = { git = "https://github.com/slipmesh/sliplib", tag = "v0.1.0" 
 
 `init_tracing()` logs to stdout through `tracing`, filtered by `RUST_LOG`, with no timestamp and no
 colour: Talos's service log and the container runtime stamp every line themselves and store it as text.
+Without `RUST_LOG`, or with it empty, it logs INFO and above: Talos starts an extension service with
+no environment of its own.
 Call it once, first thing in `main`.
 
 `serve(name, shutdown_timeout, work)` runs a daemon's work under
