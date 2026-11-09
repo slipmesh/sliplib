@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-11-09
+
+### Fixed 🐛
+
+- Log at info when rust_log is unset (#14)
+
 ## [0.5.0] - 2026-11-09
 
 ### Added ✨
