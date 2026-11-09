@@ -46,6 +46,14 @@ pub fn parse_ipv4(cidr: &str) -> Result<Ipv4Net, ParseError> {
     }
 }
 
+/// [`parse`], for a value that may only be IPv6.
+pub fn parse_ipv6(cidr: &str) -> Result<Ipv6Net, ParseError> {
+    match parse(cidr)? {
+        IpNet::V6(net) => Ok(net),
+        IpNet::V4(_) => Err(ParseError(format!("{cidr:?} is not an IPv6 CIDR"))),
+    }
+}
+
 /// What is left of `net` once `excluded` is taken out of it: the fewest networks that cover the
 /// rest, in address order. A network outside `net`, or of the other family, leaves it whole;
 /// one that covers it leaves nothing. Host bits count as the network they sit in.

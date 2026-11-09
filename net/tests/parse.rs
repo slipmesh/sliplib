@@ -1,4 +1,4 @@
-use sliplib_net::{IpNet, parse, parse_ipv4};
+use sliplib_net::{IpNet, parse, parse_ipv4, parse_ipv6};
 
 #[test]
 fn keeps_the_host_address_of_either_family() {
@@ -44,5 +44,19 @@ fn ipv4_parsing_takes_ipv4_only() {
     assert_eq!(
         parse_ipv4("10.0.0.1").unwrap_err().to_string(),
         r#""10.0.0.1" is not a CIDR (missing '/')"#
+    );
+}
+
+#[test]
+fn ipv6_parsing_takes_ipv6_only() {
+    let net = parse_ipv6("fd00::1/64").unwrap();
+    assert_eq!(IpNet::V6(net), parse("fd00::1/64").unwrap());
+    assert_eq!(
+        parse_ipv6("192.168.88.5/24").unwrap_err().to_string(),
+        r#""192.168.88.5/24" is not an IPv6 CIDR"#
+    );
+    assert_eq!(
+        parse_ipv6("fd00::1").unwrap_err().to_string(),
+        r#""fd00::1" is not a CIDR (missing '/')"#
     );
 }

@@ -28,7 +28,7 @@ crate re-exports: a component takes `IpNet`, `Ipv4Net` and `Ipv6Net` from here r
 `ipnet` itself, so one change of the version reaches all of them. Containment, masks and
 aggregation are `ipnet`'s own methods. On top of them:
 
-- `parse` and `parse_ipv4` read `"<address>/<prefix length>"` as a config writes it, keeping the
+- `parse`, `parse_ipv4` and `parse_ipv6` read `"<address>/<prefix length>"` as a config writes it, keeping the
   host bits, with errors that name the input;
 - `exclude(net, excluded)` is what `ipnet` lacks: the rest of `net` without `excluded`, as the fewest
   networks, in address order.
