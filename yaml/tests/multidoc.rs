@@ -163,6 +163,26 @@ fn an_item_is_appended_to_a_sequence_and_another_removed_line_and_all() {
 }
 
 #[test]
+fn an_added_item_indents_its_nested_sequences_as_the_file_does() {
+    let text = "clients:\n    - name: phone\n      allowed_ips:\n        - 10.0.0.2/32\n";
+    let mut file = MultiDoc::parse(text).unwrap();
+    file.patch(
+        0,
+        &[add(
+            &["clients", "-"],
+            "{name: tablet, allowed_ips: [10.0.0.3/32]}",
+        )],
+    )
+    .unwrap();
+    assert!(
+        file.text()
+            .ends_with("      allowed_ips:\n        - 10.0.0.3/32\n"),
+        "{}",
+        file.text()
+    );
+}
+
+#[test]
 fn a_path_segment_with_a_slash_or_tilde_names_one_key() {
     let mut file = MultiDoc::parse("a: 1\n").unwrap();
     file.patch(0, &[add(&["x/y~z"], "1")]).unwrap();
