@@ -1,0 +1,18 @@
+[package]
+name = "sliplib-yaml"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Multi-document YAML files read, edited and written for the slipmesh components"
+
+[dependencies]
+anyhow.workspace = true
+atomic-write-file.workspace = true
+serde.workspace = true
+yaml-rt.workspace = true
+yaml_serde.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
