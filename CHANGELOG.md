@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-11-10
+
+### Changed 🔧
+
+- Read and write through yaml_serde only (#24)
+
 ## [0.8.0] - 2026-11-10
 
 ### Added ✨
