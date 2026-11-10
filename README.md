@@ -9,6 +9,7 @@ generator, the RouterOS tool and the Kubernetes operators.
 | [`sliplib-yaml`](yaml) | Multi-document YAML files read, edited and written, comments and layout kept |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
+| [`sliplib-config`](config) | The patch format: Talos documents and the daemons' configs, with their checks |
 
 The crates are one workspace with one version and one tag. A change to one crate moves the tag for
 all of them; for a consumer of another crate that update changes nothing.
@@ -54,6 +55,22 @@ mean.
   that may not exist yet.
 - `Value`, `Mapping`, `from_str`, `from_value`, `to_string` and `to_value` are `yaml_serde`'s,
   re-exported so that a component needs no YAML crate of its own.
+
+### `sliplib-config`
+
+The patch format: what the config generator writes for a node, and what its readers take - Talos,
+the daemons on the node, and the RouterOS tool. Types and their checks only; reading and writing
+the files is `sliplib-yaml`'s.
+
+- `talos`: `Identity` is what Talos keys a document by (`apiVersion`, `kind`, `name`).
+  `ExtensionServiceConfig` and `ConfigFile` build and find the document that mounts a service's
+  files; `sets_file` says whether a document sets one of them, and `contents_as_text` turns a file's
+  contents written as YAML into the string Talos takes.
+- `awg`: `AwgConfig` with its interfaces and peers, and `validate`.
+- `router`: `RouterConfig` with its identity, iBGP peers, BFD settings, announcements and bypass
+  sources, and `validate`.
+- `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would
+  otherwise fail on; `MetricsConfig`, where a daemon serves its Prometheus endpoint.
 
 ### `sliplib-runtime`
 

@@ -1,0 +1,16 @@
+[package]
+name = "sliplib-config"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "The patch format the slipmesh generator writes and its readers take: Talos documents and the daemons' configs"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+sliplib-net.workspace = true
+sliplib-secrets.workspace = true
+sliplib-yaml.workspace = true
