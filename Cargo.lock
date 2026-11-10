@@ -465,6 +465,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sliplib-config"
+version = "0.9.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "sliplib-net",
+ "sliplib-secrets",
+ "sliplib-yaml",
+]
+
+[[package]]
 name = "sliplib-net"
 version = "0.9.0"
 dependencies = [

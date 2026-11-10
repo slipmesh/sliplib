@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["net", "runtime", "secrets", "yaml"]
+members = ["config", "net", "runtime", "secrets", "yaml"]
 
 # One version and one tag for every crate: the shared release flow releases one version per
 # repository.
@@ -26,6 +26,9 @@ tokio-graceful-shutdown = "0.20.0"
 tokio-util = { version = "0.7.20", default-features = false }
 tempfile = "3.27.0"
 serde = { version = "1.0.229", features = ["derive"] }
+sliplib-net = { path = "net" }
+sliplib-secrets = { path = "secrets" }
+sliplib-yaml = { path = "yaml" }
 # `static_secrets` for a key that outlives one handshake, `getrandom` to generate one.
 x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
 zeroize = { version = "1.9.1", features = ["derive"] }
