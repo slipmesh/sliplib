@@ -6,7 +6,7 @@ generator, the RouterOS tool and the Kubernetes operators.
 | crate | what it gives |
 | --- | --- |
 | [`sliplib-net`](net) | CIDR parsing and arithmetic on `ipnet`'s types |
-| [`sliplib-yaml`](yaml) | Multi-document YAML files read, edited and written, comments and layout kept |
+| [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and written back |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 
