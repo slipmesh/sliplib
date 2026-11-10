@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn an_interface_carrying_ipv6_takes_an_mtu_of_at_least_1280() {
-        validate(&with_mtu(&["fe80::1/64", "10.0.0.1/32"], 1280)).unwrap();
+        validate(&with_mtu(&["fe80::1/64", "198.51.100.193/32"], 1280)).unwrap();
         let err = validate(&with_mtu(&["fe80::1/64"], 1279))
             .unwrap_err()
             .to_string();
@@ -196,8 +196,8 @@ mod tests {
 
     #[test]
     fn an_ipv4_only_interface_takes_an_mtu_of_at_least_68() {
-        validate(&with_mtu(&["10.0.0.1/32"], 68)).unwrap();
-        let err = validate(&with_mtu(&["10.0.0.1/32"], 67))
+        validate(&with_mtu(&["198.51.100.193/32"], 68)).unwrap();
+        let err = validate(&with_mtu(&["198.51.100.193/32"], 67))
             .unwrap_err()
             .to_string();
         assert!(err.contains("\"mesh-a\"") && err.contains("68"), "{err}");
@@ -225,10 +225,10 @@ interfaces:
     obfuscation: {jc: 4, jmin: 40, jmax: 70}
     peers:
       - public_key: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
-        endpoint: "203.0.113.7:51820"
-  - name: rw-eu
+        endpoint: "192.0.2.7:51820"
+  - name: rw-north
     listen_port: 51900
-    addresses: ["10.99.0.1/24", "fd00:99::1/64"]
+    addresses: ["203.0.113.1/27", "3fff:99::1/64"]
     private_key: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
     obfuscation:
       s3: 60
@@ -240,7 +240,7 @@ interfaces:
       max_handshake_attempts: 90
     peers:
       - public_key: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
-        allowed_ips: ["10.99.0.5/32"]
+        allowed_ips: ["203.0.113.5/32"]
         advanced_security: true
 "#;
 
@@ -265,7 +265,7 @@ interfaces:
         assert_eq!(cfg.interfaces[0].peers[0].allowed_ips, None);
         assert_eq!(
             cfg.interfaces[1].peers[0].allowed_ips,
-            Some(vec!["10.99.0.5/32".to_string()])
+            Some(vec!["203.0.113.5/32".to_string()])
         );
         assert!(cfg.interfaces[1].peers[0].advanced_security);
         assert_eq!(cfg.interfaces[1].obfuscation.s3, Some(60));
@@ -338,14 +338,14 @@ interfaces:
             public_key: "k".to_string(),
             name: None,
             endpoint: None,
-            allowed_ips: Some(vec!["10.0.0.1/32".to_string()]),
+            allowed_ips: Some(vec!["203.0.113.1/32".to_string()]),
             advanced_security: false,
         });
         a.peers.push(PeerEntry {
             public_key: "k".to_string(),
             name: None,
             endpoint: None,
-            allowed_ips: Some(vec!["10.0.0.2/32".to_string()]),
+            allowed_ips: Some(vec!["203.0.113.2/32".to_string()]),
             advanced_security: false,
         });
         let cfg = AwgConfig {
@@ -403,7 +403,7 @@ interfaces:
 
     #[test]
     fn accepts_a_v4_metrics_listen_address() {
-        validate(&with_metrics("10.0.0.1:9586")).unwrap();
+        validate(&with_metrics("198.51.100.1:9586")).unwrap();
     }
 
     #[test]
@@ -417,12 +417,12 @@ interfaces:
     fn rejects_port_zero() {
         // The kernel would pick an ephemeral port, which nothing could then scrape. "Do not
         // listen" is spelled by omitting the section, not by asking for port 0.
-        assert!(validate(&with_metrics("10.0.0.1:0")).is_err());
+        assert!(validate(&with_metrics("198.51.100.1:0")).is_err());
     }
 
     #[test]
     fn rejects_a_malformed_metrics_listen_address() {
-        assert!(validate(&with_metrics("10.0.0.1")).is_err());
+        assert!(validate(&with_metrics("198.51.100.1")).is_err());
         assert!(validate(&with_metrics("not-an-address")).is_err());
     }
 
@@ -430,7 +430,7 @@ interfaces:
     fn rejects_a_v6_metrics_listen_address() {
         // The address Prometheus discovers is the node's InternalIP, which is the v4 loopback;
         // a v6 listener would be bound to something nothing scrapes.
-        assert!(validate(&with_metrics("[fd00::1]:9586")).is_err());
+        assert!(validate(&with_metrics("[3fff::1]:9586")).is_err());
     }
 
     #[test]
@@ -442,7 +442,7 @@ interfaces:
 
     #[test]
     fn a_metrics_section_round_trips_through_yaml() {
-        let cfg = with_metrics("10.0.0.1:9586");
+        let cfg = with_metrics("198.51.100.1:9586");
         let yaml = sliplib_yaml::to_string(&cfg).unwrap();
         assert_eq!(sliplib_yaml::from_str::<AwgConfig>(&yaml).unwrap(), cfg);
     }

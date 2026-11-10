@@ -11,38 +11,44 @@ fn net(n: &str) -> IpNet {
 #[test]
 fn leaves_the_rest_of_the_network_in_address_order() {
     assert_eq!(
-        exclude(net("10.0.0.0/24"), net("10.0.0.128/25")),
-        nets(&["10.0.0.0/25"])
+        exclude(net("203.0.113.0/25"), net("203.0.113.64/26")),
+        nets(&["203.0.113.0/26"])
     );
     assert_eq!(
-        exclude(net("10.0.0.0/24"), net("10.0.0.64/26")),
-        nets(&["10.0.0.0/26", "10.0.0.128/25"])
+        exclude(net("203.0.113.0/25"), net("203.0.113.32/27")),
+        nets(&["203.0.113.0/27", "203.0.113.64/26"])
     );
     assert_eq!(
-        exclude(net("fd00::/62"), net("fd00:0:0:1::/64")),
-        nets(&["fd00::/64", "fd00:0:0:2::/63"])
+        exclude(net("3fff::/62"), net("3fff:0:0:1::/64")),
+        nets(&["3fff::/64", "3fff:0:0:2::/63"])
     );
 }
 
 #[test]
 fn a_network_outside_changes_nothing_and_one_covering_leaves_nothing() {
     assert_eq!(
-        exclude(net("10.0.0.0/24"), net("10.0.1.0/24")),
-        nets(&["10.0.0.0/24"])
+        exclude(net("203.0.113.0/25"), net("203.0.113.128/25")),
+        nets(&["203.0.113.0/25"])
     );
     assert_eq!(
-        exclude(net("10.0.0.0/24"), net("fd00::/8")),
-        nets(&["10.0.0.0/24"])
+        exclude(net("203.0.113.0/25"), net("2001:db8::/32")),
+        nets(&["203.0.113.0/25"])
     );
-    assert_eq!(exclude(net("10.0.0.0/24"), net("10.0.0.0/24")), nets(&[]));
-    assert_eq!(exclude(net("10.0.0.0/24"), net("10.0.0.0/8")), nets(&[]));
+    assert_eq!(
+        exclude(net("203.0.113.0/25"), net("203.0.113.0/25")),
+        nets(&[])
+    );
+    assert_eq!(
+        exclude(net("203.0.113.0/25"), net("203.0.113.0/24")),
+        nets(&[])
+    );
 }
 
 #[test]
 fn host_bits_count_as_the_network_they_sit_in() {
     assert_eq!(
-        exclude(net("10.0.0.7/24"), net("10.0.0.200/25")),
-        nets(&["10.0.0.0/25"])
+        exclude(net("203.0.113.7/25"), net("203.0.113.100/26")),
+        nets(&["203.0.113.0/26"])
     );
 }
 
@@ -50,7 +56,7 @@ fn host_bits_count_as_the_network_they_sit_in() {
 /// network once, address by address, with nothing outside it.
 #[test]
 fn the_rest_and_the_excluded_network_partition_the_network() {
-    let whole = net("10.0.0.0/28");
+    let whole = net("203.0.113.0/28");
     for len in 28..=32 {
         for excluded in whole.subnets(len).unwrap() {
             let rest = exclude(whole, excluded);

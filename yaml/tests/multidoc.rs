@@ -68,9 +68,9 @@ fn the_text_holds_every_document_with_content_and_multi_line_strings_as_blocks()
 fn an_edit_shows_in_the_text_with_the_key_order_kept() {
     let mut file = MultiDoc::parse("b: 1\na: 2\n").unwrap();
     let document = file.document_mut(0).unwrap();
-    document["c"] = Value::Sequence(vec!["10.0.0.3/32".into()]);
+    document["c"] = Value::Sequence(vec!["203.0.113.3/32".into()]);
     document["b"] = 4.into();
-    assert_eq!(file.text().unwrap(), "b: 4\na: 2\nc:\n- 10.0.0.3/32\n");
+    assert_eq!(file.text().unwrap(), "b: 4\na: 2\nc:\n- 203.0.113.3/32\n");
 }
 
 #[test]
