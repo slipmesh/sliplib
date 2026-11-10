@@ -43,6 +43,11 @@ pub struct InterfaceEntry {
     /// entirely for full-tunnel peers, which are never handshake-tracked. Defaults to 180s if unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handshake_stale_secs: Option<u64>,
+    /// The interface's MTU. Unset leaves it as it is: the kernel's default for a new interface. The
+    /// generator sets one MTU on every mesh interface, low enough that a full-size packet with
+    /// its WireGuard and junk overhead still fits the underlay unfragmented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtu: Option<u32>,
     #[serde(default)]
     pub peers: Vec<PeerEntry>,
 }
@@ -101,10 +106,22 @@ pub fn validate(cfg: &AwgConfig) -> anyhow::Result<()> {
             "duplicate interface name {:?}",
             iface.name
         );
+        let mut carries_ipv6 = false;
         for cidr in &iface.addresses {
-            parse_cidr(cidr).map_err(|e| {
+            let net = parse_cidr(cidr).map_err(|e| {
                 anyhow::anyhow!("interface {:?}: invalid address {cidr:?}: {e}", iface.name)
             })?;
+            carries_ipv6 |= net.addr().is_ipv6();
+        }
+        if let Some(mtu) = iface.mtu {
+            // The smallest MTU each family allows a link (RFC 8200, RFC 791); the kernel refuses
+            // less, and only once the daemon is already converging the node.
+            let floor = if carries_ipv6 { 1280 } else { 68 };
+            anyhow::ensure!(
+                mtu >= floor,
+                "interface {:?}: mtu {mtu} is below {floor}, the least its addresses allow",
+                iface.name
+            );
         }
         let mut seen_peer_keys = HashSet::new();
         for peer in &iface.peers {
@@ -153,8 +170,50 @@ mod tests {
             private_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             obfuscation: Obfuscation::default(),
             handshake_stale_secs: None,
+            mtu: None,
             peers: vec![],
         }
+    }
+
+    fn with_mtu(addresses: &[&str], mtu: u32) -> AwgConfig {
+        let mut iface = iface("mesh-a");
+        iface.addresses = addresses.iter().map(|a| a.to_string()).collect();
+        iface.mtu = Some(mtu);
+        AwgConfig {
+            interfaces: vec![iface],
+            metrics: None,
+        }
+    }
+
+    #[test]
+    fn an_interface_carrying_ipv6_takes_an_mtu_of_at_least_1280() {
+        validate(&with_mtu(&["fe80::1/64", "10.0.0.1/32"], 1280)).unwrap();
+        let err = validate(&with_mtu(&["fe80::1/64"], 1279))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("\"mesh-a\"") && err.contains("1280"), "{err}");
+    }
+
+    #[test]
+    fn an_ipv4_only_interface_takes_an_mtu_of_at_least_68() {
+        validate(&with_mtu(&["10.0.0.1/32"], 68)).unwrap();
+        let err = validate(&with_mtu(&["10.0.0.1/32"], 67))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("\"mesh-a\"") && err.contains("68"), "{err}");
+    }
+
+    #[test]
+    fn an_mtu_is_read_when_given_and_left_out_when_not() {
+        let yaml = "interfaces:\n  - name: mesh-a\n    listen_port: 51820\n    private_key: \
+                    \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"\n    mtu: 1420\n";
+        let cfg: AwgConfig = sliplib_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.interfaces[0].mtu, Some(1420));
+        let unset = AwgConfig {
+            interfaces: vec![iface("mesh-a")],
+            metrics: None,
+        };
+        assert!(!sliplib_yaml::to_string(&unset).unwrap().contains("mtu"));
     }
 
     const FULL_CONFIG: &str = r#"
@@ -173,7 +232,7 @@ interfaces:
     private_key: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
     obfuscation:
       s3: 60
-      s4: 90
+      s4: 20
       i1: "5-10"
       header_protection_key: "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="
       content_padding_addition: 128
