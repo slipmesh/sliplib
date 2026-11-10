@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["net", "runtime", "secrets"]
+members = ["net", "runtime", "secrets", "yaml"]
 
 # One version and one tag for every crate: the shared release flow releases one version per
 # repository.
@@ -13,6 +13,7 @@ repository = "https://github.com/slipmesh/sliplib"
 
 [workspace.dependencies]
 anyhow = "1.0.104"
+atomic-write-file = "0.3.1"
 base64 = "0.23.1"
 ipnet = "2.12.2"
 tracing = "0.1.44"
@@ -23,7 +24,12 @@ tokio = { version = "1.54.1", default-features = false }
 tokio-graceful-shutdown = "0.20.0"
 # The shutdown token tokio-graceful-shutdown hands out, at the version it builds on.
 tokio-util = { version = "0.7.20", default-features = false }
+tempfile = "3.27.0"
 serde = { version = "1.0.229", features = ["derive"] }
 # `static_secrets` for a key that outlives one handshake, `getrandom` to generate one.
 x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
 zeroize = { version = "1.9.1", features = ["derive"] }
+yaml_serde = "0.10.7"
+# Lossless editing: an edit changes only the lines it writes and leaves comments and layout as they
+# were.
+yaml-rt = "0.3.3"

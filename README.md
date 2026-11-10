@@ -6,6 +6,7 @@ generator, the RouterOS tool and the Kubernetes operators.
 | crate | what it gives |
 | --- | --- |
 | [`sliplib-net`](net) | CIDR parsing and arithmetic on `ipnet`'s types |
+| [`sliplib-yaml`](yaml) | Multi-document YAML files read, edited and written, comments and layout kept |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 
@@ -32,6 +33,32 @@ aggregation are `ipnet`'s own methods. On top of them:
   host bits, with errors that name the input;
 - `exclude(net, excluded)` is what `ipnet` lacks: the rest of `net` without `excluded`, as the fewest
   networks, in address order.
+
+### `sliplib-yaml`
+
+Every read, edit and write of a YAML file goes through here, so a component deals in its own types
+and values and never in YAML text or files. The crate knows YAML and files, not what the documents
+mean.
+
+- `MultiDoc` is a multi-document file: `read` from disk or `parse` from text, then `documents()`,
+  each with its position in the file, the line it starts on and its value. A document of only
+  comments is skipped but keeps its position. `Document::take` removes a top-level key and blanks its
+  lines, and `Document::deserialize` reads the rest into a type, with errors naming the line of the
+  file.
+- `MultiDoc::patch` edits one document with RFC 6902 operations (`Operation::Add`,
+  `Operation::Remove`), all of them or none, as the smallest change: comments and layout outside
+  them stay as written. It runs on [`yaml-rt`](https://crates.io/crates/yaml-rt)'s patch support.
+- `merge` is JSON Merge Patch (RFC 7386) with key order kept; `join` and `append` put documents
+  together.
+- `replace_file` replaces a file atomically, keeping its permissions and following a symlink;
+  `write_if_changed` writes only what differs, creating the directory; `read_or_empty` reads a file
+  that may not exist yet.
+- `Value`, `Mapping`, `from_str`, `from_value`, `to_string` and `to_value` are `yaml_serde`'s,
+  re-exported so that a component needs no YAML crate of its own.
+
+`yaml-rt` cuts a document's span short when the document ends in a block scalar
+(`hdevalke/yaml-rt#5`); `documents()` takes each document as running to the start of the next one
+instead.
 
 ### `sliplib-runtime`
 
