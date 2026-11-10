@@ -1,7 +1,7 @@
 use sliplib_yaml::{Value, merge};
 
 fn yaml(text: &str) -> Value {
-    yaml_rt::from_str(text).unwrap()
+    yaml_serde::from_str(text).unwrap()
 }
 
 fn keys(value: &Value) -> Vec<&str> {

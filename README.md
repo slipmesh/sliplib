@@ -41,13 +41,12 @@ and values and never in YAML text or files. The crate knows YAML and files, not 
 mean.
 
 - `MultiDoc` is a multi-document file: `read` from disk or `parse` from text, then `documents()`,
-  each with its position in the file, the line it starts on and its value. A document of only
-  comments is skipped but keeps its position. `Document::take` removes a top-level key and blanks its
-  lines, and `Document::deserialize` reads the rest into a type, with errors naming the line of the
-  file.
-- `MultiDoc::patch` edits one document with RFC 6902 operations (`Operation::Add`,
-  `Operation::Remove`), all of them or none, as the smallest change: comments and layout outside
-  them stay as written. It runs on [`yaml-rt`](https://crates.io/crates/yaml-rt)'s patch support.
+  each with its position in the file, the line its content starts on and its value. A document of
+  only comments is skipped but keeps its position. `Document::take` removes a top-level key, and
+  `Document::deserialize` reads the rest into a type, with errors naming the line of the file.
+- `MultiDoc::document_mut` edits a document's value, and `MultiDoc::text` writes the file back. The
+  values are what is written: comments, and documents of only comments, are not kept.
+- `read` reads a file of one document into a type.
 - `merge` is JSON Merge Patch (RFC 7386) with key order kept; `join` and `append` put documents
   together.
 - `replace_file` replaces a file atomically, keeping its permissions and following a symlink;
@@ -55,10 +54,6 @@ mean.
   that may not exist yet.
 - `Value`, `Mapping`, `from_str`, `from_value`, `to_string` and `to_value` are `yaml_serde`'s,
   re-exported so that a component needs no YAML crate of its own.
-
-`yaml-rt` cuts a document's span short when the document ends in a block scalar
-(`hdevalke/yaml-rt#5`); `documents()` takes each document as running to the start of the next one
-instead.
 
 ### `sliplib-runtime`
 

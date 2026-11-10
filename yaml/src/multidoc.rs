@@ -1,20 +1,41 @@
-use std::ops::Range;
+use std::fmt;
+use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use serde::de::DeserializeOwned;
-use yaml_rt::{NodeId, Value, YamlDoc, YamlPatch};
+use serde::de::value::{MapAccessDeserializer, StrDeserializer};
+use serde::de::{
+    DeserializeOwned, DeserializeSeed, Deserializer as _, IgnoredAny, IntoDeserializer, MapAccess,
+    Visitor,
+};
+use serde::{Deserialize, Serialize};
+use yaml_serde::{Deserializer, Serializer, Value};
 
-/// A multi-document YAML file, as its text and parsed for editing.
+/// A multi-document YAML file, read into values to be edited and written back. Writing it leaves
+/// out its comments, and every document of only comments.
 pub struct MultiDoc {
-    yaml: YamlDoc,
+    documents: Vec<Document>,
 }
 
 impl MultiDoc {
     pub fn parse(text: &str) -> Result<Self> {
-        Ok(Self {
-            yaml: YamlDoc::parse(text).context("not valid YAML")?,
-        })
+        let source: Arc<str> = text.into();
+        let mut documents = Vec::new();
+        for (index, document) in Deserializer::from_str(text).enumerate() {
+            let value = Value::deserialize(document).context("not valid YAML")?;
+            if value.is_null() {
+                continue;
+            }
+            documents.push(Document {
+                index,
+                line: line_of(&source, index)?,
+                value,
+                source: Some(Arc::clone(&source)),
+                taken: Vec::new(),
+            });
+        }
+        Ok(Self { documents })
     }
 
     pub fn read(path: &Path) -> Result<Self> {
@@ -23,143 +44,177 @@ impl MultiDoc {
         Self::parse(&text).with_context(|| format!("reading {}", path.display()))
     }
 
-    /// Every document that holds anything but comments, in file order. A document of only
-    /// comments still takes a position: `index` counts it, as the edits do.
-    pub fn documents(&self) -> Result<Vec<Document>> {
-        let raw = self.text();
-        // Each document runs to where the next one starts. Its own span cannot say where it ends:
-        // `yaml-rt` ends it at the header of a block scalar closing the document, before the text
-        // under it (`hdevalke/yaml-rt#5`).
-        let mut starts: Vec<usize> = self
-            .yaml
-            .documents()
-            .map(|document| span_of(&self.yaml, document).map(|span| span.start))
-            .collect::<Result<_>>()?;
-        if let Some(first) = starts.first_mut() {
-            *first = 0;
-        }
-        let mut documents = Vec::new();
-        for (index, &start) in starts.iter().enumerate() {
-            let end = starts.get(index + 1).copied().unwrap_or(raw.len());
-            let Some(root) = self.yaml.document_root(index)? else {
-                continue;
-            };
-            let line = raw[..start].matches('\n').count() + 1;
-            let text = raw[start..end].to_owned();
-            let read = || -> Result<Document> {
-                let value: Value = yaml_rt::from_str(&text).context("not valid YAML")?;
-                let entries = self.entries(root, &value, start)?;
-                Ok(Document {
-                    index,
-                    line,
-                    value,
-                    text,
-                    entries,
-                })
-            };
-            documents
-                .push(read().with_context(|| format!("the document starting at line {line}"))?);
-        }
-        Ok(documents)
+    /// Every document that holds anything but comments, in file order, edits included.
+    pub fn documents(&self) -> &[Document] {
+        &self.documents
     }
 
-    /// The top-level keys of `value` with where each entry sits in its document's text: from the
-    /// key to the end of its value, which for a block scalar lies past the entry's own span.
-    fn entries(
-        &self,
-        root: NodeId,
-        value: &Value,
-        document_start: usize,
-    ) -> Result<Vec<(String, Range<usize>)>> {
-        let Some(mapping) = value.as_mapping() else {
-            return Ok(Vec::new());
-        };
-        let mut entries = Vec::new();
-        for key in mapping.keys().filter_map(Value::as_str) {
-            let Some(entry) = self.yaml.get_mapping_entry(root, key)? else {
-                continue;
-            };
-            let mut span = span_of(&self.yaml, entry)?;
-            if let Some(value) = self.yaml.get_mapping_value(root, key)? {
-                span.end = span.end.max(span_of(&self.yaml, value)?.end);
-            }
-            entries.push((
-                key.to_owned(),
-                span.start - document_start..span.end - document_start,
-            ));
-        }
-        Ok(entries)
-    }
-
-    /// Applies `operations` to document `index` as RFC 6902 (JSON Patch) does, all of them or none:
-    /// a failing one leaves the file as it was. Each is the smallest edit - everything it does not
-    /// touch, comments and layout included, stays as written - and an added value is written in
-    /// block style.
-    pub fn patch(&mut self, index: usize, operations: &[Operation]) -> Result<()> {
-        let patch: Vec<Value> = operations.iter().map(Operation::to_patch_entry).collect();
-        let patch = yaml_rt::to_string(&patch).context("serializing the patch")?;
-        let patch = YamlPatch::parse(&patch).context("the patch does not parse")?;
-        let mut patched = self.yaml.clone();
-        patched.apply_patch(index, &patch)?;
-        patched.commit_edits()?;
-        self.yaml = YamlDoc::parse(&patched.to_string())?;
-        Ok(())
+    /// The value of the document at `index`, to edit; none for a document of only comments.
+    pub fn document_mut(&mut self, index: usize) -> Option<&mut Value> {
+        let document = self.documents.iter_mut().find(|d| d.index == index)?;
+        document.source = None;
+        Some(&mut document.value)
     }
 
     /// The file's text with every edit in it.
-    pub fn text(&self) -> String {
-        self.yaml.to_string()
+    pub fn text(&self) -> Result<String> {
+        let mut text = Vec::new();
+        let mut serializer = Serializer::new(&mut text);
+        for document in &self.documents {
+            document.value.serialize(&mut serializer).with_context(|| {
+                format!("writing the document starting at line {}", document.line)
+            })?;
+        }
+        drop(serializer);
+        String::from_utf8(text).context("the written YAML is not UTF-8")
     }
-}
-
-/// The byte range of `node` in the source.
-fn span_of(yaml: &YamlDoc, node: NodeId) -> Result<Range<usize>> {
-    let span = yaml
-        .node(node)
-        .context("a node the parser did not keep")?
-        .span();
-    Ok(span.start as usize..span.end as usize)
 }
 
 /// One document of a [`MultiDoc`].
+#[derive(Clone)]
 pub struct Document {
     /// Its position among the documents of the file, those of only comments included.
     pub index: usize,
-    /// The line of the file it starts on.
+    /// The line of the file its content starts on.
     pub line: usize,
     pub value: Value,
-    text: String,
-    entries: Vec<(String, Range<usize>)>,
+    /// The file it was read from, while it holds the document as read.
+    source: Option<Arc<str>>,
+    taken: Vec<String>,
 }
 
 impl Document {
-    /// The document as written, from its separator on, with any taken key blanked out.
-    pub fn text(&self) -> &str {
-        &self.text
-    }
-
-    /// Takes the top-level `key` out of the document: out of `value`, and out of the text, where
-    /// its lines are left empty so that every line after it keeps its number.
+    /// Takes the top-level `key` out of the document: out of `value`, and out of what
+    /// [`Document::deserialize`] reads.
     pub fn take(&mut self, key: &str) -> Option<Value> {
         let value = self.value.as_mapping_mut()?.shift_remove(key)?;
-        if let Some(position) = self.entries.iter().position(|(k, _)| k == key) {
-            let (_, range) = self.entries.remove(position);
-            let blank = "\n".repeat(self.text[range.clone()].matches('\n').count());
-            let removed = range.len() - blank.len();
-            self.text.replace_range(range.clone(), &blank);
-            for (_, other) in &mut self.entries {
-                if other.start >= range.end {
-                    *other = other.start - removed..other.end - removed;
-                }
-            }
-        }
+        self.taken.push(key.to_owned());
         Some(value)
     }
 
-    /// The document as `T`. An error names the field and the line of the file it is on.
+    /// The document as `T`. As read from the file, an error names the field and the line of the
+    /// file it is on.
     pub fn deserialize<T: DeserializeOwned>(&self) -> Result<T> {
-        let positioned = "\n".repeat(self.line - 1) + &self.text;
-        Ok(yaml_rt::from_str(&positioned)?)
+        let Some(source) = &self.source else {
+            return Ok(yaml_serde::from_value(self.value.clone())?);
+        };
+        let document = Deserializer::from_str(source)
+            .nth(self.index)
+            .context("the document is no longer in the file")?;
+        Ok(document.deserialize_map(Without {
+            keys: &self.taken,
+            target: PhantomData,
+        })?)
+    }
+}
+
+/// The line the content of document `index` of `source` starts on: where the parser stands when
+/// it is asked for something no YAML value is.
+fn line_of(source: &str, index: usize) -> Result<usize> {
+    struct Nothing;
+    impl Visitor<'_> for Nothing {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("nothing")
+        }
+    }
+    let document = Deserializer::from_str(source)
+        .nth(index)
+        .context("a document the parser did not keep")?;
+    let stop = document
+        .deserialize_any(Nothing)
+        .expect_err("no YAML value is nothing");
+    Ok(stop.location().map_or(1, |location| location.line()))
+}
+
+/// Deserializes a mapping as `T` without the entries of `keys`.
+struct Without<'k, T> {
+    keys: &'k [String],
+    target: PhantomData<T>,
+}
+
+impl<'de, T: Deserialize<'de>> Visitor<'de> for Without<'_, T> {
+    type Value = T;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a mapping")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<T, A::Error> {
+        T::deserialize(MapAccessDeserializer::new(Skipping {
+            map,
+            keys: self.keys,
+        }))
+    }
+}
+
+struct Skipping<'k, A> {
+    map: A,
+    keys: &'k [String],
+}
+
+impl<'de, A: MapAccess<'de>> MapAccess<'de> for Skipping<'_, A> {
+    type Error = A::Error;
+
+    fn next_key_seed<K: DeserializeSeed<'de>>(
+        &mut self,
+        seed: K,
+    ) -> Result<Option<K::Value>, A::Error> {
+        let mut seed = Some(seed);
+        loop {
+            let key = KeySeed {
+                seed: &mut seed,
+                skipped: self.keys,
+            };
+            match self.map.next_key_seed(key)? {
+                None => return Ok(None),
+                Some(Key::Skipped) => {
+                    self.map.next_value::<IgnoredAny>()?;
+                }
+                Some(Key::Read(key)) => return Ok(Some(key)),
+            }
+        }
+    }
+
+    fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, A::Error> {
+        self.map.next_value_seed(seed)
+    }
+}
+
+enum Key<K> {
+    Skipped,
+    Read(K),
+}
+
+/// A key read by the parser itself, so that an error about it - an unknown field - carries its
+/// line.
+struct KeySeed<'s, 'k, K> {
+    seed: &'s mut Option<K>,
+    skipped: &'k [String],
+}
+
+impl<'de, K: DeserializeSeed<'de>> DeserializeSeed<'de> for KeySeed<'_, '_, K> {
+    type Value = Key<K::Value>;
+
+    fn deserialize<D: serde::Deserializer<'de>>(self, key: D) -> Result<Self::Value, D::Error> {
+        key.deserialize_str(self)
+    }
+}
+
+impl<'de, K: DeserializeSeed<'de>> Visitor<'de> for KeySeed<'_, '_, K> {
+    type Value = Key<K::Value>;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a string key")
+    }
+
+    fn visit_str<E: serde::de::Error>(self, key: &str) -> Result<Self::Value, E> {
+        if self.skipped.iter().any(|skipped| skipped == key) {
+            return Ok(Key::Skipped);
+        }
+        let seed = self.seed.take().expect("a key is read once");
+        let key: StrDeserializer<E> = key.into_deserializer();
+        seed.deserialize(key).map(Key::Read)
     }
 }
 
@@ -179,37 +234,4 @@ pub fn append(text: &str, documents: &[String]) -> String {
         out.push_str(document);
     }
     out
-}
-
-/// One edit of a document, at `path`: a key at each step, an item index as its number, or `-` for
-/// the end of a sequence.
-pub enum Operation {
-    /// Sets the value at `path`, adding the key or inserting the item. Its parent has to exist.
-    Add { path: Vec<String>, value: Value },
-    /// Removes the key or the item at `path`, which has to exist.
-    Remove { path: Vec<String> },
-}
-
-impl Operation {
-    fn to_patch_entry(&self) -> Value {
-        let mut entry = yaml_rt::Mapping::new();
-        let (op, path, value) = match self {
-            Operation::Add { path, value } => ("add", path, Some(value)),
-            Operation::Remove { path } => ("remove", path, None),
-        };
-        entry.insert("op".into(), op.into());
-        entry.insert("path".into(), json_pointer(path).into());
-        if let Some(value) = value {
-            entry.insert("value".into(), value.clone());
-        }
-        Value::Mapping(entry)
-    }
-}
-
-/// `path` as a JSON Pointer (RFC 6901): `~` and `/` inside a step are escaped, so each step names
-/// exactly one key.
-fn json_pointer(path: &[String]) -> String {
-    path.iter()
-        .map(|step| format!("/{}", step.replace('~', "~0").replace('/', "~1")))
-        .collect()
 }

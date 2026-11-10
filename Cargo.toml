@@ -31,4 +31,4 @@ x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
 zeroize = { version = "1.9.1", features = ["derive"] }
 # Lossless editing: an edit changes only the lines it writes and leaves comments and layout as they
 # were.
-yaml-rt = { version = "0.3.3", features = ["serde"] }
+yaml_serde = "0.10.7"
