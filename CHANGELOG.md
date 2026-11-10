@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - 2026-11-10
+
+### Added ✨
+
+- Add the patch format as sliplib-config (#27)
+
+### Documentation 📚
+
+- Say that sliplib-yaml writes a file back from its values (#26)
+
 ## [0.9.0] - 2026-11-10
 
 ### Changed 🔧
