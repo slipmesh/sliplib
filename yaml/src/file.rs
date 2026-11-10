@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 pub fn read<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    yaml_rt::from_str(&text).with_context(|| format!("reading {}", path.display()))
+    yaml_serde::from_str(&text).with_context(|| format!("reading {}", path.display()))
 }
 
 /// The text of `path`, empty when there is no such file. Any other failure is an error: a file that
