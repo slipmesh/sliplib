@@ -29,7 +29,6 @@ serde = { version = "1.0.229", features = ["derive"] }
 # `static_secrets` for a key that outlives one handshake, `getrandom` to generate one.
 x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
 zeroize = { version = "1.9.1", features = ["derive"] }
-yaml_serde = "0.10.7"
 # Lossless editing: an edit changes only the lines it writes and leaves comments and layout as they
 # were.
 yaml-rt = { version = "0.3.3", features = ["serde"] }

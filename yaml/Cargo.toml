@@ -12,7 +12,6 @@ anyhow.workspace = true
 atomic-write-file.workspace = true
 serde.workspace = true
 yaml-rt.workspace = true
-yaml_serde.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

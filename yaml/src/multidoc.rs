@@ -3,8 +3,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
-use yaml_rt::{NodeId, YamlDoc, YamlPatch};
-use yaml_serde::Value;
+use yaml_rt::{NodeId, Value, YamlDoc, YamlPatch};
 
 /// A multi-document YAML file, as its text and parsed for editing.
 pub struct MultiDoc {
@@ -48,7 +47,7 @@ impl MultiDoc {
             let line = raw[..start].matches('\n').count() + 1;
             let text = raw[start..end].to_owned();
             let read = || -> Result<Document> {
-                let value: Value = yaml_serde::from_str(&text).context("not valid YAML")?;
+                let value: Value = yaml_rt::from_str(&text).context("not valid YAML")?;
                 let entries = self.entries(root, &value, start)?;
                 Ok(Document {
                     index,
@@ -98,8 +97,6 @@ impl MultiDoc {
     /// block style.
     pub fn patch(&mut self, index: usize, operations: &[Operation]) -> Result<()> {
         let patch: Vec<Value> = operations.iter().map(Operation::to_patch_entry).collect();
-        // yaml-rt's serializer, not yaml_serde's: an added value keeps the layout it is written
-        // in, and only yaml-rt indents a sequence under its key the way a hand-written file does.
         let patch = yaml_rt::to_string(&patch).context("serializing the patch")?;
         let patch = YamlPatch::parse(&patch).context("the patch does not parse")?;
         let mut patched = self.yaml.clone();
@@ -162,7 +159,7 @@ impl Document {
     /// The document as `T`. An error names the field and the line of the file it is on.
     pub fn deserialize<T: DeserializeOwned>(&self) -> Result<T> {
         let positioned = "\n".repeat(self.line - 1) + &self.text;
-        Ok(yaml_serde::from_str(&positioned)?)
+        Ok(yaml_rt::from_str(&positioned)?)
     }
 }
 
@@ -195,7 +192,7 @@ pub enum Operation {
 
 impl Operation {
     fn to_patch_entry(&self) -> Value {
-        let mut entry = yaml_serde::Mapping::new();
+        let mut entry = yaml_rt::Mapping::new();
         let (op, path, value) = match self {
             Operation::Add { path, value } => ("add", path, Some(value)),
             Operation::Remove { path } => ("remove", path, None),
