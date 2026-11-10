@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-11-10
+
+### Added ✨
+
+- Read a single-document file as a type (#22)
+
+### Changed 🔧
+
+- Take the serde model from yaml-rt (#21)
+
+### Fixed 🐛
+
+- Indent sequences in added values as a hand-written file does (#20)
+
 ## [0.7.0] - 2026-11-10
 
 ### Added ✨
