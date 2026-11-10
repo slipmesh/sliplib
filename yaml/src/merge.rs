@@ -1,4 +1,4 @@
-use yaml_serde::{Mapping, Value};
+use yaml_rt::{Mapping, Value};
 
 /// `overlay` merged over `base` as JSON Merge Patch (RFC 7386) does: mappings merge recursively, an
 /// explicit `null` deletes the key it names, anything else replaces what was there. Key order is

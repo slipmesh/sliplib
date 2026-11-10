@@ -76,7 +76,7 @@ fn a_deserialize_error_names_the_field_and_its_line_in_the_file() {
 fn add(path: &[&str], value: &str) -> Operation {
     Operation::Add {
         path: path.iter().map(|s| s.to_string()).collect(),
-        value: yaml_serde::from_str(value).unwrap(),
+        value: yaml_rt::from_str(value).unwrap(),
     }
 }
 
