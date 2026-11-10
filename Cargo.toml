@@ -32,4 +32,4 @@ zeroize = { version = "1.9.1", features = ["derive"] }
 yaml_serde = "0.10.7"
 # Lossless editing: an edit changes only the lines it writes and leaves comments and layout as they
 # were.
-yaml-rt = "0.3.3"
+yaml-rt = { version = "0.3.3", features = ["serde"] }

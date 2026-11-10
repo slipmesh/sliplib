@@ -98,7 +98,9 @@ impl MultiDoc {
     /// block style.
     pub fn patch(&mut self, index: usize, operations: &[Operation]) -> Result<()> {
         let patch: Vec<Value> = operations.iter().map(Operation::to_patch_entry).collect();
-        let patch = yaml_serde::to_string(&patch).context("serializing the patch")?;
+        // yaml-rt's serializer, not yaml_serde's: an added value keeps the layout it is written
+        // in, and only yaml-rt indents a sequence under its key the way a hand-written file does.
+        let patch = yaml_rt::to_string(&patch).context("serializing the patch")?;
         let patch = YamlPatch::parse(&patch).context("the patch does not parse")?;
         let mut patched = self.yaml.clone();
         patched.apply_patch(index, &patch)?;

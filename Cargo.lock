@@ -756,6 +756,7 @@ checksum = "9860179b71d46ad0a748837d85389cc76b928219d8f7ec797ba76a0c5164ebe6"
 dependencies = [
  "yaml-rt-core",
  "yaml-rt-derive",
+ "yaml-rt-serde",
 ]
 
 [[package]]
@@ -773,6 +774,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "yaml-rt-serde"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06517edca01f005474a6db20df0f38c82729a8d1eaa4a727646e0289820ebc0b"
+dependencies = [
+ "serde",
+ "yaml-rt-core",
 ]
 
 [[package]]
