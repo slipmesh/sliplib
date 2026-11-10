@@ -2,6 +2,15 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use serde::de::DeserializeOwned;
+
+/// The one document in `path`, as `T`. An error names the file, and the line for a value that
+/// does not fit `T`.
+pub fn read<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    yaml_rt::from_str(&text).with_context(|| format!("reading {}", path.display()))
+}
 
 /// The text of `path`, empty when there is no such file. Any other failure is an error: a file that
 /// cannot be read must not pass for one that is not there.
