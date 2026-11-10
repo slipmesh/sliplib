@@ -318,7 +318,7 @@ mod tests {
     fn minimal_yaml() -> &'static str {
         r#"
 node:
-  loopback_addresses: ["10.62.0.1/32", "fd00::1/128"]
+  loopback_addresses: ["198.51.100.1/32", "3fff::1/128"]
 bgp_as: 64512
 "#
     }
@@ -369,17 +369,17 @@ bgp_as: 64512
     fn parses_a_full_config() {
         let yaml = r#"
 node:
-  loopback_addresses: ["10.62.0.1/32", "fd00::1/128"]
+  loopback_addresses: ["198.51.100.1/32", "3fff::1/128"]
 bgp_as: 64512
 bgp_peers:
-  - name: fra
-    address: fd00::2
-  - name: lon
-    address: fd00::3
+  - name: east
+    address: 3fff::2
+  - name: west
+    address: 3fff::3
 ospf_interfaces: ["mesh-*", "router-lo"]
-learn: ["10.99.0.0/24"]
+learn: ["203.0.113.0/27"]
 announce:
-  - net: "10.96.0.0/12"
+  - net: "203.0.113.192/26"
     label: "k8s-services"
 bypass:
   refresh_interval_secs: 3600
@@ -389,7 +389,7 @@ bypass:
       asns: ["AS15169"]
   exclude:
     - kind: literal
-      prefixes: [{net: "10.0.0.0/8"}]
+      prefixes: [{net: "192.0.2.0/24"}]
 "#;
         let cfg: RouterConfig = sliplib_yaml::from_str(yaml).unwrap();
         validate(&cfg).unwrap();
@@ -400,34 +400,34 @@ bypass:
     #[test]
     fn parse_loopback_address_defaults_prefix_by_family() {
         assert_eq!(
-            parse_loopback_address("10.62.0.1").unwrap(),
-            ("10.62.0.1".parse().unwrap(), 32)
+            parse_loopback_address("198.51.100.1").unwrap(),
+            ("198.51.100.1".parse().unwrap(), 32)
         );
         assert_eq!(
-            parse_loopback_address("fd00::1").unwrap(),
-            ("fd00::1".parse().unwrap(), 128)
+            parse_loopback_address("3fff::1").unwrap(),
+            ("3fff::1".parse().unwrap(), 128)
         );
     }
 
     #[test]
     fn parse_loopback_address_accepts_explicit_prefix() {
         assert_eq!(
-            parse_loopback_address("10.62.0.1/24").unwrap(),
-            ("10.62.0.1".parse().unwrap(), 24)
+            parse_loopback_address("198.51.100.1/25").unwrap(),
+            ("198.51.100.1".parse().unwrap(), 25)
         );
     }
 
     #[test]
     fn rejects_missing_ipv4_loopback() {
         let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.node.loopback_addresses = vec!["fd00::1/128".to_string()];
+        cfg.node.loopback_addresses = vec!["3fff::1/128".to_string()];
         assert!(validate(&cfg).is_err());
     }
 
     #[test]
     fn rejects_missing_ipv6_loopback() {
         let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.node.loopback_addresses = vec!["10.62.0.1/32".to_string()];
+        cfg.node.loopback_addresses = vec!["198.51.100.1/32".to_string()];
         assert!(validate(&cfg).is_err());
     }
 
@@ -436,12 +436,12 @@ bypass:
         let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
         cfg.bgp_peers = vec![
             BgpPeerEntry {
-                name: "fra".to_string(),
-                address: "fd00::2".to_string(),
+                name: "east".to_string(),
+                address: "3fff::2".to_string(),
             },
             BgpPeerEntry {
-                name: "fra".to_string(),
-                address: "fd00::3".to_string(),
+                name: "east".to_string(),
+                address: "3fff::3".to_string(),
             },
         ];
         assert!(validate(&cfg).is_err());
@@ -451,8 +451,8 @@ bypass:
     fn rejects_ipv4_peer_address() {
         let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
         cfg.bgp_peers = vec![BgpPeerEntry {
-            name: "fra".to_string(),
-            address: "10.0.0.2".to_string(),
+            name: "east".to_string(),
+            address: "198.51.100.2".to_string(),
         }];
         assert!(validate(&cfg).is_err());
     }

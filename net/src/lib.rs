@@ -19,7 +19,7 @@ impl fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 /// `"<address>/<prefix length>"` of either family. The address keeps its host bits: a config
-/// gives an interface address and its network in one value, as `10.0.0.1/24`.
+/// gives an interface address and its network in one value, as `203.0.113.1/24`.
 pub fn parse(cidr: &str) -> Result<IpNet, ParseError> {
     let (addr, prefix_len) = cidr
         .split_once('/')
