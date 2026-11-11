@@ -65,7 +65,11 @@ the files is `sliplib-yaml`'s.
 - `talos`: `Identity` is what Talos keys a document by (`apiVersion`, `kind`, `name`).
   `ExtensionServiceConfig` and `ConfigFile` build and find the document that mounts a service's
   files; `sets_file` says whether a document sets one of them, and `contents_as_text` turns a file's
-  contents written as YAML into the string Talos takes.
+  contents written as YAML into the string Talos takes. `merge` merges two documents of one identity
+  as a JSON Merge Patch, a `$patch: delete` on either side replaced by the overlay.
+  `kube_node_config` is an empty `KubeNodeConfig` and `is_kube_node_config` recognises one;
+  `annotate` adds the annotations of one namespace to it, refusing a document that deletes it or
+  sets an annotation in that namespace itself.
 - `awg`: `AwgConfig` with its interfaces and peers, and `validate`.
 - `router`: `RouterConfig` with its identity, iBGP peers, BFD settings, announcements and bypass
   sources, and `validate`.

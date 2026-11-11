@@ -1,10 +1,15 @@
 //! Talos machine-config documents, as far as the slipmesh components read and write them.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
-use sliplib_yaml::Value;
+use sliplib_yaml::{Mapping, Value};
 
+const API_VERSION: &str = "v1alpha1";
 const EXTENSION_SERVICE_CONFIG: &str = "ExtensionServiceConfig";
+const KUBE_NODE_CONFIG: &str = "KubeNodeConfig";
+
+/// The directive that turns a document into a deletion: a message to Talos, not values to merge.
+const PATCH_KEY: &str = "$patch";
 
 /// What Talos keys a document by: two documents of one identity are one document.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +58,7 @@ pub struct ExtensionServiceConfig {
 impl ExtensionServiceConfig {
     pub fn new(name: &str, config_files: Vec<ConfigFile>) -> Self {
         Self {
-            api_version: "v1alpha1".into(),
+            api_version: API_VERSION.into(),
             kind: EXTENSION_SERVICE_CONFIG.into(),
             name: name.into(),
             config_files,
@@ -114,5 +119,71 @@ pub fn contents_as_text(document: &mut Value) -> Result<()> {
             *content = Value::String(text);
         }
     }
+    Ok(())
+}
+
+/// `overlay` merged over `base`, two documents of one identity: JSON Merge Patch, as
+/// [`sliplib_yaml::merge`] does it. A `$patch: delete` document on either side is not merged - over
+/// the base it would turn a deletion into an edit, under the overlay an edit into a deletion - and
+/// the overlay replaces the result outright.
+///
+/// Sequences are replaced rather than appended, unlike Talos' own strategic merge: Talos appends to
+/// a keyed list by its key because it knows the types, and schemaless YAML could neither remove an
+/// element nor tell that two `configFiles` entries share a `mountPath`.
+pub fn merge(base: Value, overlay: &Value) -> Value {
+    if is_deletion(overlay) || is_deletion(&base) {
+        return overlay.clone();
+    }
+    sliplib_yaml::merge(base, overlay)
+}
+
+fn is_deletion(document: &Value) -> bool {
+    document.get(PATCH_KEY).and_then(Value::as_str) == Some("delete")
+}
+
+/// A `KubeNodeConfig` that sets nothing: the document of the node's labels, annotations and
+/// taints, one to a machine config.
+pub fn kube_node_config() -> Value {
+    Value::Mapping(Mapping::from_iter([
+        ("apiVersion".into(), API_VERSION.into()),
+        ("kind".into(), KUBE_NODE_CONFIG.into()),
+    ]))
+}
+
+pub fn is_kube_node_config(document: &Value) -> bool {
+    Identity::of(document).kind.as_deref() == Some(KUBE_NODE_CONFIG)
+}
+
+/// Adds `annotations`, all in `namespace`, to the `KubeNodeConfig` `document`. Refuses a document
+/// that sets an annotation in `namespace` itself, which `annotations` would overwrite silently, and
+/// one that deletes the `KubeNodeConfig`, which would drop them.
+pub fn annotate(document: &mut Value, namespace: &str, annotations: Mapping) -> Result<()> {
+    ensure!(
+        !is_deletion(document),
+        "a document deletes the {KUBE_NODE_CONFIG}, which carries the annotations in {namespace} - \
+         drop its `{PATCH_KEY}: delete`"
+    );
+    let given = document
+        .as_mapping_mut()
+        .with_context(|| format!("a {KUBE_NODE_CONFIG} document is not a mapping"))?
+        .entry("annotations".into())
+        .or_insert(Value::Null);
+    if given.is_null() {
+        *given = Value::Mapping(Mapping::new());
+    }
+    let given = given
+        .as_mapping_mut()
+        .with_context(|| format!("the annotations of a {KUBE_NODE_CONFIG} are not a mapping"))?;
+    if let Some(set) = given
+        .keys()
+        .filter_map(Value::as_str)
+        .find(|key| key.starts_with(namespace))
+    {
+        bail!(
+            "a document sets the annotation {set}, and those in {namespace} are generated - take it \
+             out of the document"
+        );
+    }
+    given.extend(annotations);
     Ok(())
 }
