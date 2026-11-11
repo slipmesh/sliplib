@@ -160,7 +160,8 @@ pub fn is_kube_node_config(document: &Value) -> bool {
 pub fn annotate(document: &mut Value, namespace: &str, annotations: Mapping) -> Result<()> {
     ensure!(
         !is_deletion(document),
-        "a document deletes the {KUBE_NODE_CONFIG}, which carries the annotations in {namespace}"
+        "a document deletes the {KUBE_NODE_CONFIG}, which carries the annotations in {namespace} - \
+         drop its `{PATCH_KEY}: delete`"
     );
     let given = document
         .as_mapping_mut()
@@ -178,7 +179,10 @@ pub fn annotate(document: &mut Value, namespace: &str, annotations: Mapping) -> 
         .filter_map(Value::as_str)
         .find(|key| key.starts_with(namespace))
     {
-        bail!("a document sets the annotation {set}, and those in {namespace} are generated");
+        bail!(
+            "a document sets the annotation {set}, and those in {namespace} are generated - take it \
+             out of the document"
+        );
     }
     given.extend(annotations);
     Ok(())
