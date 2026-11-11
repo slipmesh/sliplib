@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] - 2026-11-11
+
+### Added ✨
+
+- Merge talos documents and annotate a KubeNodeConfig (#32)
+
+### Tests ✅
+
+- Tidy up fixtures (#31)
+
 ## [0.11.0] - 2026-11-10
 
 ### Added ✨
