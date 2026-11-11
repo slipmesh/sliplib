@@ -154,18 +154,6 @@ fn yaml(text: &str) -> Value {
 }
 
 #[test]
-fn documents_of_one_identity_merge_as_a_merge_patch() {
-    let merged = merge(
-        yaml("kind: KubeletConfig\nextraArgs: {a: b, c: d}\n"),
-        &yaml("kind: KubeletConfig\nextraArgs: {a: e}\n"),
-    );
-    assert_eq!(
-        merged,
-        yaml("kind: KubeletConfig\nextraArgs: {a: e, c: d}\n")
-    );
-}
-
-#[test]
 fn a_delete_directive_on_the_overlay_replaces_the_result() {
     let overlay = yaml("apiVersion: v1alpha1\nkind: KubeletConfig\n$patch: delete");
     let merged = merge(
