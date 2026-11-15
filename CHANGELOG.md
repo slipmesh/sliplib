@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] - 2026-11-15
+
+### Added ✨
+
+- Create and write the secrets and defaults of slipmesh.yaml (#42)
+- Add the rw commands and fmt (#43)
+
 ## [0.15.0] - 2026-11-15
 
 ### Added ✨
