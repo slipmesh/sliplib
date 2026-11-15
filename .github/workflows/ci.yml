@@ -1,6 +1,5 @@
-# Pull requests and pushes run the checks; a merged release PR is tagged and released in the same
-# run. The crates are consumed by git tag, so a release builds nothing: the tag and its notes are
-# the release.
+# Pull requests and pushes run the checks; only a merged release PR is built, in its own run, and
+# released with the `slipmesh` binaries that build produced. The crates are consumed by git tag.
 name: CI
 
 on:
@@ -26,9 +25,16 @@ jobs:
     if: github.event_name == 'push'
     uses: slipmesh/.github/.github/workflows/release-commit.yml@v3.2.2
 
-  tag:
+  build:
     needs: [release-commit, checks]
     if: needs.release-commit.outputs.version != ''
+    uses: slipmesh/.github/.github/workflows/rust-build.yml@v3.2.2
+    with:
+      binaries: slipmesh
+      build-args: -p slipmesh
+
+  tag:
+    needs: [release-commit, build]
     uses: slipmesh/.github/.github/workflows/tag-release.yml@v3.2.2
     permissions:
       contents: write
@@ -44,3 +50,11 @@ jobs:
       tag: ${{ needs.release-commit.outputs.version }}
       latest: ${{ needs.release-commit.outputs.latest == 'true' }}
       prerelease: ${{ needs.release-commit.outputs.prerelease == 'true' }}
+      download-binaries: true
+      prepare: |
+        mkdir dist
+        for arch in amd64 arm64; do
+          cp "binaries/$arch/release/slipmesh" "dist/slipmesh-linux-$arch"
+        done
+        (cd dist && sha256sum -- * > SHA256SUMS)
+      assets: dist/slipmesh-linux-amd64 dist/slipmesh-linux-arm64 dist/SHA256SUMS
