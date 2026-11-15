@@ -25,6 +25,7 @@ text: a file kept encrypted is decrypted by whatever runs the tool.
 ```bash
 slipmesh check --config slipmesh.yaml
 slipmesh mint --config slipmesh.yaml
+slipmesh fmt --config slipmesh.yaml
 slipmesh rekey --node node-a --config slipmesh.yaml
 slipmesh rw add --if plain --name laptop --allowed-ips 203.0.113.5/32 --export --config slipmesh.yaml
 ```
@@ -38,8 +39,9 @@ EDITOR="slipmesh mint --config"
 ```
 
 Writing anything rewrites the whole file from its values: comments outside block scalars, and
-documents of only comments, are not kept, and the layout becomes that of the YAML serializer. A
-command with nothing to write leaves the file as it is.
+documents of only comments, are not kept, and the layout becomes that of the YAML serializer. So
+the first write to a file written by hand changes most of its lines; [`fmt`](#fmt) makes that
+change alone. A command with nothing to write leaves the file as it is.
 
 ### `check`
 
@@ -78,6 +80,15 @@ changes with it. Only what was created is written: a field set on the entry or i
 `obfuscation` is not copied down.
 
 The file holds private keys in the clear; keep it where such files are kept.
+
+### `fmt`
+
+`fmt` rewrites the file in the form every writing command leaves it in and changes no value: it
+reads the text it is about to write and refuses to write it if any document's values differ from
+the file's. What a hand-written file loses is its layout, its comments outside block scalars and
+its documents of only comments. Committed on its own, that rewrite keeps a later `rekey` or
+`rw add` down to the lines it edits. A file already in that form is not touched, and one that does
+not read is refused as it is. One line says whether the file was rewritten.
 
 ### `rekey`
 

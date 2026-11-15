@@ -10,6 +10,7 @@ use std::process::ExitCode;
 mod check;
 mod edit;
 mod file;
+mod fmt;
 mod mint;
 mod rekey;
 mod roadwarrior;
@@ -39,6 +40,11 @@ enum Command {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,
     },
+    /// Rewrite slipmesh.yaml in the form this tool writes it, changing no value.
+    Fmt {
+        #[arg(long, default_value = "slipmesh.yaml")]
+        config: PathBuf,
+    },
     /// Replace one node's mesh key in slipmesh.yaml with a new one.
     Rekey {
         /// The node, by its name in the network document.
@@ -58,6 +64,7 @@ fn main() -> Result<ExitCode> {
     match Cli::parse().command {
         Command::Check { config } => return Ok(check::run(&config)),
         Command::Mint { config } => mint::run(&config)?,
+        Command::Fmt { config } => fmt::run(&config)?,
         Command::Rekey { node, config } => rekey::run(&node, &config)?,
         Command::Rw { command } => rw::run(command)?,
     }
