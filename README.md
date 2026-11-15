@@ -97,9 +97,10 @@ every tool that configures a node of any platform.
   fields an obfuscation lacks of those every link and pool that is not `plain` carries once its
   secrets are minted - `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
-  node checks it. It refuses a node, peer or pool without its key, and a link or pool that is not
-  `plain` with an obfuscation `unminted` finds fields in, naming what lacks what. It refuses only
-  what the rendered node needs, so a file may lack the secrets of nodes that are not rendered.
+  node checks it. It needs the node's own mesh key always; for each of its links, the peer's key
+  and the link's obfuscation; for each pool on it, the pool's key and obfuscation. It refuses what
+  of these is missing, or an obfuscation not `plain` that `unminted` finds fields in, naming what
+  lacks what; the secrets of nodes, links and pools the node is not on may be missing.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
   crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits.
 - `addressing` gives a node's IPv4 loopback from its `node_id`, the link-local of a loopback, and

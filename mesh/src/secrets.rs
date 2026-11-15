@@ -25,7 +25,6 @@ pub fn link_key(pair: &[String; 2]) -> String {
     format!("{}|{}", sorted[0], sorted[1])
 }
 
-/// Whether one field of an obfuscation is set.
 pub(crate) type FieldIsSet = fn(&Obfuscation) -> bool;
 
 /// The obfuscation fields a link or pool that is not `plain` carries once its secrets are minted.

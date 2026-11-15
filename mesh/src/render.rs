@@ -326,6 +326,7 @@ pub(crate) fn render_awg_config(
 }
 
 /// A node's configs, as its daemons would take them.
+#[derive(Debug)]
 pub struct NodeConfigs {
     pub awg: AwgConfig,
     pub router: RouterConfig,
@@ -361,8 +362,8 @@ pub fn node_configs(
     })
 }
 
-/// The obfuscation read for `what`, refused unless it has been minted - a `plain` one carries
-/// none.
+/// The obfuscation read for `what`, refused when none was read and, unless `plain`, when it lacks
+/// a minted field.
 fn minted_obfuscation(read: Option<&Obfuscation>, plain: bool, what: &str) -> Result<Obfuscation> {
     let obfuscation = read
         .cloned()
@@ -497,7 +498,6 @@ bypass:
 
     #[test]
     fn render_router_config_direct_interfaces_has_no_default() {
-        // An omitted list announces nothing.
         let mesh: MeshConfig = sliplib_yaml::from_str(three_node_mesh_yaml()).unwrap();
         let cfg_a = render_router_config(&mesh, "a").unwrap();
         let cfg_b = render_router_config(&mesh, "b").unwrap();
@@ -744,8 +744,6 @@ mesh:
 
     #[test]
     fn render_router_config_rejects_tunnel_networks_without_the_mesh_glob() {
-        // The tunnel IPv4 address reaches other nodes only through `protocol direct` on the mesh
-        // glob: OSPFv3 carries no IPv4.
         let mesh: MeshConfig =
             sliplib_yaml::from_str(mesh_and_roadwarriors_with_tunnel_networks_yaml()).unwrap();
         let err = render_router_config(&mesh, "a").unwrap_err().to_string();
@@ -1005,13 +1003,13 @@ mesh:
         resolved.mesh_link_obfuscation.clear();
         says(
             &refusal(&mesh, &resolved, "b"),
-            &["mesh link a-b", "obfuscation"],
+            &["mesh link a-b: obfuscation is not set"],
         );
         let mut resolved = resolved_for(&mesh);
         resolved.roadwarrior_obfuscation.clear();
         says(
             &refusal(&mesh, &resolved, "a"),
-            &["roadwarriors pool \"north\"", "obfuscation"],
+            &["roadwarriors pool \"north\": obfuscation is not set"],
         );
     }
 
@@ -1041,7 +1039,7 @@ mesh:
     fn node_configs_refusal(yaml: &str, resolved: Option<ResolvedSecrets>) -> String {
         let mesh: MeshConfig = sliplib_yaml::from_str(yaml).unwrap();
         let resolved = resolved.unwrap_or_else(|| resolved_for(&mesh));
-        format!("{:#}", node_configs(&mesh, "a", &resolved).err().unwrap())
+        format!("{:#}", node_configs(&mesh, "a", &resolved).unwrap_err())
     }
 
     #[test]
@@ -1166,5 +1164,25 @@ mesh:
             on_b.peers[0].public_key,
             on_a.private_key.public_key().unwrap()
         );
+    }
+
+    #[test]
+    fn a_secret_of_a_node_link_or_pool_the_rendered_node_does_not_touch_is_not_refused() {
+        let yaml = mesh_and_roadwarriors_yaml()
+            .replace(
+                "    - {pair: [a, b], port: 51820}",
+                "    - {pair: [a, b], port: 51820}\n    - {pair: [a, c], port: 51821}",
+            )
+            .replace(
+                "{name: c, node_id: \"198.51.100.3\"}",
+                "{name: c, node_id: \"198.51.100.3\", endpoint: \"c.example.com\"}",
+            );
+        let mesh: MeshConfig = sliplib_yaml::from_str(&yaml).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        resolved.mesh_private_keys.remove("c");
+        resolved.mesh_link_obfuscation.remove("a|c");
+        resolved.roadwarrior_private_keys.remove("north");
+        resolved.roadwarrior_obfuscation.remove("north");
+        node_configs(&mesh, "b", &resolved).unwrap();
     }
 }

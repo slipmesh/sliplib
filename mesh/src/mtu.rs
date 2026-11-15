@@ -269,10 +269,12 @@ mod tests {
     fn an_mtu_below_1280_is_an_error_and_1280_is_not() {
         assert_eq!(mtu(V4, ", uplink_mtu: 1340", PLAIN, ""), 1280);
         let err = error(V4, ", uplink_mtu: 1339", PLAIN, "");
-        assert!(err.contains("1279") && err.contains("1280"), "{err}");
-        assert!(err.contains("mesh link a-b limits"), "{err}");
+        assert!(
+            err.contains("mesh link a-b limits the mesh MTU to 1279, below 1280"),
+            "{err}"
+        );
         let err = error(V4, "", PLAIN, "  mesh_mtu: 1279\n");
-        assert!(err.contains("1279") && err.contains("1280"), "{err}");
+        assert!(err.contains("cluster.mesh_mtu 1279 is below 1280"), "{err}");
     }
 
     #[test]
@@ -283,7 +285,10 @@ mod tests {
         let mut topology = mesh(V4, V6, PLAIN, "  mesh_mtu: 1400\n");
         topology.mesh.links.clear();
         let err = format!("{:#}", computed(&topology).unwrap_err());
-        assert!(err.contains("mesh_mtu"), "{err}");
+        assert!(
+            err.contains("cluster.mesh_mtu is set, but the mesh has no link"),
+            "{err}"
+        );
     }
 
     /// The outer packet as it leaves the node: the inner packet padded to 16 but never past the
