@@ -16,7 +16,11 @@
 - A crate holds only what more than one component needs, and only what no maintained crate already
   does. The logic of a single component stays in that component's repository; otherwise every fix
   to it is a release here before one there.
-- Tests sit in a `#[cfg(test)] mod tests` at the end of the file they test.
+- `slipmesh/` is the one binary crate, named for its binary and without the prefix. It holds what
+  only the tool does and exports nothing: what a second component needs moves into a library
+  crate.
+- Tests sit in a `#[cfg(test)] mod tests` at the end of the file they test; tests that run a
+  binary sit in its crate's `tests/`.
 
 ## Naming
 
