@@ -466,7 +466,7 @@ dependencies = [
 
 [[package]]
 name = "sliplib-config"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -477,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "sliplib-mesh"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "sliplib-config",
@@ -488,14 +488,14 @@ dependencies = [
 
 [[package]]
 name = "sliplib-net"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "ipnet",
 ]
 
 [[package]]
 name = "sliplib-runtime"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "tokio",
@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "sliplib-secrets"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "base64",
  "curve25519-dalek",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "sliplib-yaml"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "atomic-write-file",
