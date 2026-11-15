@@ -249,4 +249,37 @@ roadwarriors:
             ]
         );
     }
+
+    #[test]
+    fn a_pool_is_minted_for_its_key_or_its_obfuscation_alone() {
+        let mut topology = topology();
+        let key_only = resolve(&topology).1;
+        let obfuscated = &key_only.pools[0];
+        assert_eq!(obfuscated.name, "obfuscated");
+        assert!(obfuscated.private_key.is_some() && obfuscated.obfuscation.is_none());
+
+        topology.roadwarriors[0].private_key = Some(PrivateKey::generate());
+        topology.roadwarriors[0].obfuscation = Obfuscation::default();
+        let obfuscation_only = resolve(&topology).1;
+        let obfuscated = &obfuscation_only.pools[0];
+        assert_eq!(obfuscated.name, "obfuscated");
+        assert!(obfuscated.private_key.is_none() && obfuscated.obfuscation.is_some());
+    }
+
+    #[test]
+    fn nothing_is_minted_for_a_topology_that_lacks_nothing() {
+        let mut topology = topology();
+        assert!(!resolve(&topology).1.is_empty());
+
+        for node in &mut topology.nodes {
+            node.mesh_private_key = Some(PrivateKey::generate());
+        }
+        topology.mesh.links[0].plain = true;
+        for pool in &mut topology.roadwarriors {
+            pool.private_key = Some(PrivateKey::generate());
+        }
+        let minted = resolve(&topology).1;
+        assert!(minted.is_empty());
+        assert!(minted.pools.is_empty());
+    }
 }

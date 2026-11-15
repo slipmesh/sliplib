@@ -456,6 +456,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn missing_defaults_are_the_prefix_and_protocol_keys_left_out_each_with_its_default() {
+        let cfg: MeshConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
+        assert_eq!(
+            missing_defaults(&cfg),
+            [
+                ("cluster.interface_prefix.mesh", Value::from("mesh-")),
+                ("cluster.route_proto_id.egress", Value::from(152u64)),
+            ]
+        );
+
+        let given = |setting: &str| -> MeshConfig {
+            let yaml =
+                minimal_yaml().replace("  bgp_as: 64512\n", &format!("  bgp_as: 64512\n{setting}"));
+            sliplib_yaml::from_str(&yaml).unwrap()
+        };
+        let keys = |cfg: &MeshConfig| -> Vec<&str> {
+            missing_defaults(cfg)
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect()
+        };
+        assert_eq!(
+            keys(&given("  interface_prefix: {mesh: wg-}\n")),
+            ["cluster.route_proto_id.egress"]
+        );
+        assert_eq!(
+            keys(&given("  route_proto_id: {egress: 160}\n")),
+            ["cluster.interface_prefix.mesh"]
+        );
+        assert!(
+            keys(&given(
+                "  interface_prefix: {mesh: wg-}\n  route_proto_id: {egress: 160}\n"
+            ))
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn the_prefix_and_protocol_keys_are_read_when_given() {
         let yaml = minimal_yaml().replace(
             "  bgp_as: 64512\n",
