@@ -594,6 +594,7 @@ name = "sliplib-mesh"
 version = "0.14.0"
 dependencies = [
  "anyhow",
+ "rand",
  "sliplib-config",
  "sliplib-net",
  "sliplib-secrets",

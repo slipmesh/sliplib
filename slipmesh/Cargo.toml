@@ -12,7 +12,7 @@ description = "The tool for slipmesh.yaml itself: checks the whole file the way 
 anyhow.workspace = true
 clap.workspace = true
 sliplib-config.workspace = true
-sliplib-mesh.workspace = true
+sliplib-mesh = { workspace = true, features = ["mint"] }
 sliplib-yaml.workspace = true
 
 [dev-dependencies]

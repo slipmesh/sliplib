@@ -6,6 +6,7 @@ use crate::Obfuscation;
 use crate::router::{BfdSettings, BypassSourceEntry};
 use serde::Deserialize;
 use sliplib_secrets::wireguard::PrivateKey;
+use sliplib_yaml::Value;
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 
@@ -300,6 +301,27 @@ pub struct BypassEntry {
     pub include: Vec<BypassSourceEntry>,
     #[serde(default)]
     pub exclude: Vec<BypassSourceEntry>,
+}
+
+/// The keys of the network document that `topology` leaves out and `generate` writes down with
+/// their default, so that the values published to the nodes stand in `slipmesh.yaml`. The mesh MTU
+/// is not one of them: written down, it would no longer follow the links.
+pub fn missing_defaults(topology: &MeshConfig) -> Vec<(&'static str, Value)> {
+    let cluster = &topology.cluster;
+    let mut missing = Vec::new();
+    if cluster.interface_prefix.mesh.is_none() {
+        missing.push((
+            "cluster.interface_prefix.mesh",
+            DEFAULT_MESH_INTERFACE_PREFIX.into(),
+        ));
+    }
+    if cluster.route_proto_id.egress.is_none() {
+        missing.push((
+            "cluster.route_proto_id.egress",
+            u64::from(DEFAULT_EGRESS_ROUTE_PROTO_ID).into(),
+        ));
+    }
+    missing
 }
 
 /// The checks across the topology that its types alone cannot make; the configs rendered from it

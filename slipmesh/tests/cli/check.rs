@@ -1,6 +1,6 @@
+use crate::common::{Ran, slipmesh};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::path::Path;
-use std::process::{Command, Output};
 
 /// What a link that is not `plain` carries once its secrets are written.
 const OBFUSCATION: &str = "{jc: 4, jmin: 10, jmax: 50, s1: 15, s2: 16, h1: 5, h2: 6, h3: 7, h4: 8}";
@@ -35,27 +35,7 @@ cluster:
     )
 }
 
-struct Checked {
-    code: Option<i32>,
-    stdout: String,
-    stderr: String,
-}
-
-impl From<Output> for Checked {
-    fn from(output: Output) -> Self {
-        Self {
-            code: output.status.code(),
-            stdout: String::from_utf8(output.stdout).unwrap(),
-            stderr: String::from_utf8(output.stderr).unwrap(),
-        }
-    }
-}
-
-fn slipmesh() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_slipmesh"))
-}
-
-fn check_at(path: &Path) -> Checked {
+fn check_at(path: &Path) -> Ran {
     slipmesh()
         .args(["check", "--config"])
         .arg(path)
@@ -73,7 +53,7 @@ fn names_in(dir: &Path) -> Vec<std::ffi::OsString> {
 
 /// What `check` gives for a file holding `content`, and the file's path. Whatever it gives, it
 /// has left the file as it was and nothing beside it.
-fn check(content: &str) -> (Checked, String) {
+fn check(content: &str) -> (Ran, String) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("network.yaml");
     std::fs::write(&path, content).unwrap();
@@ -186,7 +166,7 @@ fn the_file_is_slipmesh_yaml_of_the_working_directory_unless_given() {
         network("", &[]),
     )
     .unwrap();
-    let checked: Checked = slipmesh()
+    let checked: Ran = slipmesh()
         .arg("check")
         .current_dir(dir.path())
         .output()
