@@ -2,9 +2,6 @@
 exclude_re = [
     "impl fmt::Display for KeyError",
     "Visitor.*::expecting",
-    # Where a `slipmesh.yaml` refusal points: the kind and line of the document.
-    "Kind::name",
-    "Document::at",
     # Which of two links of one limit a mesh MTU refusal names: the first, a choice nothing else
     # depends on.
     "replace < with <= in mesh_mtu",
