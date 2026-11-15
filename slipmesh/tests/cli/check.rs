@@ -206,3 +206,43 @@ fn a_file_without_one_network_default_is_refused_naming_only_that_one() {
     assert!(checked.stderr.contains("cluster.route_proto_id.egress"));
     assert!(!checked.stderr.contains("cluster.interface_prefix.mesh"));
 }
+
+/// A pool on node `a`, with `settings` after its required ones.
+fn pool(settings: &str) -> String {
+    format!(
+        "---\nslipmesh:\n  kind: roadwarriors\nname: north\nnode_hostnames: [a]\naddress: \"203.0.113.1/27\"\nlisten_port: 51900\n{settings}"
+    )
+}
+
+#[test]
+fn a_refusal_for_a_secret_the_file_lacks_names_the_command_that_creates_it() {
+    let keyed = format!("private_key: \"{}\"\n", PrivateKey::generate().expose());
+    let cases = [
+        ("the node's own key", network("", &["a"]), 1),
+        ("a peer's key", network("", &["c"]), 2),
+        (
+            "a link's obfuscation",
+            network("", &[]).replace(&format!(", obfuscation: {OBFUSCATION}"), ""),
+            2,
+        ),
+        ("a pool's key", network("", &[]) + &pool("plain: true\n"), 1),
+        ("a pool's obfuscation", network("", &[]) + &pool(&keyed), 1),
+    ];
+    for (lacking, content, refused) in cases {
+        let (checked, _) = check(&content);
+        assert_eq!(checked.code, Some(1), "{lacking}");
+        let refusals: Vec<&str> = checked.stderr.lines().collect();
+        assert_eq!(refusals.len(), refused, "{lacking}: {}", checked.stderr);
+        for refusal in refusals {
+            assert!(refusal.contains("`slipmesh mint`"), "{lacking}: {refusal}");
+        }
+    }
+}
+
+#[test]
+fn a_refusal_that_no_secret_cures_names_no_command() {
+    let (checked, _) = check(&network("  awg_metrics_port: 0\n", &[]));
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stderr.lines().count(), 4, "{}", checked.stderr);
+    assert!(!checked.stderr.contains("slipmesh"), "{}", checked.stderr);
+}

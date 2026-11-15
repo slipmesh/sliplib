@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use sliplib_config::mesh_config::missing_defaults;
 use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_mesh::render::node_configs;
-use sliplib_mesh::secrets::ResolvedSecrets;
+use sliplib_mesh::secrets::{MissingSecret, ResolvedSecrets};
 use sliplib_yaml::MultiDoc;
 use std::path::Path;
 use std::process::ExitCode;
@@ -33,8 +33,13 @@ fn whole_file(config_path: &Path, file: &SlipmeshFile) -> Result<()> {
 
 fn node(file: &SlipmeshFile, host: &str, resolved: &ResolvedSecrets) -> Result<()> {
     let model = file.effective_for(host)?;
-    node_configs(&model, host, resolved)?;
-    Ok(())
+    match node_configs(&model, host, resolved) {
+        Ok(_) => Ok(()),
+        Err(refusal) if refusal.is::<MissingSecret>() => {
+            Err(anyhow::anyhow!("{refusal:#} - `slipmesh mint` creates it"))
+        }
+        Err(refusal) => Err(refusal),
+    }
 }
 
 /// Prints `<node>: ok` for each node that passes and every refusal on a line of its own: one

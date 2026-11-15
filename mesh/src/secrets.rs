@@ -19,6 +19,19 @@ pub struct ResolvedSecrets {
     pub roadwarrior_obfuscation: HashMap<String, Obfuscation>,
 }
 
+/// A key or an obfuscation the rendered node needs and the file does not set. A refusal that
+/// carries one is cured by creating the secret, which a caller can tell its user how to do.
+#[derive(Debug)]
+pub struct MissingSecret(pub(crate) String);
+
+impl std::fmt::Display for MissingSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for MissingSecret {}
+
 /// Canonical, order-independent key for a mesh link's maps (`pair`'s two names, sorted).
 pub fn link_key(pair: &[String; 2]) -> String {
     let mut sorted = pair.clone();

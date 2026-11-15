@@ -4,7 +4,7 @@
 
 use crate::addressing;
 use crate::mtu::link_name;
-use crate::secrets::{ResolvedSecrets, link_key, unminted};
+use crate::secrets::{MissingSecret, ResolvedSecrets, link_key, unminted};
 use anyhow::{Context, Result};
 use sliplib_config::awg::{AwgConfig, InterfaceEntry, PeerEntry};
 use sliplib_config::mesh_config::MeshConfig;
@@ -208,7 +208,7 @@ fn mesh_interfaces_for(
     let own_private_key = resolved
         .mesh_private_keys
         .get(node_name)
-        .with_context(|| format!("node {node_name:?}: mesh_private_key is not set"))?;
+        .ok_or_else(|| MissingSecret(format!("node {node_name:?}: mesh_private_key is not set")))?;
     // Decoded for every node, whether or not a link uses its key: where one does, the daemon
     // would otherwise be the first to decode it, and refuse a config it is already running on.
     own_private_key
@@ -226,10 +226,9 @@ fn mesh_interfaces_for(
             continue;
         };
         let peer_node = mesh.node(peer_name)?;
-        let peer_private_key = resolved
-            .mesh_private_keys
-            .get(peer_name)
-            .with_context(|| format!("node {peer_name:?}: mesh_private_key is not set"))?;
+        let peer_private_key = resolved.mesh_private_keys.get(peer_name).ok_or_else(|| {
+            MissingSecret(format!("node {peer_name:?}: mesh_private_key is not set"))
+        })?;
         let obfuscation = minted_obfuscation(
             resolved.mesh_link_obfuscation.get(&link_key(&link.pair)),
             link.plain,
@@ -281,8 +280,11 @@ fn roadwarrior_interfaces_for(
                 .roadwarrior_private_keys
                 .get(&pool.name)
                 .cloned()
-                .with_context(|| {
-                    format!("roadwarriors pool {:?}: private_key is not set", pool.name)
+                .ok_or_else(|| {
+                    MissingSecret(format!(
+                        "roadwarriors pool {:?}: private_key is not set",
+                        pool.name
+                    ))
                 })?;
             let mut addresses = vec![pool.address.clone()];
             addresses.extend(pool.address6.clone());
@@ -371,20 +373,25 @@ pub fn node_configs(
 
 /// The obfuscation read for `what`, refused when none was read and, unless `plain`, when it lacks
 /// a minted field.
-fn minted_obfuscation(read: Option<&Obfuscation>, plain: bool, what: &str) -> Result<Obfuscation> {
+fn minted_obfuscation(
+    read: Option<&Obfuscation>,
+    plain: bool,
+    what: &str,
+) -> Result<Obfuscation, MissingSecret> {
     let obfuscation = read
         .cloned()
-        .with_context(|| format!("{what}: obfuscation is not set"))?;
+        .ok_or_else(|| MissingSecret(format!("{what}: obfuscation is not set")))?;
     let unminted = if plain {
         Vec::new()
     } else {
         unminted(&obfuscation)
     };
-    anyhow::ensure!(
-        unminted.is_empty(),
-        "{what}: obfuscation lacks {}",
-        unminted.join(", ")
-    );
+    if !unminted.is_empty() {
+        return Err(MissingSecret(format!(
+            "{what}: obfuscation lacks {}",
+            unminted.join(", ")
+        )));
+    }
     Ok(obfuscation)
 }
 
@@ -1138,6 +1145,69 @@ mesh:
             &node_configs_refusal(&yaml, None),
             &["rendered router config for node \"a\" is invalid", "bgp_as"],
         );
+    }
+
+    /// Whether what refuses node `a` of `mesh` with `resolved` is marked as a missing secret.
+    fn is_a_missing_secret(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> bool {
+        node_configs(mesh, "a", resolved)
+            .unwrap_err()
+            .is::<MissingSecret>()
+    }
+
+    #[test]
+    fn a_refusal_for_a_key_or_obfuscation_the_file_lacks_is_marked_as_a_missing_secret() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        type Take = fn(&mut ResolvedSecrets);
+        let cases: [(&str, Take); 6] = [
+            ("the node's own key", |r| {
+                r.mesh_private_keys.remove("a");
+            }),
+            ("a peer's key", |r| {
+                r.mesh_private_keys.remove("b");
+            }),
+            ("a pool's key", |r| r.roadwarrior_private_keys.clear()),
+            ("a link's obfuscation in part", |r| {
+                r.mesh_link_obfuscation.insert("a|b".to_owned(), partial());
+            }),
+            ("a pool's obfuscation in part", |r| {
+                r.roadwarrior_obfuscation
+                    .insert("north".to_owned(), partial());
+            }),
+            ("a link's obfuscation", |r| r.mesh_link_obfuscation.clear()),
+        ];
+        for (lacking, take) in cases {
+            let mut resolved = resolved_for(&mesh);
+            take(&mut resolved);
+            assert!(is_a_missing_secret(&mesh, &resolved), "{lacking}");
+        }
+    }
+
+    #[test]
+    fn a_refusal_that_no_secret_cures_is_not_marked_as_a_missing_secret() {
+        let unrendered = mesh_and_roadwarriors_yaml()
+            .replace("bgp_as: 64512", "bgp_as: 64512\n  awg_metrics_port: 0");
+        let invalid = mesh_and_roadwarriors_yaml().replace("bgp_as: 64512", "bgp_as: 0");
+        for yaml in [unrendered, invalid] {
+            let mesh: MeshConfig = sliplib_yaml::from_str(&yaml).unwrap();
+            assert!(!is_a_missing_secret(&mesh, &resolved_for(&mesh)), "{yaml}");
+        }
+
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        let clash = Obfuscation {
+            h2: Some(5),
+            ..crate::test_support::minted_obfuscation()
+        };
+        resolved
+            .mesh_link_obfuscation
+            .insert("a|b".to_owned(), clash);
+        assert!(!is_a_missing_secret(&mesh, &resolved));
+
+        let mut resolved = resolved_for(&mesh);
+        resolved
+            .mesh_private_keys
+            .insert("a".to_owned(), "not a key".into());
+        assert!(!is_a_missing_secret(&mesh, &resolved));
     }
 
     /// Fixed 32-byte keys, plain text once decoded, so none can be mistaken for a real one.
