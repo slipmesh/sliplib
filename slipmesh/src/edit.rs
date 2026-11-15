@@ -1,5 +1,5 @@
-//! Every edit `taloscfg` makes to `slipmesh.yaml`: minted secrets written into the fields they
-//! belong to, roadwarrior clients added and removed.
+//! Every edit made to `slipmesh.yaml`: minted secrets and a node's new key written into the
+//! fields they belong to, and the defaults of the network settings the file leaves out.
 //!
 //! Written, a minted value is the operator's like any other: the next run mints nothing, and
 //! deleting it mints a new identity for that node, link or pool, and for every peer that refers to

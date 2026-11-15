@@ -1,6 +1,6 @@
 //! The topology's secrets, with whatever `slipmesh.yaml` leaves unset generated: every node's mesh
 //! private key, every link's and pool's obfuscation, every pool's private key. What was generated
-//! comes back as `Minted` for `edit::record` to write into the field it belongs to - the next run
+//! comes back as `Minted`, for the caller to write into the field it belongs to - the next run
 //! finds it there and generates nothing.
 //!
 //! They are resolved once for the whole topology, not per node: a link's two ends need the same
@@ -43,9 +43,7 @@ impl Minted {
     }
 }
 
-/// Generates whatever of `obfuscation` is still unset - see `obfuscation_gen`'s own doc comment
-/// for why that only ever fills in the "original nine" fields - and returns the fields generated,
-/// `None` when there were none.
+/// Generates the minted fields `obfuscation` lacks and returns them, `None` when it lacked none.
 fn mint_obfuscation(obfuscation: &mut Obfuscation) -> Option<Obfuscation> {
     secrets::fill(obfuscation, &obfuscation_gen::generate())
 }
@@ -125,7 +123,7 @@ pub fn resolve(topology: &MeshConfig) -> (ResolvedSecrets, Minted) {
 mod tests {
     use super::*;
 
-    /// The 3.1 switches are never invented: `generate()` leaves them unset, so an
+    /// The 3.1 switches are never invented: they are not among the minted fields, so an
     /// unconfigured mesh stays as it was.
     #[test]
     fn mint_obfuscation_carries_the_31_switches_and_never_generates_them() {

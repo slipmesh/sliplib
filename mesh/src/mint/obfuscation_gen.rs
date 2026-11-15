@@ -1,11 +1,8 @@
-//! Random AmneziaWG obfuscation parameters, for whatever `slipmesh.yaml` leaves unset - see
-//! `secrets`, which writes what was generated back into the field it belongs to. Deliberately
-//! scoped to "the original nine" (`jc/jmin/jmax/s1/s2/h1-h4` - see `docs/extension-services.md`'s
-//! own framing of that set vs. the AmneziaWG 3.0 additions): those are the only params with a
-//! well-known safe range from AmneziaWG's own defaults/docs. `s3/s4/i1-i5/header_protection_key`
-//! and the timing knobs are left `None` unless `slipmesh.yaml` sets them explicitly - no established
-//! safe default exists for them, and `header_protection_key` specifically must match between both
-//! ends of a link, which a per-node independent random draw cannot guarantee on its own.
+//! Random values for the minted fields of an AmneziaWG obfuscation: `jc`, `jmin`, `jmax`, `s1`,
+//! `s2` and `h1` to `h4`, the only parameters the kernel module's README gives a recommended range
+//! for. `s3`, `s4`, `i1` to `i5` and the timing knobs have no established safe default, and
+//! `header_protection_key` is a secret both ends share by other means, so none of them is ever
+//! generated.
 
 use crate::secrets::Fresh;
 use rand::{Rng, RngExt};

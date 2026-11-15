@@ -1,5 +1,6 @@
-//! `slipmesh`: the tool for `slipmesh.yaml` itself, whatever platform its nodes run. The file is
-//! read as plain text; decrypting it is the caller's.
+//! `slipmesh`: the tool for `slipmesh.yaml` itself, whatever platform its nodes run, and the only
+//! one that writes into it. The file is plain text to it; decrypting it, and encrypting what a
+//! command wrote, is the caller's.
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
