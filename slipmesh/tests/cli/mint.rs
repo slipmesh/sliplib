@@ -61,24 +61,53 @@ fn a_second_run_changes_nothing() {
 }
 
 #[test]
-fn mint_names_what_it_wrote_and_prints_no_key() {
+fn mint_prints_the_entries_it_wrote_and_no_value() {
     let config = Config::holding(SLIPMESH);
     let ran = config.run(&["mint"]);
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
-    for written in [
-        "nodes[a].mesh_private_key",
-        "nodes[b].mesh_private_key",
-        "nodes[c].mesh_private_key",
-        "nodes[d].mesh_private_key",
-        "mesh.links[a|b].obfuscation",
-        "cluster.interface_prefix.mesh",
-        "cluster.route_proto_id.egress",
-    ] {
-        assert!(ran.stdout.contains(written), "{written}: {}", ran.stdout);
-    }
-    for node in topology(&config).nodes {
-        let key = node.mesh_private_key.unwrap();
-        assert!(!ran.stdout.contains(key.expose()), "{}", node.name);
+    let path = config.path.display();
+    assert_eq!(
+        ran.stdout,
+        format!(
+            "minted nodes[a].mesh_private_key, nodes[b].mesh_private_key, \
+             nodes[c].mesh_private_key, nodes[d].mesh_private_key, mesh.links[a|b].obfuscation \
+             into {path}\n\
+             wrote the defaults of cluster.interface_prefix.mesh, cluster.route_proto_id.egress \
+             into {path}\n"
+        )
+    );
+    assert_eq!(ran.stderr, "");
+}
+
+#[test]
+fn mint_writes_nothing_when_a_node_would_be_refused_with_what_it_minted() {
+    // No `jmax` the generator draws reaches this `jmin`, so the link's obfuscation is one the
+    // kernel module refuses whatever is minted beside it.
+    let content = SLIPMESH.replace("port: 51820}", "port: 51820, obfuscation: {jmin: 1100}}");
+    assert_ne!(content, SLIPMESH);
+    let config = Config::holding(&content);
+    let ran = config.run(&["mint"]);
+    assert_eq!(ran.code, Some(1));
+    assert_eq!(ran.stdout, "");
+    assert!(
+        ran.stderr.contains("interface \"mesh-b\""),
+        "{}",
+        ran.stderr
+    );
+    assert_eq!(config.text(), content);
+}
+
+#[test]
+fn a_file_the_loader_refuses_is_left_as_it_is_by_mint_and_rekey() {
+    let content = SLIPMESH.replace("  bgp_as: 64512", "  no_such_setting: 1\n  bgp_as: 64512");
+    assert_ne!(content, SLIPMESH);
+    for command in [&["mint"][..], &["rekey", "--node", "a"][..]] {
+        let config = Config::holding(&content);
+        let ran = config.run(command);
+        assert_eq!(ran.code, Some(1), "{command:?}");
+        assert_eq!(ran.stdout, "", "{command:?}");
+        assert!(ran.stderr.contains("no_such_setting"), "{}", ran.stderr);
+        assert_eq!(config.text(), content, "{command:?}");
     }
 }
 
