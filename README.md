@@ -187,9 +187,9 @@ every tool that configures a node of any platform.
   `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes, links
   and pools the node is not on. Such a refusal carries `secrets::MissingSecret` in its chain
   (`anyhow::Error::is`), so a tool can add how its user creates the secret.
-- The `mint` feature, off by default, adds `mint::resolve`: the secrets with whatever the file
-  lacks created, and what was created by the entry it belongs to. `slipmesh` builds with it; a
-  tool that only reads the file leaves it off, and that function is not in its build.
+- The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks,
+  created, each by the entry it belongs to. `slipmesh` builds with it; a tool that only reads the
+  file leaves it off, and that function is not in its build.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
   crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits. It reads every
   link's obfuscation through its `s4`, links the node is not on included; a missing entry counts as

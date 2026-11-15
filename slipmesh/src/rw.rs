@@ -251,7 +251,7 @@ fn written_secrets(
     name: &str,
     config_path: &Path,
 ) -> Result<ResolvedSecrets> {
-    let (_, minted) = mint::resolve(topology);
+    let minted = mint::create(topology);
     anyhow::ensure!(
         !minted.pools.iter().any(|pool| pool.name == name),
         "{} lacks the secrets of pool {name:?} - `slipmesh mint` creates and writes them",

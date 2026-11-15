@@ -235,7 +235,7 @@ plain: true
     fn run(raw: &str) -> String {
         let mut yaml = MultiDoc::parse(raw).unwrap();
         let file = SlipmeshFile::read(&yaml).unwrap();
-        let (_, minted) = mint::resolve(file.topology());
+        let minted = mint::create(file.topology());
         record(&mut yaml, &file, &minted).unwrap();
         yaml.text().unwrap()
     }
