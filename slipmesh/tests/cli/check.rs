@@ -27,6 +27,8 @@ fn network(cluster: &str, keyless: &[&str]) -> String {
 cluster:
   bgp_as: 64512
   loopback_networks: {{ipv4: "198.51.100.0/25", ipv6: "3fff::/32"}}
+  interface_prefix: {{mesh: mesh-}}
+  route_proto_id: {{egress: 152}}
 {cluster}nodes:
 {nodes}mesh:
   links:
@@ -174,4 +176,33 @@ fn the_file_is_slipmesh_yaml_of_the_working_directory_unless_given() {
         .into();
     assert_eq!(checked.code, Some(0), "{}", checked.stderr);
     assert_eq!(checked.stdout, "a: ok\nb: ok\nc: ok\nd: ok\n");
+}
+
+#[test]
+fn a_file_without_the_network_defaults_is_refused_naming_them_and_its_nodes_are_still_checked() {
+    let content = network("", &[])
+        .replace("  interface_prefix: {mesh: mesh-}\n", "")
+        .replace("  route_proto_id: {egress: 152}\n", "");
+    let (checked, path) = check(&content);
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stdout, "a: ok\nb: ok\nc: ok\nd: ok\n");
+    let refusals: Vec<&str> = checked.stderr.lines().collect();
+    assert_eq!(refusals.len(), 1, "{}", checked.stderr);
+    for named in [
+        path.as_str(),
+        "cluster.interface_prefix.mesh",
+        "cluster.route_proto_id.egress",
+        "slipmesh mint",
+    ] {
+        assert!(refusals[0].contains(named), "{named}: {}", refusals[0]);
+    }
+}
+
+#[test]
+fn a_file_without_one_network_default_is_refused_naming_only_that_one() {
+    let content = network("", &[]).replace("  route_proto_id: {egress: 152}\n", "");
+    let (checked, _) = check(&content);
+    assert_eq!(checked.code, Some(1));
+    assert!(checked.stderr.contains("cluster.route_proto_id.egress"));
+    assert!(!checked.stderr.contains("cluster.interface_prefix.mesh"));
 }

@@ -3,3 +3,4 @@
 mod check;
 mod common;
 mod mint;
+mod rekey;

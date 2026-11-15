@@ -10,6 +10,7 @@ mod check;
 mod edit;
 mod file;
 mod mint;
+mod rekey;
 
 #[derive(Parser)]
 #[command(
@@ -35,12 +36,21 @@ enum Command {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,
     },
+    /// Replace one node's mesh key in slipmesh.yaml with a new one.
+    Rekey {
+        /// The node, by its name in the network document.
+        #[arg(long)]
+        node: String,
+        #[arg(long, default_value = "slipmesh.yaml")]
+        config: PathBuf,
+    },
 }
 
 fn main() -> Result<ExitCode> {
     match Cli::parse().command {
         Command::Check { config } => return Ok(check::run(&config)),
         Command::Mint { config } => mint::run(&config)?,
+        Command::Rekey { node, config } => rekey::run(&node, &config)?,
     }
     Ok(ExitCode::SUCCESS)
 }

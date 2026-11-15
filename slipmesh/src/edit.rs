@@ -13,19 +13,16 @@ use anyhow::{Context, Result};
 use sliplib_config::Obfuscation;
 use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_mesh::mint::Minted;
+use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{MultiDoc, Value};
 
 /// Writes every value of `minted` into its field of `yaml`, the `slipmesh.yaml` `file` was read
 /// from.
 pub fn record(yaml: &mut MultiDoc, file: &SlipmeshFile, minted: &Minted) -> Result<()> {
-    let network = document(yaml, file.network_document())?;
     for (node, key) in &minted.node_keys {
-        let entry = network
-            .get_mut("nodes")
-            .and_then(|nodes| nodes.get_mut(*node))
-            .context("a node the network document does not have")?;
-        set(entry, "mesh_private_key", key.expose().into())?;
+        set_node_key(yaml, file, *node, key)?;
     }
+    let network = document(yaml, file.network_document())?;
     for (link, generated) in &minted.link_obfuscation {
         let entry = network
             .get_mut("mesh")
@@ -49,6 +46,21 @@ pub fn record(yaml: &mut MultiDoc, file: &SlipmeshFile, minted: &Minted) -> Resu
         }
     }
     Ok(())
+}
+
+/// Sets the mesh key of the node at position `node` of `nodes` in `yaml`, the `slipmesh.yaml`
+/// `file` was read from.
+pub fn set_node_key(
+    yaml: &mut MultiDoc,
+    file: &SlipmeshFile,
+    node: usize,
+    key: &PrivateKey,
+) -> Result<()> {
+    let entry = document(yaml, file.network_document())?
+        .get_mut("nodes")
+        .and_then(|nodes| nodes.get_mut(node))
+        .context("a node the network document does not have")?;
+    set(entry, "mesh_private_key", key.expose().into())
 }
 
 /// Writes each of `defaults` at its key in the network document of `yaml`, the `slipmesh.yaml`

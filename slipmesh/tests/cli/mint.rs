@@ -1,39 +1,5 @@
-use crate::common::Config;
-use sliplib_config::mesh_config::MeshConfig;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use crate::common::{Config, SLIPMESH, mint, topology};
 use sliplib_yaml::MultiDoc;
-
-const SLIPMESH: &str = r#"slipmesh:
-  kind: network
-cluster:
-  bgp_as: 64512
-  loopback_networks: {ipv4: "198.51.100.0/25", ipv6: "3fff::/32"}
-nodes:
-  - {name: a, node_id: "198.51.100.1", endpoint: "192.0.2.10"}
-  - {name: b, node_id: "198.51.100.2", endpoint: "192.0.2.11"}
-  - {name: c, node_id: "198.51.100.3"}
-  - {name: d, node_id: "198.51.100.4"}
-mesh:
-  links:
-    - {pair: [a, b], port: 51820}
----
-slipmesh:
-  kind: patch
-  include: [a]
-apiVersion: v1alpha1
-kind: UnattendedInstallConfig
-installer:
-    disk: /dev/vda
-"#;
-
-fn mint(config: &Config) {
-    let ran = config.run(&["mint"]);
-    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
-}
-
-fn topology(config: &Config) -> MeshConfig {
-    SlipmeshFile::parse(&config.text()).unwrap().into_topology()
-}
 
 #[cfg(unix)]
 #[test]
@@ -92,4 +58,38 @@ fn a_second_run_changes_nothing() {
     let first = config.text();
     mint(&config);
     assert_eq!(config.text(), first);
+}
+
+#[test]
+fn mint_names_what_it_wrote_and_prints_no_key() {
+    let config = Config::holding(SLIPMESH);
+    let ran = config.run(&["mint"]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    for written in [
+        "nodes[a].mesh_private_key",
+        "nodes[b].mesh_private_key",
+        "nodes[c].mesh_private_key",
+        "nodes[d].mesh_private_key",
+        "mesh.links[a|b].obfuscation",
+        "cluster.interface_prefix.mesh",
+        "cluster.route_proto_id.egress",
+    ] {
+        assert!(ran.stdout.contains(written), "{written}: {}", ran.stdout);
+    }
+    for node in topology(&config).nodes {
+        let key = node.mesh_private_key.unwrap();
+        assert!(!ran.stdout.contains(key.expose()), "{}", node.name);
+    }
+}
+
+#[test]
+fn a_run_with_nothing_to_write_leaves_the_file_and_its_comments_as_they_are() {
+    let config = Config::holding(SLIPMESH);
+    mint(&config);
+    let commented = format!("# kept by hand\n{}", config.text());
+    std::fs::write(&config.path, &commented).unwrap();
+    let ran = config.run(&["mint"]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    assert_eq!(ran.stdout, "");
+    assert_eq!(config.text(), commented);
 }

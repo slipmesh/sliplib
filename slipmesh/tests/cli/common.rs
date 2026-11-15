@@ -1,5 +1,7 @@
 //! The `slipmesh` binary run on a file of its own, as a caller would run it.
 
+use sliplib_config::mesh_config::MeshConfig;
+use sliplib_config::slipmesh_file::SlipmeshFile;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
@@ -51,4 +53,38 @@ impl Config {
             .unwrap()
             .into()
     }
+}
+
+/// A topology with none of its secrets written, and a patch document beside it.
+pub const SLIPMESH: &str = r#"slipmesh:
+  kind: network
+cluster:
+  bgp_as: 64512
+  loopback_networks: {ipv4: "198.51.100.0/25", ipv6: "3fff::/32"}
+nodes:
+  - {name: a, node_id: "198.51.100.1", endpoint: "192.0.2.10"}
+  - {name: b, node_id: "198.51.100.2", endpoint: "192.0.2.11"}
+  - {name: c, node_id: "198.51.100.3"}
+  - {name: d, node_id: "198.51.100.4"}
+mesh:
+  links:
+    - {pair: [a, b], port: 51820}
+---
+slipmesh:
+  kind: patch
+  include: [a]
+apiVersion: v1alpha1
+kind: UnattendedInstallConfig
+installer:
+    disk: /dev/vda
+"#;
+
+/// `slipmesh mint` on the file, which has to pass.
+pub fn mint(config: &Config) {
+    let ran = config.run(&["mint"]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+}
+
+pub fn topology(config: &Config) -> MeshConfig {
+    SlipmeshFile::parse(&config.text()).unwrap().into_topology()
 }

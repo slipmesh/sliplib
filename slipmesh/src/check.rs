@@ -2,46 +2,61 @@
 //! computed and checked the way the tool that configures the node would. It writes nothing.
 
 use anyhow::{Context, Result};
+use sliplib_config::mesh_config::missing_defaults;
 use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_mesh::render::node_configs;
+use sliplib_mesh::secrets::ResolvedSecrets;
 use sliplib_yaml::MultiDoc;
 use std::path::Path;
 use std::process::ExitCode;
 
-fn nodes(config_path: &Path) -> Result<Vec<(String, Result<()>)>> {
-    let file = SlipmeshFile::read(&MultiDoc::read(config_path)?)
-        .with_context(|| format!("reading {}", config_path.display()))?;
-    let resolved = sliplib_mesh::secrets::read(file.topology());
-    Ok(file
-        .hosts()
-        .into_iter()
-        .map(|host| {
-            let checked = file
-                .effective_for(host)
-                .and_then(|model| node_configs(&model, host, &resolved))
-                .map(drop);
-            (host.to_owned(), checked)
-        })
-        .collect())
+fn read(config_path: &Path) -> Result<SlipmeshFile> {
+    SlipmeshFile::read(&MultiDoc::read(config_path)?)
+        .with_context(|| format!("reading {}", config_path.display()))
 }
 
-/// Prints `<node>: ok` for each node that passes and every refusal on a line of its own: one node
-/// refused says nothing about the next, so all of them are checked.
+/// What refuses the file whichever node is configured from it: a network setting left to its
+/// default, which a tool that publishes it to the nodes takes only as written.
+fn whole_file(config_path: &Path, file: &SlipmeshFile) -> Result<()> {
+    let unset: Vec<&str> = missing_defaults(file.topology())
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+    anyhow::ensure!(
+        unset.is_empty(),
+        "{} lacks {} - `slipmesh mint` writes their defaults",
+        config_path.display(),
+        unset.join(", ")
+    );
+    Ok(())
+}
+
+fn node(file: &SlipmeshFile, host: &str, resolved: &ResolvedSecrets) -> Result<()> {
+    let model = file.effective_for(host)?;
+    node_configs(&model, host, resolved)?;
+    Ok(())
+}
+
+/// Prints `<node>: ok` for each node that passes and every refusal on a line of its own: one
+/// refusal says nothing about the next node, so all of them are checked.
 pub fn run(config_path: &Path) -> ExitCode {
-    let nodes = match nodes(config_path) {
-        Ok(nodes) => nodes,
-        Err(refusal) => {
-            eprintln!("{refusal:#}");
-            return ExitCode::FAILURE;
-        }
-    };
     let mut passed = ExitCode::SUCCESS;
-    for (node, checked) in nodes {
-        match checked {
-            Ok(()) => println!("{node}: ok"),
-            Err(refusal) => {
-                eprintln!("{refusal:#}");
-                passed = ExitCode::FAILURE;
+    let mut refuse = |refusal: anyhow::Error| {
+        eprintln!("{refusal:#}");
+        passed = ExitCode::FAILURE;
+    };
+    match read(config_path) {
+        Err(refusal) => refuse(refusal),
+        Ok(file) => {
+            if let Err(refusal) = whole_file(config_path, &file) {
+                refuse(refusal);
+            }
+            let resolved = sliplib_mesh::secrets::read(file.topology());
+            for host in file.hosts() {
+                match node(&file, host, &resolved) {
+                    Ok(()) => println!("{host}: ok"),
+                    Err(refusal) => refuse(refusal),
+                }
             }
         }
     }
