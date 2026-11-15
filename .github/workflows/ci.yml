@@ -1,5 +1,6 @@
-# Pull requests and pushes run the checks; only a merged release PR is built, in its own run, and
-# released with the `slipmesh` binaries that build produced. The crates are consumed by git tag.
+# Pull requests and pushes run the checks. The push of a merged release PR also builds the
+# `slipmesh` binaries, before the tag, so a failed build leaves no tag, and the release carries
+# the binaries that build produced.
 name: CI
 
 on:

@@ -19,7 +19,8 @@
 - `slipmesh/` is the one binary crate, named for its binary and without the prefix. It holds what
   only the tool does and exports nothing: what a second component needs moves into a library
   crate.
-- Tests sit in a `#[cfg(test)] mod tests` at the end of the file they test.
+- Tests sit in a `#[cfg(test)] mod tests` at the end of the file they test; tests that run a
+  binary sit in its crate's `tests/`.
 
 ## Naming
 

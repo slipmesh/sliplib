@@ -27,9 +27,11 @@ slipmesh check --config slipmesh.yaml
 
 `check` reads the whole file through the loader every tool reads it with, then computes every
 node's `awg` and `router` configs and checks each the way its node would. It prints `<node>: ok`
-for a node that passes and each refusal on a line of its own, goes through every node whatever the
-others gave, and exits 1 when anything was refused; a file that does not read is one refusal. It
-writes nothing. `--config` is `slipmesh.yaml` of the working directory unless given.
+for a node that passes and, for one that does not, the first thing that refuses it on a line of
+its own. It goes through every node whatever the others gave, and exits 1 when anything was
+refused. What the loader refuses is one refusal for the whole file, with no node checked, even
+when it concerns one node - a `node_id` that is not an address, two links on one port. It writes
+nothing. `--config` is `slipmesh.yaml` of the working directory unless given.
 
 What only one platform's tool knows is that tool's own check - the Talos generator's `--check`
 for the templates and patches of a Talos node.
@@ -42,10 +44,12 @@ A release carries the tool built for Linux, statically linked, as `slipmesh-linu
 ```bash
 gh release download --repo slipmesh/sliplib --pattern slipmesh-linux-amd64 --pattern SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
-install -m 0755 slipmesh-linux-amd64 "$HOME/.local/bin/slipmesh"
+install -D -m 0755 slipmesh-linux-amd64 "$HOME/.local/bin/slipmesh"
 ```
 
-From a checkout, `cargo install --path slipmesh` builds the same tool.
+On arm64, `arm64` takes the place of `amd64` in each line. From a checkout,
+`cargo install --locked --path slipmesh` builds the tool for the host it runs on, linked the way
+that host links, not the static binary of a release.
 
 ## Using a crate
 
