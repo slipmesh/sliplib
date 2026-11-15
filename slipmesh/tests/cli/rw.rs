@@ -125,18 +125,44 @@ fn rw_add_to_an_unknown_pool_names_the_pools_there_are() {
     );
 }
 
-/// A pool on node `a` named `lone`, with `settings` after its required ones.
-fn lone_pool(settings: &str) -> String {
+/// A pool on node `a` named `name`, with `settings` after its required ones and one client.
+fn pool(name: &str, port: u16, settings: &str) -> String {
     format!(
-        "---\nslipmesh:\n  kind: roadwarriors\nname: lone\nnode_hostnames: [a]\naddress: \"203.0.113.65/27\"\nlisten_port: 51902\n{settings}"
+        "---\nslipmesh:\n  kind: roadwarriors\nname: {name}\nnode_hostnames: [a]\naddress: \"203.0.113.65/27\"\nlisten_port: {port}\n{settings}clients:\n  - {{name: carol, public_key: \"CCC=\", allowed_ips: [\"203.0.113.71/32\"]}}\n"
     )
+}
+
+fn keyed() -> String {
+    format!("private_key: \"{}\"\n", PrivateKey::generate().expose())
+}
+
+/// A file whose pool `lone` lacks one of its secrets, by what it lacks.
+fn lacking_a_pool_secret() -> [(&'static str, Config); 2] {
+    [
+        ("its key", "plain: true\n".to_owned()),
+        ("its obfuscation", keyed()),
+    ]
+    .map(|(lacking, settings)| {
+        let lone = pool("lone", 51902, &settings);
+        (lacking, Config::holding(&format!("{SLIPMESH}{lone}")))
+    })
+}
+
+/// Asserts that `ran` refused pool `lone` for its secrets, naming the command that writes them,
+/// and printed nothing else.
+fn refused_for_the_pools_secrets(ran: &crate::common::Ran, lacking: &str) {
+    assert_eq!(ran.code, Some(1), "{lacking}");
+    assert!(
+        ran.stderr.contains("\"lone\"") && ran.stderr.contains("`slipmesh mint`"),
+        "{lacking}: {}",
+        ran.stderr
+    );
+    assert_eq!(ran.stdout, "", "{lacking}");
 }
 
 #[test]
 fn rw_add_to_a_pool_without_its_key_or_obfuscation_is_refused_and_writes_nothing() {
-    let keyed = format!("private_key: \"{}\"\n", PrivateKey::generate().expose());
-    for (lacking, settings) in [("its key", "plain: true\n"), ("its obfuscation", &keyed)] {
-        let config = Config::holding(&format!("{SLIPMESH}{}", lone_pool(settings)));
+    for (lacking, config) in lacking_a_pool_secret() {
         let before = config.text();
         for how in [&["--export"][..], &["--public-key", "DDD="][..]] {
             let ran = config.run(
@@ -147,28 +173,59 @@ fn rw_add_to_a_pool_without_its_key_or_obfuscation_is_refused_and_writes_nothing
                 ]
                 .concat(),
             );
-            assert_eq!(ran.code, Some(1), "{lacking}");
-            assert!(
-                ran.stderr.contains("\"lone\"") && ran.stderr.contains("`slipmesh mint`"),
-                "{lacking}: {}",
-                ran.stderr
-            );
-            assert_eq!(ran.stdout, "", "{lacking}");
+            refused_for_the_pools_secrets(&ran, lacking);
             assert_eq!(config.text(), before, "{lacking}");
         }
     }
 }
 
 #[test]
-fn rw_add_creates_nothing_but_the_clients_own_key() {
+fn rw_inspect_of_a_pool_without_its_key_or_obfuscation_is_refused() {
+    for (lacking, config) in lacking_a_pool_secret() {
+        let before = config.text();
+        let ran = config.run(&["rw", "inspect", "--if", "lone", "--name", "carol"]);
+        refused_for_the_pools_secrets(&ran, lacking);
+        assert_eq!(config.text(), before, "{lacking}");
+    }
+}
+
+#[test]
+fn rw_add_and_rw_inspect_need_no_secret_but_their_own_pools() {
+    // No node has a key, and pool `lone` has neither its key nor its obfuscation.
+    let ready = pool("ready", 51903, &format!("plain: true\n{}", keyed()));
+    let lone = pool("lone", 51902, "");
+    let config = Config::holding(&format!("{SLIPMESH}{ready}{lone}"));
+
+    let ran = config.run(&["rw", "inspect", "--if", "ready", "--name", "carol"]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+
+    let ran = config.run(&[
+        "rw",
+        "add",
+        "--if",
+        "ready",
+        "--name",
+        "dave",
+        "--allowed-ips",
+        "203.0.113.70",
+        "--export",
+    ]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    let (documents, ready) = documents_and_pool(&config, "ready");
+    assert_eq!(client_names(&documents[ready]), ["carol", "dave"]);
+}
+
+/// `pool` without its `clients`.
+fn without_clients(pool: &Value) -> Value {
+    let mut pool = pool.clone();
+    pool.as_mapping_mut().unwrap().shift_remove("clients");
+    pool
+}
+
+#[test]
+fn rw_add_writes_the_clients_public_key_and_nothing_else() {
     let config = pools();
     mint(&config);
-    let mut unkeyed = MultiDoc::parse(&config.text()).unwrap();
-    unkeyed.document_mut(0).unwrap()["nodes"]
-        .as_sequence_mut()
-        .unwrap()
-        .push(sliplib_yaml::from_str("{name: e, node_id: \"198.51.100.5\"}").unwrap());
-    std::fs::write(&config.path, unkeyed.text().unwrap()).unwrap();
     let (before, first) = documents_and_pool(&config, "first");
 
     let ran = add_dave(&config, &["--export"]);
@@ -176,8 +233,53 @@ fn rw_add_creates_nothing_but_the_clients_own_key() {
 
     let (after, _) = documents_and_pool(&config, "first");
     only_edited(&before, &after, first);
-    assert_eq!(client_names(&after[first]), ["dave"]);
-    assert!(!ran.stdout.contains("minted"), "{}", ran.stdout);
+    assert_eq!(
+        without_clients(&after[first]),
+        without_clients(&before[first])
+    );
+    let clients = after[first]["clients"].as_sequence().unwrap();
+    assert_eq!(clients.len(), 1);
+    assert_eq!(clients[0]["name"], "dave");
+    assert!(clients[0]["public_key"].is_string(), "{:?}", clients[0]);
+    assert!(clients[0].get("private_key").is_none(), "{:?}", clients[0]);
+}
+
+/// The value of the `PrivateKey` line of a client config.
+fn private_key_in(config_text: &str) -> &str {
+    config_text
+        .lines()
+        .find_map(|line| line.strip_prefix("PrivateKey = "))
+        .unwrap()
+}
+
+#[test]
+fn rw_inspect_fills_in_the_clients_own_private_key_and_refuses_another() {
+    let config = pools();
+    mint(&config);
+    let added = add_dave(&config, &["--export"]);
+    assert_eq!(added.code, Some(0), "{}", added.stderr);
+    let own = private_key_in(&added.stdout).to_owned();
+    let inspect = |key: &str| {
+        config.run(&[
+            "rw",
+            "inspect",
+            "--if",
+            "first",
+            "--name",
+            "dave",
+            "--private-key",
+            key,
+        ])
+    };
+
+    let ran = inspect(&own);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    assert_eq!(private_key_in(&ran.stdout), own);
+
+    let ran = inspect(PrivateKey::generate().expose());
+    assert_eq!(ran.code, Some(1));
+    assert_eq!(ran.stdout, "");
+    assert!(ran.stderr.contains("--private-key"), "{}", ran.stderr);
 }
 
 #[test]
@@ -189,6 +291,7 @@ fn rw_add_keeping_the_private_key_lets_rw_inspect_render_the_config_in_full() {
 
     let (documents, first) = documents_and_pool(&config, "first");
     let entry = &documents[first]["clients"][0];
+    assert!(entry["private_key"].is_string(), "{entry:?}");
     assert!(entry.get("public_key").is_none(), "{entry:?}");
     let topology = topology(&config);
     let dave = &topology.roadwarriors[0].clients[0];
@@ -203,32 +306,4 @@ fn rw_add_keeping_the_private_key_lets_rw_inspect_render_the_config_in_full() {
         "{}",
         ran.stdout
     );
-}
-
-#[test]
-fn rw_inspect_needs_the_pool_key_to_be_written_down_already() {
-    let config = pools();
-    let inspect = || config.run(&["rw", "inspect", "--if", "second", "--name", "carol"]);
-    let before = config.text();
-    let ran = inspect();
-    assert_eq!(ran.code, Some(1));
-    assert!(ran.stderr.contains("`slipmesh mint`"), "{}", ran.stderr);
-    assert_eq!(config.text(), before);
-
-    mint(&config);
-    assert_eq!(inspect().code, Some(0));
-}
-
-#[test]
-fn rw_inspect_needs_no_secret_but_its_pools() {
-    let config = pools();
-    mint(&config);
-    let mut unkeyed = MultiDoc::parse(&config.text()).unwrap();
-    unkeyed.document_mut(0).unwrap()["nodes"]
-        .as_sequence_mut()
-        .unwrap()
-        .push(sliplib_yaml::from_str("{name: e, node_id: \"198.51.100.5\"}").unwrap());
-    std::fs::write(&config.path, unkeyed.text().unwrap()).unwrap();
-    let ran = config.run(&["rw", "inspect", "--if", "second", "--name", "carol"]);
-    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
 }
