@@ -12,6 +12,8 @@ mod edit;
 mod file;
 mod mint;
 mod rekey;
+mod roadwarrior;
+mod rw;
 
 #[derive(Parser)]
 #[command(
@@ -45,6 +47,11 @@ enum Command {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,
     },
+    /// Add, remove or show a client of a roadwarriors pool.
+    Rw {
+        #[command(subcommand)]
+        command: rw::Command,
+    },
 }
 
 fn main() -> Result<ExitCode> {
@@ -52,6 +59,7 @@ fn main() -> Result<ExitCode> {
         Command::Check { config } => return Ok(check::run(&config)),
         Command::Mint { config } => mint::run(&config)?,
         Command::Rekey { node, config } => rekey::run(&node, &config)?,
+        Command::Rw { command } => rw::run(command)?,
     }
     Ok(ExitCode::SUCCESS)
 }

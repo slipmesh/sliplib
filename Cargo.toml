@@ -19,6 +19,8 @@ atomic-write-file = "0.3.1"
 base64 = "0.23.1"
 clap = { version = "4.6.7", features = ["derive"] }
 ipnet = "2.12.2"
+# The terminal renderer alone: the default features bring an image encoder nothing here uses.
+qrcode = { version = "0.14.1", default-features = false }
 rand = "0.10.3"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
