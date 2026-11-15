@@ -5,4 +5,9 @@ exclude_re = [
     # Where a `slipmesh.yaml` refusal points: the kind and line of the document.
     "Kind::name",
     "Document::at",
+    # Which link a mesh MTU refusal names: among links of one limit, the first.
+    "replace < with <= in mesh_mtu",
+    "replace name -> String with",
+    # The network and node_id halves of a loopback share no bit, so `|` and `^` agree.
+    "replace \\| with \\^ in ipv[46]_loopback",
 ]
