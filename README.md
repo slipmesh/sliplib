@@ -36,6 +36,10 @@ word and the path after it:
 EDITOR="slipmesh mint --config"
 ```
 
+Writing anything rewrites the whole file from its values: comments outside block scalars, and
+documents of only comments, are not kept, and the layout becomes that of the YAML serializer. A
+command with nothing to write leaves the file as it is.
+
 ### `check`
 
 `check` reads the whole file through the loader every tool reads it with, then computes every
@@ -60,17 +64,19 @@ would otherwise fill in by hand: `nodes[].mesh_private_key`, a pool document's `
 the fields `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4` of the `obfuscation` of a link or pool
 that leaves them unset. A `plain` link or pool gets no obfuscation. It writes the defaults of
 `cluster.interface_prefix.mesh` (`mesh-`) and `cluster.route_proto_id.egress` (`152`) where the
-file leaves them out, and prints the name of each field it wrote, never a value.
+file leaves them out, and prints each entry it wrote into - `nodes[node-a].mesh_private_key`,
+`mesh.links[node-a|node-b].obfuscation` - never a value.
+
+Before it writes, `mint` checks every node on the file as it would become, as `check` does, and
+writes nothing when one would be refused: a value that is written is never minted again. Where a
+setting of the file's own narrows what fits beside it, a further run draws again.
 
 Written, a value is the operator's like any other: `mint` never replaces one, and deleting one
 gives that node, link or pool a new identity on the next run, and every peer of it a config that
 changes with it. Only what was created is written: a field set on the entry or in the global
 `obfuscation` is not copied down.
 
-Writing anything rewrites the whole file from its values: comments, and documents of only
-comments, are not kept, and the layout becomes that of the YAML serializer. A run with nothing to
-write leaves the file as it is. The file holds private keys in the clear; keep it where such files
-are kept.
+The file holds private keys in the clear; keep it where such files are kept.
 
 ### `rekey`
 
@@ -183,7 +189,7 @@ every tool that configures a node of any platform.
   (`anyhow::Error::is`), so a tool can add how its user creates the secret.
 - The `mint` feature, off by default, adds `mint::resolve`: the secrets with whatever the file
   lacks created, and what was created by the entry it belongs to. `slipmesh` builds with it; a
-  tool that only reads the file leaves it off and has no function that creates a secret.
+  tool that only reads the file leaves it off, and that function is not in its build.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
   crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits. It reads every
   link's obfuscation through its `s4`, links the node is not on included; a missing entry counts as
