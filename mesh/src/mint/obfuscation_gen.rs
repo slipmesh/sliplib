@@ -10,14 +10,16 @@ use rand::{Rng, RngExt};
 /// From 5 up, the floor the kernel module's README recommends: 1..4 are WireGuard's own message
 /// types, `sliplib_config::DEFAULT_MAGIC_HEADERS`, which amneziawg-tools' generator avoids too.
 fn random_magic_headers(rng: &mut impl Rng) -> [u32; 4] {
-    let mut values = Vec::with_capacity(4);
-    while values.len() < 4 {
-        let candidate = rng.random_range(5..=2_147_483_647);
-        if !values.contains(&candidate) {
-            values.push(candidate);
-        }
+    let mut values = [0; 4];
+    for drawn in 0..values.len() {
+        values[drawn] = loop {
+            let candidate = rng.random_range(5..=2_147_483_647);
+            if !values[..drawn].contains(&candidate) {
+                break candidate;
+            }
+        };
     }
-    [values[0], values[1], values[2], values[3]]
+    values
 }
 
 /// Every range is the recommended one from the kernel module's README. The s1/s2 floor of 15
