@@ -46,7 +46,7 @@ pub enum Command {
         #[arg(long)]
         invert: bool,
         /// Write the generated private key into the client's entry in place of its public key, so
-        /// rw-inspect can re-render the full config later.
+        /// rw inspect can re-render the full config later.
         #[arg(long = "keep-private")]
         keep_private: bool,
         #[arg(long, default_value = "slipmesh.yaml")]
@@ -67,7 +67,7 @@ pub enum Command {
         if_: String,
         #[arg(long)]
         name: String,
-        /// This client's private key, if you have it and rw-add did not keep it - fills in the
+        /// This client's private key, if you have it and rw add did not keep it - fills in the
         /// config in full instead of a placeholder.
         #[arg(long = "private-key")]
         private_key: Option<PrivateKey>,
@@ -221,7 +221,7 @@ fn rw_inspect(
     let text = roadwarrior::inspect(topology, &secrets, if_, name, private_key, endpoint)?;
 
     // Inspecting is pointless with no output at all - default to --export if neither flag was
-    // given, unlike rw-add (where registering a client without ever displaying it is legitimate).
+    // given, unlike rw add (where registering a client without ever displaying it is legitimate).
     let export = export || !qr;
     if export {
         println!("{text}");

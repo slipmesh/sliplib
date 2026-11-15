@@ -1,4 +1,4 @@
-//! `rw-add`/`rw-del`/`rw-inspect` - a roadwarriors pool's clients: the entry a new client gets,
+//! `rw add`/`rw del`/`rw inspect` - a roadwarriors pool's clients: the entry a new client gets,
 //! the client found by name, and the client-side config rendered as text or a QR code. Editing
 //! `slipmesh.yaml` is `edit`'s.
 
@@ -11,7 +11,7 @@ use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{IpAddr, Ipv4Addr};
 
 /// A private key we know (was just generated, or given via `--public-key`'s absence) vs. one we
-/// never had (given via `--public-key`, or looking up an existing client with `rw-inspect`).
+/// never had (given via `--public-key`, or looking up an existing client with `rw inspect`).
 #[derive(Debug)]
 pub enum ClientPrivateKey {
     Known(PrivateKey),
@@ -78,9 +78,8 @@ fn check_not_duplicate(pool: &RoadwarriorPool, name: &str, public_key: &str) -> 
     Ok(())
 }
 
-/// The pool's server identity, taken from the secrets `generate` resolves - never a second,
-/// independently generated set of values that could drift from what `generate` actually puts on
-/// the wire.
+/// The pool's server identity, from the secrets the file has written: what a tool that configures
+/// the pool's node puts on the wire.
 fn pool_identity(
     pool: &RoadwarriorPool,
     secrets: &ResolvedSecrets,
@@ -147,7 +146,7 @@ pub(crate) fn resolve_dns(mesh: &MeshConfig, pool: &RoadwarriorPool) -> Option<S
 /// Renders a client-side config: stock WireGuard `.conf` shape for both cases (AmneziaWG apps
 /// accept the same `[Interface]`/`[Peer]` INI with extra keys, not a different format) - the
 /// AmneziaWG `Jc..H4` lines are only emitted when `obfuscation` is non-default (a `plain` pool
-/// always resolves to `Obfuscation::default()`, see `resolve_pool_identity`).
+/// always reads as `Obfuscation::default()`).
 ///
 /// No `# Name`/similar leading comment - neither the official WireGuard app nor AmneziaWG's
 /// recognizes one on QR import (confirmed: no documented convention, generic "Server 1"-style
@@ -225,13 +224,13 @@ pub fn render_qr(config_text: &str, invert: bool) -> Result<String> {
     Ok(renderer.build())
 }
 
-/// What `rw-add` makes: the entry to add to the pool, and the client config if one was asked for.
+/// What `rw add` makes: the entry to add to the pool, and the client config if one was asked for.
 pub struct Added {
     pub client: RoadwarriorClient,
     pub config: Option<(ClientPrivateKey, String)>,
 }
 
-/// `rw-add`: validates, resolves/generates the client's keypair, and (if `export`/`qr`) renders
+/// `rw add`: validates, resolves/generates the client's keypair, and (if `export`/`qr`) renders
 /// the client config. With `keep_private` the entry holds the generated private key instead of the
 /// public one. Writing the entry into `slipmesh.yaml` is `edit::add_client`'s.
 #[allow(clippy::too_many_arguments)]
@@ -310,7 +309,7 @@ pub fn add(
     })
 }
 
-/// Client `name` of pool `if_`, with its position in the pool's `clients` - what `rw-del` removes.
+/// Client `name` of pool `if_`, with its position in the pool's `clients` - what `rw del` removes.
 pub fn find_client<'a>(
     mesh: &'a MeshConfig,
     if_: &str,
@@ -321,8 +320,8 @@ pub fn find_client<'a>(
     Ok((index, &pool.clients[index]))
 }
 
-/// `rw-inspect`: re-renders an existing client's config/QR - never writes anything. The private
-/// key is the one passed in, else the one `rw-add --keep-private` kept with the client; with
+/// `rw inspect`: re-renders an existing client's config/QR - never writes anything. The private
+/// key is the one passed in, else the one `rw add --keep-private` kept with the client; with
 /// neither, the config carries a placeholder.
 pub fn inspect(
     mesh: &MeshConfig,

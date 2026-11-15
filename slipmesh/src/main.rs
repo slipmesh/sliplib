@@ -20,7 +20,7 @@ mod rw;
     name = env!("CARGO_BIN_NAME"),
     bin_name = env!("CARGO_BIN_NAME"),
     version,
-    about = "Checks slipmesh.yaml and writes what it lacks"
+    about = "Checks slipmesh.yaml, writes what it lacks and edits its road-warrior clients"
 )]
 struct Cli {
     #[command(subcommand)]

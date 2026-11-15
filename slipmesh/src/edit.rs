@@ -1,5 +1,6 @@
 //! Every edit made to `slipmesh.yaml`: minted secrets and a node's new key written into the
-//! fields they belong to, and the defaults of the network settings the file leaves out.
+//! fields they belong to, the defaults of the network settings the file leaves out, and
+//! roadwarrior clients added and removed.
 //!
 //! Written, a minted value is the operator's like any other: the next run mints nothing, and
 //! deleting it mints a new identity for that node, link or pool, and for every peer that refers to
@@ -109,7 +110,7 @@ pub fn remove_client(yaml: &mut MultiDoc, document: usize, client_index: usize) 
     Ok(())
 }
 
-/// One client entry as `rw-add` writes it: by its private key when that was kept, else by its
+/// One client entry as `rw add` writes it: by its private key when that was kept, else by its
 /// public key - never both.
 fn client_entry(client: &RoadwarriorClient) -> Value {
     let mut entry = Mapping::new();
