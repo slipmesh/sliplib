@@ -19,10 +19,8 @@ pub struct BfdConfig {
     pub settings: BfdSettings,
 }
 
-/// The mesh interface prefix when `cluster.interface_prefix.mesh` does not say.
 pub const DEFAULT_MESH_INTERFACE_PREFIX: &str = "mesh-";
 
-/// The egress route protocol number when `cluster.route_proto_id.egress` does not say.
 pub const DEFAULT_EGRESS_ROUTE_PROTO_ID: u8 = 152;
 
 /// Strict for the same reason `ClusterConfig` is.
@@ -116,8 +114,8 @@ pub struct ClusterConfig {
     /// Interfaces whose connected prefixes every node announces (BIRD's `protocol direct`). One
     /// that a node lacks matches nothing there. Empty announces nothing: no interface is implied.
     ///
-    /// Must include the mesh glob whenever `tunnel_networks` is set, or rendering refuses. A node's
-    /// podCIDR comes through `pod_subnet`, not from here.
+    /// Must include the mesh glob whenever `tunnel_networks` is set, or `sliplib-mesh` refuses to
+    /// render the node's router config. A node's podCIDR comes through `pod_subnet`, not from here.
     #[serde(default)]
     pub direct_interfaces: Vec<String>,
     /// Kubernetes' ClusterIP range, announced from every node. Stated here because no daemon reads
@@ -147,7 +145,6 @@ pub struct LoopbackNetworks {
     pub ipv6: String,
 }
 
-/// The networks of [`ClusterConfig::tunnel_networks`].
 #[derive(Deserialize, Debug, Default, PartialEq)]
 pub struct TunnelNetworks {
     #[serde(default)]
@@ -298,7 +295,6 @@ impl TryFrom<ClientEntry> for RoadwarriorClient {
 
 #[derive(Deserialize, Debug, PartialEq)]
 pub struct BypassEntry {
-    /// The node whose router config gets these lists.
     pub node: String,
     #[serde(default)]
     pub include: Vec<BypassSourceEntry>,
@@ -306,10 +302,8 @@ pub struct BypassEntry {
     pub exclude: Vec<BypassSourceEntry>,
 }
 
-/// The references across the topology - link pairs, pool nodes and bypass nodes name real nodes -
-/// and the invariants rendering relies on: distinct node names and `node_id`s, a port used once per
-/// node, a usable mesh prefix and egress protocol. The configs rendered from it are the daemons'
-/// checks to make.
+/// The checks across the topology that its types alone cannot make; the configs rendered from it
+/// are the daemons' checks to make.
 pub fn validate(cfg: &MeshConfig) -> anyhow::Result<()> {
     anyhow::ensure!(!cfg.nodes.is_empty(), "nodes must not be empty");
     let prefix = cfg.cluster.mesh_interface_prefix();

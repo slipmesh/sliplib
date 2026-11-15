@@ -405,8 +405,6 @@ extraArgs:
         }
     }
 
-    // The file as a whole.
-
     #[test]
     fn hosts_come_from_the_network_document_in_its_order() {
         let parsed = SlipmeshFile::parse(NETWORK).unwrap();
@@ -523,8 +521,6 @@ extraArgs:
         );
         SlipmeshFile::parse(&network).unwrap();
     }
-
-    // What one host's patch file gets.
 
     #[test]
     fn a_patch_without_include_reaches_every_host() {
@@ -683,8 +679,6 @@ name: {name}
         let err = error(&file(&[NETWORK, &patch]));
         assert!(err.contains("/etc/talos-extensions/router.yaml"), "{err}");
     }
-
-    // The model each host is rendered from.
 
     #[test]
     fn pools_are_gathered_in_file_order() {
