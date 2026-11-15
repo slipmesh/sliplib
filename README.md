@@ -18,12 +18,29 @@ the tag for all of them; for a consumer of another crate that update changes not
 
 ## `slipmesh`
 
-`slipmesh` works on `slipmesh.yaml` whatever platform its nodes run. It reads the file as plain
+`slipmesh` works on `slipmesh.yaml` whatever platform its nodes run, and is the one tool that
+writes into it: the tools that configure a node only read the file. It takes the file as plain
 text: a file kept encrypted is decrypted by whatever runs the tool.
 
 ```bash
 slipmesh check --config slipmesh.yaml
+slipmesh mint --config slipmesh.yaml
+slipmesh rekey --node node-a --config slipmesh.yaml
 ```
+
+`--config` is `slipmesh.yaml` of the working directory unless given. A command that writes
+replaces the file in place, so it can be given as an editor command, with `--config` as its last
+word and the path after it:
+
+```bash
+EDITOR="slipmesh mint --config"
+```
+
+Writing anything rewrites the whole file from its values: comments outside block scalars, and
+documents of only comments, are not kept, and the layout becomes that of the YAML serializer. A
+command with nothing to write leaves the file as it is.
+
+### `check`
 
 `check` reads the whole file through the loader every tool reads it with, then computes every
 node's `awg` and `router` configs and checks each the way its node would. It prints `<node>: ok`
@@ -31,10 +48,41 @@ for a node that passes and, for one that does not, the first thing that refuses 
 its own. It goes through every node whatever the others gave, and exits 1 when anything was
 refused. What the loader refuses is one refusal for the whole file, with no node checked, even
 when it concerns one node - a `node_id` that is not an address, two links on one port. It writes
-nothing. `--config` is `slipmesh.yaml` of the working directory unless given.
+nothing.
+
+It also refuses a file that leaves `cluster.interface_prefix.mesh` or
+`cluster.route_proto_id.egress` to its default, and still checks its nodes: a tool that publishes
+them to the nodes takes them only as written. A refusal that `mint` cures says so.
 
 What only one platform's tool knows is that tool's own check - the Talos generator's `--check`
 for the templates and patches of a Talos node.
+
+### `mint`
+
+Keys cannot be derived, so `mint` creates them once and writes them into the fields an operator
+would otherwise fill in by hand: `nodes[].mesh_private_key`, a pool document's `private_key`, and
+the fields `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4` of the `obfuscation` of a link or pool
+that leaves them unset. A `plain` link or pool gets no obfuscation. It writes the defaults of
+`cluster.interface_prefix.mesh` (`mesh-`) and `cluster.route_proto_id.egress` (`152`) where the
+file leaves them out, and prints each entry it wrote into - `nodes[node-a].mesh_private_key`,
+`mesh.links[node-a|node-b].obfuscation` - never a value.
+
+Before it writes, `mint` checks every node on the file as it would become, as `check` does, and
+writes nothing when one would be refused: a value that is written is never minted again. Where a
+setting of the file's own narrows what fits beside it, a further run draws again.
+
+Written, a value is the operator's like any other: `mint` never replaces one, and deleting one
+gives that node, link or pool a new identity on the next run, and every peer of it a config that
+changes with it. Only what was created is written: a field set on the entry or in the global
+`obfuscation` is not copied down.
+
+The file holds private keys in the clear; keep it where such files are kept.
+
+### `rekey`
+
+`rekey --node <name>` gives one node a new mesh key, whether or not it had one. Every peer of the
+node dials it by the public half of that key, so the config of each of them changes with it and
+has to reach its node in the same pass.
 
 ### Installing
 
@@ -85,8 +133,7 @@ mean.
 - `MultiDoc::document_mut` edits a document's value, and `MultiDoc::text` writes the file back. The
   values are what is written: comments, and documents of only comments, are not kept.
 - `read` reads a file of one document into a type.
-- `merge` is JSON Merge Patch (RFC 7386) with key order kept; `join` and `append` put documents
-  together.
+- `merge` is JSON Merge Patch (RFC 7386) with key order kept; `join` puts documents together.
 - `replace_file` replaces a file atomically, keeping its permissions and following a symlink;
   `write_if_changed` writes only what differs, creating the directory; `read_or_empty` reads a file
   that may not exist yet.
@@ -107,6 +154,8 @@ their checks only; reading and writing the files is `sliplib-yaml`'s.
   may only add files to.
 - `mesh_config`: the topology - `MeshConfig` with its cluster settings, nodes, mesh links,
   roadwarriors pools and bypass entries - and `validate`, the checks across them.
+  `missing_defaults` lists the network settings the topology leaves to a default that a node is
+  told, each with that default.
 - `nftables::TEMPLATE_PATH`, where the `nftables` service reads its ruleset template.
 - `talos`: `Identity` is what Talos keys a document by (`apiVersion`, `kind`, `name`).
   `ExtensionServiceConfig` and `ConfigFile` build and find the document that mounts a service's
@@ -130,14 +179,17 @@ every tool that configures a node of any platform.
 - `secrets::read` takes the secrets the file sets: each node's mesh private key, each pool's private
   key, and each link's and pool's obfuscation layered over the topology's. It never creates one: a
   key the file lacks is absent from `ResolvedSecrets`, while every link and pool gets an obfuscation
-  entry, empty when nothing is set or it is `plain`. `secrets::unminted` names the fields an
-  obfuscation lacks of those every link and pool that is not `plain` carries once its secrets are
-  minted - `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`.
+  entry, empty when nothing is set or it is `plain`.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
   node checks it. It needs the node's own mesh key always; for each of its links, the peer's key
   and the link's obfuscation; for each pool on it, the pool's key and obfuscation. It refuses what
-  of these is missing, or an obfuscation not `plain` that `unminted` finds fields in, naming what
-  lacks what; it refuses nothing for the secrets of nodes, links and pools the node is not on.
+  of these is missing, or an obfuscation not `plain` without one of `jc`, `jmin`, `jmax`, `s1`,
+  `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes, links
+  and pools the node is not on. Such a refusal carries `secrets::MissingSecret` in its chain
+  (`anyhow::Error::is`), so a tool can add how its user creates the secret.
+- The `mint` feature, off by default, adds `mint::resolve`: the secrets with whatever the file
+  lacks created, and what was created by the entry it belongs to. `slipmesh` builds with it; a
+  tool that only reads the file leaves it off, and that function is not in its build.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
   crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits. It reads every
   link's obfuscation through its `s4`, links the node is not on included; a missing entry counts as

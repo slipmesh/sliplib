@@ -8,8 +8,14 @@ repository.workspace = true
 publish.workspace = true
 description = "A node's awg and router configs, computed from slipmesh.yaml"
 
+[features]
+# Creating the secrets a topology lacks. Off for a tool that only reads slipmesh.yaml: the function
+# that creates them is then not in its build.
+mint = ["dep:rand"]
+
 [dependencies]
 anyhow.workspace = true
+rand = { workspace = true, optional = true }
 sliplib-config.workspace = true
 sliplib-net.workspace = true
 sliplib-secrets.workspace = true

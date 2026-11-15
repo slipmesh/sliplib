@@ -6,7 +6,7 @@ use sliplib_config::Obfuscation;
 use sliplib_config::mesh_config::MeshConfig;
 use sliplib_secrets::wireguard::PrivateKey;
 
-/// Every field of `secrets::MINTED_OBFUSCATION`, at values the kernel module accepts.
+/// Every field a minted obfuscation carries, at values the kernel module accepts.
 pub fn minted_obfuscation() -> Obfuscation {
     Obfuscation {
         jc: Some(4),

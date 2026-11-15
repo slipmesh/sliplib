@@ -1,6 +1,6 @@
+use crate::common::{Ran, slipmesh};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::path::Path;
-use std::process::{Command, Output};
 
 /// What a link that is not `plain` carries once its secrets are written.
 const OBFUSCATION: &str = "{jc: 4, jmin: 10, jmax: 50, s1: 15, s2: 16, h1: 5, h2: 6, h3: 7, h4: 8}";
@@ -27,6 +27,8 @@ fn network(cluster: &str, keyless: &[&str]) -> String {
 cluster:
   bgp_as: 64512
   loopback_networks: {{ipv4: "198.51.100.0/25", ipv6: "3fff::/32"}}
+  interface_prefix: {{mesh: mesh-}}
+  route_proto_id: {{egress: 152}}
 {cluster}nodes:
 {nodes}mesh:
   links:
@@ -35,27 +37,7 @@ cluster:
     )
 }
 
-struct Checked {
-    code: Option<i32>,
-    stdout: String,
-    stderr: String,
-}
-
-impl From<Output> for Checked {
-    fn from(output: Output) -> Self {
-        Self {
-            code: output.status.code(),
-            stdout: String::from_utf8(output.stdout).unwrap(),
-            stderr: String::from_utf8(output.stderr).unwrap(),
-        }
-    }
-}
-
-fn slipmesh() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_slipmesh"))
-}
-
-fn check_at(path: &Path) -> Checked {
+fn check_at(path: &Path) -> Ran {
     slipmesh()
         .args(["check", "--config"])
         .arg(path)
@@ -73,7 +55,7 @@ fn names_in(dir: &Path) -> Vec<std::ffi::OsString> {
 
 /// What `check` gives for a file holding `content`, and the file's path. Whatever it gives, it
 /// has left the file as it was and nothing beside it.
-fn check(content: &str) -> (Checked, String) {
+fn check(content: &str) -> (Ran, String) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("network.yaml");
     std::fs::write(&path, content).unwrap();
@@ -149,6 +131,11 @@ fn a_key_that_does_not_decode_is_refused_on_its_owners_line_and_its_peers() {
             &["for node \"c\"", not_a_key],
         ],
     );
+    assert!(
+        !checked.stderr.contains("slipmesh mint"),
+        "{}",
+        checked.stderr
+    );
 }
 
 #[test]
@@ -186,7 +173,7 @@ fn the_file_is_slipmesh_yaml_of_the_working_directory_unless_given() {
         network("", &[]),
     )
     .unwrap();
-    let checked: Checked = slipmesh()
+    let checked: Ran = slipmesh()
         .arg("check")
         .current_dir(dir.path())
         .output()
@@ -194,4 +181,91 @@ fn the_file_is_slipmesh_yaml_of_the_working_directory_unless_given() {
         .into();
     assert_eq!(checked.code, Some(0), "{}", checked.stderr);
     assert_eq!(checked.stdout, "a: ok\nb: ok\nc: ok\nd: ok\n");
+}
+
+#[test]
+fn a_file_without_the_network_defaults_is_refused_naming_them_and_its_nodes_are_still_checked() {
+    let content = network("", &[])
+        .replace("  interface_prefix: {mesh: mesh-}\n", "")
+        .replace("  route_proto_id: {egress: 152}\n", "");
+    let (checked, path) = check(&content);
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stdout, "a: ok\nb: ok\nc: ok\nd: ok\n");
+    let refusals: Vec<&str> = checked.stderr.lines().collect();
+    assert_eq!(refusals.len(), 1, "{}", checked.stderr);
+    for named in [
+        path.as_str(),
+        "cluster.interface_prefix.mesh",
+        "cluster.route_proto_id.egress",
+        "slipmesh mint",
+    ] {
+        assert!(refusals[0].contains(named), "{named}: {}", refusals[0]);
+    }
+}
+
+#[test]
+fn a_file_without_one_network_default_is_refused_naming_only_that_one() {
+    let content = network("", &[]).replace("  route_proto_id: {egress: 152}\n", "");
+    let (checked, _) = check(&content);
+    assert_eq!(checked.code, Some(1));
+    assert!(checked.stderr.contains("cluster.route_proto_id.egress"));
+    assert!(!checked.stderr.contains("cluster.interface_prefix.mesh"));
+}
+
+/// A pool on node `a`, with `settings` after its required ones.
+fn pool(settings: &str) -> String {
+    format!(
+        "---\nslipmesh:\n  kind: roadwarriors\nname: north\nnode_hostnames: [a]\naddress: \"203.0.113.1/27\"\nlisten_port: 51900\n{settings}"
+    )
+}
+
+#[test]
+fn a_refusal_for_a_secret_the_file_lacks_names_it_and_the_command_that_creates_it() {
+    let keyed = format!("private_key: \"{}\"\n", PrivateKey::generate().expose());
+    let link = "mesh link b-c: obfuscation lacks";
+    let cases: [(&str, String, &[&str]); 5] = [
+        (
+            "the node's own key",
+            network("", &["a"]),
+            &["node \"a\": mesh_private_key is not set"],
+        ),
+        (
+            "a peer's key",
+            network("", &["c"]),
+            &[
+                "node \"c\": mesh_private_key is not set",
+                "node \"c\": mesh_private_key is not set",
+            ],
+        ),
+        (
+            "a link's obfuscation",
+            network("", &[]).replace(&format!(", obfuscation: {OBFUSCATION}"), ""),
+            &[link, link],
+        ),
+        (
+            "a pool's key",
+            network("", &[]) + &pool("plain: true\n"),
+            &["roadwarriors pool \"north\": private_key is not set"],
+        ),
+        (
+            "a pool's obfuscation",
+            network("", &[]) + &pool(&keyed),
+            &["roadwarriors pool \"north\": obfuscation lacks"],
+        ),
+    ];
+    for (lacking, content, missing) in cases {
+        let (checked, _) = check(&content);
+        assert_eq!(checked.code, Some(1), "{lacking}");
+        let named: Vec<[&str; 2]> = missing.iter().map(|m| [*m, "`slipmesh mint`"]).collect();
+        let named: Vec<&[&str]> = named.iter().map(|n| &n[..]).collect();
+        refusals(&checked.stderr, &named);
+    }
+}
+
+#[test]
+fn a_refusal_that_no_secret_cures_names_no_command() {
+    let (checked, _) = check(&network("  awg_metrics_port: 0\n", &[]));
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stderr.lines().count(), 4, "{}", checked.stderr);
+    assert!(!checked.stderr.contains("slipmesh"), "{}", checked.stderr);
 }

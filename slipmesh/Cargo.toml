@@ -6,15 +6,15 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "The tool for slipmesh.yaml itself: checks the whole file the way the tools that configure its nodes read it"
+description = "The tool for slipmesh.yaml itself: checks the file the way the tools that configure its nodes read it, and is the one that writes into it"
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
 sliplib-config.workspace = true
-sliplib-mesh.workspace = true
+sliplib-mesh = { workspace = true, features = ["mint"] }
+sliplib-secrets.workspace = true
 sliplib-yaml.workspace = true
 
 [dev-dependencies]
-sliplib-secrets.workspace = true
 tempfile.workspace = true

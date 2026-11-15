@@ -6,6 +6,7 @@ use crate::Obfuscation;
 use crate::router::{BfdSettings, BypassSourceEntry};
 use serde::Deserialize;
 use sliplib_secrets::wireguard::PrivateKey;
+use sliplib_yaml::Value;
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 
@@ -19,9 +20,9 @@ pub struct BfdConfig {
     pub settings: BfdSettings,
 }
 
-pub const DEFAULT_MESH_INTERFACE_PREFIX: &str = "mesh-";
+pub(crate) const DEFAULT_MESH_INTERFACE_PREFIX: &str = "mesh-";
 
-pub const DEFAULT_EGRESS_ROUTE_PROTO_ID: u8 = 152;
+pub(crate) const DEFAULT_EGRESS_ROUTE_PROTO_ID: u8 = 152;
 
 /// Strict for the same reason `ClusterConfig` is.
 #[derive(Deserialize, Debug, Default, PartialEq)]
@@ -302,6 +303,27 @@ pub struct BypassEntry {
     pub exclude: Vec<BypassSourceEntry>,
 }
 
+/// The keys of the network document that `topology` leaves out and that are written down with
+/// their default, so that the values published to the nodes stand in `slipmesh.yaml`. The mesh MTU
+/// is not one of them: written down, it would no longer follow the links.
+pub fn missing_defaults(topology: &MeshConfig) -> Vec<(&'static str, Value)> {
+    let cluster = &topology.cluster;
+    let mut missing = Vec::new();
+    if cluster.interface_prefix.mesh.is_none() {
+        missing.push((
+            "cluster.interface_prefix.mesh",
+            DEFAULT_MESH_INTERFACE_PREFIX.into(),
+        ));
+    }
+    if cluster.route_proto_id.egress.is_none() {
+        missing.push((
+            "cluster.route_proto_id.egress",
+            u64::from(DEFAULT_EGRESS_ROUTE_PROTO_ID).into(),
+        ));
+    }
+    missing
+}
+
 /// The checks across the topology that its types alone cannot make; the configs rendered from it
 /// are the daemons' checks to make.
 pub fn validate(cfg: &MeshConfig) -> anyhow::Result<()> {
@@ -432,6 +454,44 @@ pub fn validate(cfg: &MeshConfig) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_defaults_are_the_prefix_and_protocol_keys_left_out_each_with_its_default() {
+        let cfg: MeshConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
+        assert_eq!(
+            missing_defaults(&cfg),
+            [
+                ("cluster.interface_prefix.mesh", Value::from("mesh-")),
+                ("cluster.route_proto_id.egress", Value::from(152u64)),
+            ]
+        );
+
+        let given = |setting: &str| -> MeshConfig {
+            let yaml =
+                minimal_yaml().replace("  bgp_as: 64512\n", &format!("  bgp_as: 64512\n{setting}"));
+            sliplib_yaml::from_str(&yaml).unwrap()
+        };
+        let keys = |cfg: &MeshConfig| -> Vec<&str> {
+            missing_defaults(cfg)
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect()
+        };
+        assert_eq!(
+            keys(&given("  interface_prefix: {mesh: wg-}\n")),
+            ["cluster.route_proto_id.egress"]
+        );
+        assert_eq!(
+            keys(&given("  route_proto_id: {egress: 160}\n")),
+            ["cluster.interface_prefix.mesh"]
+        );
+        assert!(
+            keys(&given(
+                "  interface_prefix: {mesh: wg-}\n  route_proto_id: {egress: 160}\n"
+            ))
+            .is_empty()
+        );
+    }
 
     #[test]
     fn the_prefix_and_protocol_keys_are_read_when_given() {
