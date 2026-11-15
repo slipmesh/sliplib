@@ -25,7 +25,9 @@ text: a file kept encrypted is decrypted by whatever runs the tool.
 ```bash
 slipmesh check --config slipmesh.yaml
 slipmesh mint --config slipmesh.yaml
+slipmesh fmt --config slipmesh.yaml
 slipmesh rekey --node node-a --config slipmesh.yaml
+slipmesh rw add --if plain --name laptop --allowed-ips 203.0.113.5/32 --export --config slipmesh.yaml
 ```
 
 `--config` is `slipmesh.yaml` of the working directory unless given. A command that writes
@@ -36,9 +38,11 @@ word and the path after it:
 EDITOR="slipmesh mint --config"
 ```
 
-Writing anything rewrites the whole file from its values: comments outside block scalars, and
-documents of only comments, are not kept, and the layout becomes that of the YAML serializer. A
-command with nothing to write leaves the file as it is.
+Writing anything rewrites the whole file from its values, in the layout of the YAML serializer.
+Comments outside block scalars are not kept; a document that holds nothing - only comments, empty,
+or `~` - is dropped; an anchor and its aliases are written out as independent copies. So the first
+write to a file written by hand changes most of its lines; [`fmt`](#fmt) makes that change alone.
+A command with nothing to write leaves the file as it is.
 
 ### `check`
 
@@ -78,11 +82,54 @@ changes with it. Only what was created is written: a field set on the entry or i
 
 The file holds private keys in the clear; keep it where such files are kept.
 
+### `fmt`
+
+`fmt` rewrites the file in the form every writing command leaves it in and changes no value: it
+reads the text it is about to write and refuses to write it if any document's values differ from
+the file's. What a hand-written file loses is its layout, its comments outside block scalars, its
+documents that hold nothing - only comments, empty, or `~` - and the link between an anchor and its
+aliases, each of which becomes a copy. Committed on its own, that rewrite keeps a later `rekey` or
+`rw add` down to the lines it edits. A file already in that form is not touched, and one that does
+not read is refused as it is. One line says whether the file was rewritten.
+
 ### `rekey`
 
 `rekey --node <name>` gives one node a new mesh key, whether or not it had one. Every peer of the
 node dials it by the public half of that key, so the config of each of them changes with it and
 has to reach its node in the same pass.
+
+### `rw add`, `rw del`, `rw inspect`
+
+The clients of a roadwarriors pool, each in the pool's own document. `--if` names the pool,
+`--name` the client:
+
+```bash
+slipmesh rw add --if plain --name laptop --allowed-ips 203.0.113.5/32 --export --qr
+slipmesh rw inspect --if plain --name laptop --qr
+slipmesh rw del --if plain --name laptop
+```
+
+`rw add` generates the client's key pair, writes the public half into the pool and prints a
+ready-to-import config with `--export`, a QR code of it in the terminal with `--qr`; `--invert`
+swaps the code's dark and light for a terminal theme whose polarity a scanner refuses. A generated
+private key goes into that config, or with `--keep-private` into the file, and nowhere else: with
+none of `--export`, `--qr` and `--keep-private` the key would be lost, and `rw add` refuses to
+generate one. `--public-key` registers a client that has its own key pair. `--allowed-ips` takes
+networks separated by commas; an address without a prefix length is that one host.
+
+With `--keep-private` the entry holds the private key in place of the public one, never both, and
+`rw inspect` renders the config in full from it. Without it, `rw inspect` leaves a placeholder for
+the key unless `--private-key` gives it back, and refuses one that is not the client's. `rw
+inspect` prints the config when neither `--export` nor `--qr` is given, and writes nothing.
+
+A pool whose key or obfuscation is not written takes no client and shows none: `rw add` and
+`rw inspect` refuse it, whatever else they were asked for, until `mint` has written them. Only that
+pool's secrets matter to them. `rw add` creates nothing but the client's key pair.
+
+The config's `Endpoint` is the first of the pool's `node_hostnames`, with the pool's
+`listen_port`. `--endpoint` picks another of them, or names anything else - a DNS name in front of
+the pool, say - taken as written, with the pool's port when it carries none. Its `DNS` is the
+pool's `dns`, else address 10 of `cluster.service_subnet`, else absent.
 
 ### Installing
 
@@ -187,9 +234,9 @@ every tool that configures a node of any platform.
   `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes, links
   and pools the node is not on. Such a refusal carries `secrets::MissingSecret` in its chain
   (`anyhow::Error::is`), so a tool can add how its user creates the secret.
-- The `mint` feature, off by default, adds `mint::resolve`: the secrets with whatever the file
-  lacks created, and what was created by the entry it belongs to. `slipmesh` builds with it; a
-  tool that only reads the file leaves it off, and that function is not in its build.
+- The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks,
+  created, each by the entry it belongs to. `slipmesh` builds with it; a tool that only reads the
+  file leaves it off, and that function is not in its build.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
   crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits. It reads every
   link's obfuscation through its `s4`, links the node is not on included; a missing entry counts as

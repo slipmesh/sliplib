@@ -10,15 +10,18 @@ use std::process::ExitCode;
 mod check;
 mod edit;
 mod file;
+mod fmt;
 mod mint;
 mod rekey;
+mod roadwarrior;
+mod rw;
 
 #[derive(Parser)]
 #[command(
     name = env!("CARGO_BIN_NAME"),
     bin_name = env!("CARGO_BIN_NAME"),
     version,
-    about = "Checks slipmesh.yaml and writes what it lacks"
+    about = "Checks slipmesh.yaml, writes what it lacks and edits its road-warrior clients"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -37,6 +40,11 @@ enum Command {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,
     },
+    /// Rewrite slipmesh.yaml in the form this tool writes it, changing no value.
+    Fmt {
+        #[arg(long, default_value = "slipmesh.yaml")]
+        config: PathBuf,
+    },
     /// Replace one node's mesh key in slipmesh.yaml with a new one.
     Rekey {
         /// The node, by its name in the network document.
@@ -45,13 +53,20 @@ enum Command {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,
     },
+    /// Add, remove or show a client of a roadwarriors pool.
+    Rw {
+        #[command(subcommand)]
+        command: rw::Command,
+    },
 }
 
 fn main() -> Result<ExitCode> {
     match Cli::parse().command {
         Command::Check { config } => return Ok(check::run(&config)),
         Command::Mint { config } => mint::run(&config)?,
+        Command::Fmt { config } => fmt::run(&config)?,
         Command::Rekey { node, config } => rekey::run(&node, &config)?,
+        Command::Rw { command } => rw::run(command)?,
     }
     Ok(ExitCode::SUCCESS)
 }

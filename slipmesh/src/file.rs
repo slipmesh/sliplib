@@ -5,18 +5,32 @@ use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_yaml::MultiDoc;
 use std::path::Path;
 
-pub fn read_slipmesh(config_path: &Path) -> Result<(MultiDoc, SlipmeshFile)> {
-    let yaml = MultiDoc::read(config_path)?;
-    let file =
-        SlipmeshFile::read(&yaml).with_context(|| format!("reading {}", config_path.display()))?;
+pub fn read_text(config_path: &Path) -> Result<String> {
+    std::fs::read_to_string(config_path)
+        .with_context(|| format!("reading {}", config_path.display()))
+}
+
+/// `text`, the content of the file at `config_path`, parsed for editing, and read.
+pub fn parse_slipmesh(config_path: &Path, text: &str) -> Result<(MultiDoc, SlipmeshFile)> {
+    let reading = || format!("reading {}", config_path.display());
+    let yaml = MultiDoc::parse(text).with_context(reading)?;
+    let file = SlipmeshFile::read(&yaml).with_context(reading)?;
     Ok((yaml, file))
+}
+
+pub fn read_slipmesh(config_path: &Path) -> Result<(MultiDoc, SlipmeshFile)> {
+    parse_slipmesh(config_path, &read_text(config_path)?)
 }
 
 /// Writes `yaml` with its edits to `config_path` - once the result still reads as a valid
 /// `slipmesh.yaml`, so a bad edit is refused instead of written.
 pub fn write_edits(config_path: &Path, yaml: &MultiDoc) -> Result<()> {
-    let updated = yaml.text()?;
-    SlipmeshFile::parse(&updated)
+    write_text(config_path, &yaml.text()?)
+}
+
+/// Replaces the file at `config_path` with `updated`, once it reads as a valid `slipmesh.yaml`.
+pub fn write_text(config_path: &Path, updated: &str) -> Result<()> {
+    SlipmeshFile::parse(updated)
         .context("the edited slipmesh.yaml does not read back - not written")?;
-    sliplib_yaml::replace_file(config_path, &updated)
+    sliplib_yaml::replace_file(config_path, updated)
 }
