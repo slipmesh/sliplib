@@ -10,6 +10,7 @@ generator, the RouterOS tool and the Kubernetes operators.
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 | [`sliplib-config`](config) | `slipmesh.yaml` and the patch format: the schema and its loader, Talos documents and the daemons' configs, with their checks |
+| [`sliplib-mesh`](mesh) | A node's `awg` and `router` configs, computed from `slipmesh.yaml` |
 
 The crates are one workspace with one version and one tag. A change to one crate moves the tag for
 all of them; for a consumer of another crate that update changes nothing.
@@ -84,6 +85,23 @@ their checks only; reading and writing the files is `sliplib-yaml`'s.
   sources, and `validate`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would
   otherwise fail on; `MetricsConfig`, where a daemon serves its Prometheus endpoint.
+
+### `sliplib-mesh`
+
+What a node's daemons are configured with, computed from the topology `sliplib-config` reads, for
+every tool that configures a node of any platform.
+
+- `secrets::read` takes the secrets the file sets: each node's mesh private key, each pool's
+  private key, and each link's and pool's obfuscation layered over the topology's. It never
+  creates one; a missing one is absent from `ResolvedSecrets`.
+- `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
+  node checks it. Rendering refuses a node, peer or pool without its key, and a link or pool that
+  is not `plain` without every field of `secrets::MINTED_OBFUSCATION`, naming what lacks it.
+  `render_awg_config` and `render_router_config` are the two halves.
+- `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
+  crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits.
+- `addressing` derives a node's loopbacks from its `node_id`, the link-local of a loopback, and
+  an endpoint to dial.
 
 ### `sliplib-runtime`
 

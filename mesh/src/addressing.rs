@@ -112,4 +112,26 @@ mod tests {
             "fe80::a1b2:c3d4"
         );
     }
+
+    #[test]
+    fn an_endpoint_keeps_its_own_port_and_takes_the_given_one_otherwise() {
+        assert_eq!(
+            endpoint("node-a.example.com:51821", 51820),
+            "node-a.example.com:51821"
+        );
+        assert_eq!(
+            endpoint("node-a.example.com", 51820),
+            "node-a.example.com:51820"
+        );
+        assert_eq!(
+            endpoint("node-a.example.com:x", 51820),
+            "node-a.example.com:x:51820"
+        );
+        assert_eq!(endpoint("192.0.2.10:51821", 51820), "192.0.2.10:51821");
+        assert_eq!(endpoint("2001:db8::10", 51820), "[2001:db8::10]:51820");
+        assert_eq!(
+            endpoint("[2001:db8::10]:51821", 51820),
+            "[2001:db8::10]:51821"
+        );
+    }
 }

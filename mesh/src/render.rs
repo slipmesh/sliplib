@@ -5,15 +5,15 @@
 //! Every function here takes the topology's secrets already resolved - see `secrets`.
 
 use crate::addressing;
-use crate::secrets::{ResolvedSecrets, link_key};
+use crate::secrets::{ResolvedSecrets, link_key, unminted};
 use anyhow::{Context, Result};
-use sliplib_config::MetricsConfig;
 use sliplib_config::awg::{AwgConfig, InterfaceEntry, PeerEntry};
 use sliplib_config::mesh_config::MeshConfig;
 use sliplib_config::router::{
     AnnounceEntry, BgpPeerEntry, BypassConfig, DEFAULT_BYPASS_REFRESH_INTERVAL_SECS, NodeIdentity,
     RouterConfig,
 };
+use sliplib_config::{MetricsConfig, Obfuscation};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 fn parse_loopback_networks(mesh: &MeshConfig) -> Result<(Ipv4Addr, u8, Ipv6Addr, u8)> {
@@ -265,11 +265,11 @@ fn mesh_interfaces_for(
             .mesh_private_keys
             .get(peer_name)
             .with_context(|| format!("no resolved mesh private key for node {peer_name:?}"))?;
-        let obfuscation = resolved
-            .mesh_link_obfuscation
-            .get(&link_key(&link.pair))
-            .cloned()
-            .unwrap_or_default();
+        let obfuscation = minted_obfuscation(
+            resolved.mesh_link_obfuscation.get(&link_key(&link.pair)),
+            link.plain,
+            &format!("mesh link {}", link_key(&link.pair)),
+        )?;
 
         let mut addresses = vec![format!("{interface_link_local}/64")];
         if let Some(tunnel_v4) = tunnel_v4 {
@@ -322,11 +322,11 @@ fn roadwarrior_interfaces_for(
                 listen_port: pool.listen_port,
                 addresses,
                 private_key,
-                obfuscation: resolved
-                    .roadwarrior_obfuscation
-                    .get(&pool.name)
-                    .cloned()
-                    .unwrap_or_default(),
+                obfuscation: minted_obfuscation(
+                    resolved.roadwarrior_obfuscation.get(&pool.name),
+                    pool.plain,
+                    &format!("pool {:?}", pool.name),
+                )?,
                 handshake_stale_secs: pool.handshake_stale_secs,
                 mtu: None,
                 peers: pool
@@ -361,6 +361,61 @@ pub fn render_awg_config(
             "awg_metrics_port",
         )?,
     })
+}
+
+/// A node's configs, as its daemons would take them.
+pub struct NodeConfigs {
+    pub awg: AwgConfig,
+    pub router: RouterConfig,
+}
+
+/// `host`'s configs from `model`, each checked the way the node would check it.
+pub fn node_configs(
+    model: &MeshConfig,
+    host: &str,
+    resolved: &ResolvedSecrets,
+) -> Result<NodeConfigs> {
+    let awg_cfg = render_awg_config(model, host, resolved)
+        .with_context(|| format!("rendering awg config for node {host:?}"))?;
+    sliplib_config::awg::validate(&awg_cfg)
+        .with_context(|| format!("rendered awg config for node {host:?} is invalid"))?;
+    // Checked here rather than by awg: the daemon can only refuse a config it is already running
+    // on, and a refusal there would leave every interface of the node down.
+    for iface in &awg_cfg.interfaces {
+        iface.obfuscation.validate().with_context(|| {
+            format!(
+                "node {host:?}, interface {:?}: the kernel module refuses this obfuscation",
+                iface.name
+            )
+        })?;
+    }
+    let router_cfg = render_router_config(model, host)
+        .with_context(|| format!("rendering router config for node {host:?}"))?;
+    sliplib_config::router::validate(&router_cfg)
+        .with_context(|| format!("rendered router config for node {host:?} is invalid"))?;
+    Ok(NodeConfigs {
+        awg: awg_cfg,
+        router: router_cfg,
+    })
+}
+
+/// The obfuscation read for `what`, refused unless it has been minted - a `plain` one carries
+/// none.
+fn minted_obfuscation(read: Option<&Obfuscation>, plain: bool, what: &str) -> Result<Obfuscation> {
+    let obfuscation = read
+        .cloned()
+        .with_context(|| format!("no resolved obfuscation for {what}"))?;
+    let unminted = if plain {
+        Vec::new()
+    } else {
+        unminted(&obfuscation)
+    };
+    anyhow::ensure!(
+        unminted.is_empty(),
+        "{what}: obfuscation lacks {} - run `slipmesh-taloscfg generate` to mint it",
+        unminted.join(", ")
+    );
+    Ok(obfuscation)
 }
 
 /// A metrics listener for this node, when the given port says there is one. The address is
@@ -922,5 +977,133 @@ mesh:
             Some("198.51.100.2:9586")
         );
         sliplib_config::awg::validate(&cfg).unwrap();
+    }
+
+    // A secret the file lacks.
+
+    fn refusal(mesh: &MeshConfig, resolved: &ResolvedSecrets, node: &str) -> String {
+        format!("{:#}", render_awg_config(mesh, node, resolved).unwrap_err())
+    }
+
+    #[test]
+    fn a_node_without_its_own_key_is_refused_by_name() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        resolved.mesh_private_keys.remove("a");
+        assert!(refusal(&mesh, &resolved, "a").contains("node \"a\""));
+    }
+
+    #[test]
+    fn a_node_whose_peer_has_no_key_is_refused_naming_the_peer() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        resolved.mesh_private_keys.remove("b");
+        assert!(refusal(&mesh, &resolved, "a").contains("node \"b\""));
+    }
+
+    #[test]
+    fn a_pool_without_its_key_is_refused_by_name() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        resolved.roadwarrior_private_keys.remove("north");
+        assert!(refusal(&mesh, &resolved, "a").contains("pool \"north\""));
+    }
+
+    fn partial() -> Obfuscation {
+        Obfuscation {
+            jc: Some(4),
+            s4: Some(12),
+            ..Obfuscation::default()
+        }
+    }
+
+    #[test]
+    fn a_link_with_part_of_its_obfuscation_is_refused_naming_the_link_and_what_it_lacks() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        resolved
+            .mesh_link_obfuscation
+            .insert("a|b".to_owned(), partial());
+        let err = refusal(&mesh, &resolved, "b");
+        assert!(
+            err.contains("mesh link a|b") && err.contains("jmin, jmax, s1, s2, h1, h2, h3, h4"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_pool_with_part_of_its_obfuscation_is_refused_naming_the_pool() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        resolved
+            .roadwarrior_obfuscation
+            .insert("north".to_owned(), partial());
+        assert!(refusal(&mesh, &resolved, "a").contains("pool \"north\""));
+    }
+
+    #[test]
+    fn a_link_or_pool_with_no_obfuscation_read_is_refused() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        resolved.mesh_link_obfuscation.clear();
+        assert!(refusal(&mesh, &resolved, "b").contains("mesh link a|b"));
+        let mut resolved = resolved_for(&mesh);
+        resolved.roadwarrior_obfuscation.clear();
+        assert!(refusal(&mesh, &resolved, "a").contains("pool \"north\""));
+    }
+
+    #[test]
+    fn a_plain_link_and_pool_render_without_obfuscation() {
+        let mut mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        mesh.mesh.links[0].plain = true;
+        mesh.roadwarriors[0].plain = true;
+        let cfg = render_awg_config(&mesh, "a", &resolved_for(&mesh)).unwrap();
+        for iface in &cfg.interfaces {
+            assert_eq!(iface.obfuscation, Obfuscation::default(), "{}", iface.name);
+        }
+    }
+
+    // A node's configs, checked.
+
+    #[test]
+    fn node_configs_are_the_rendered_ones() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let resolved = resolved_for(&mesh);
+        let configs = node_configs(&mesh, "a", &resolved).unwrap();
+        assert_eq!(
+            configs.awg,
+            render_awg_config(&mesh, "a", &resolved).unwrap()
+        );
+        assert_eq!(configs.router, render_router_config(&mesh, "a").unwrap());
+    }
+
+    #[test]
+    fn node_configs_refuse_an_obfuscation_the_kernel_module_refuses() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        let clash = Obfuscation {
+            h2: Some(5),
+            ..crate::test_support::minted_obfuscation()
+        };
+        resolved
+            .mesh_link_obfuscation
+            .insert("a|b".to_owned(), clash);
+        let err = format!("{:#}", node_configs(&mesh, "a", &resolved).err().unwrap());
+        assert!(err.contains("kernel module refuses"), "{err}");
+    }
+
+    #[test]
+    fn node_configs_refuse_an_awg_config_the_daemon_refuses() {
+        let yaml = mesh_and_roadwarriors_yaml()
+            .replace("name: b,", "name: a-long-name,")
+            .replace("pair: [a, b]", "pair: [a, a-long-name]");
+        let mesh: MeshConfig = sliplib_yaml::from_str(&yaml).unwrap();
+        let err = format!(
+            "{:#}",
+            node_configs(&mesh, "a", &resolved_for(&mesh))
+                .err()
+                .unwrap()
+        );
+        assert!(err.contains("rendered awg config"), "{err}");
     }
 }
