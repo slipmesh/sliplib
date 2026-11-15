@@ -209,8 +209,8 @@ fn mesh_interfaces_for(
         .mesh_private_keys
         .get(node_name)
         .with_context(|| format!("node {node_name:?}: mesh_private_key is not set"))?;
-    // The node's own key reaches its config as written and is decoded only on the node, where a
-    // refusal takes every mesh interface down.
+    // Decoded for every node, whether or not a link uses its key: where one does, the daemon
+    // would otherwise be the first to decode it, and refuse a config it is already running on.
     own_private_key
         .public_key()
         .with_context(|| format!("node {node_name:?}: mesh_private_key"))?;
@@ -964,17 +964,22 @@ mesh:
         );
     }
 
+    const NOT_A_KEY: &str = "mesh_private_key: key is not valid base64";
+
     #[test]
     fn a_node_whose_own_key_does_not_decode_is_refused_naming_it_and_the_key() {
         let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
-        let mut resolved = resolved_for(&mesh);
-        resolved
-            .mesh_private_keys
-            .insert("c".to_owned(), "not a key".into());
-        says(
-            &refusal(&mesh, &resolved, "c"),
-            &["node \"c\": mesh_private_key"],
-        );
+        for (node, links) in [("a", "one link"), ("c", "no link")] {
+            let mut resolved = resolved_for(&mesh);
+            resolved
+                .mesh_private_keys
+                .insert(node.to_owned(), "not a key".into());
+            let refusal = refusal(&mesh, &resolved, node);
+            assert!(
+                refusal.contains(&format!("node {node:?}: {NOT_A_KEY}")),
+                "{links}: {refusal}"
+            );
+        }
     }
 
     #[test]
@@ -986,7 +991,7 @@ mesh:
             .insert("b".to_owned(), "not a key".into());
         says(
             &refusal(&mesh, &resolved, "a"),
-            &["node \"b\": mesh_private_key"],
+            &[&format!("node \"b\": {NOT_A_KEY}")],
         );
     }
 
