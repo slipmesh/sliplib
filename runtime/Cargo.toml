@@ -5,6 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+publish.workspace = true
 description = "Logging and shutdown set up the same way for every slipmesh daemon and tool"
 
 [features]

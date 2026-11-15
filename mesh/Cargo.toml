@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
+publish.workspace = true
 description = "A node's awg and router configs, computed from slipmesh.yaml"
 
 [dependencies]
