@@ -114,7 +114,7 @@ fn pool_endpoint(
         None => pool
             .node_hostnames
             .first()
-            .expect("mesh_config::validate: node_hostnames is non-empty"),
+            .with_context(|| format!("pool {:?} has no node_hostnames", pool.name))?,
     };
     let node = mesh.node(host)?;
     let endpoint = node.endpoint.as_deref().with_context(|| {
