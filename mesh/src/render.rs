@@ -1,8 +1,6 @@
-//! Per-node computation: the topology -> this node's `awg`/`router` config. Ported from
-//! `slipmesh-core::desired_state`'s full-mesh-minus-self BGP/OSPF derivation, adapted to a static
-//! config file instead of live `NodeConfig`/`MeshLink` CRDs.
-//!
-//! Every function here takes the topology's secrets already resolved - see `secrets`.
+//! A node's `awg` and `router` configs from the topology: its mesh interfaces and peers, iBGP with
+//! every other node, OSPF, announcements, roadwarriors pools and bypass lists. Every function takes
+//! the topology's secrets as [`crate::secrets::read`] gives them.
 
 use crate::addressing;
 use crate::secrets::{ResolvedSecrets, link_key, unminted};
@@ -45,8 +43,7 @@ fn node_id_of(mesh: &MeshConfig, node_name: &str) -> Result<Ipv4Addr> {
     })
 }
 
-/// This node's (v4, v6) loopback identity, derived from its `node_id` OR'd onto
-/// `cluster.loopback_networks` - see `addressing`'s module doc comment for the formula.
+/// The node's (v4, v6) loopbacks: its `node_id` in the host part of `cluster.loopback_networks`.
 pub fn node_loopbacks(mesh: &MeshConfig, node_name: &str) -> Result<(Ipv4Addr, Ipv6Addr)> {
     let (v4_net, v4_prefix, v6_net, v6_prefix) = parse_loopback_networks(mesh)?;
     let node_id = node_id_of(mesh, node_name)?;
@@ -56,9 +53,8 @@ pub fn node_loopbacks(mesh: &MeshConfig, node_name: &str) -> Result<(Ipv4Addr, I
     ))
 }
 
-/// This node's (v4, v6) tunnel identity, same derivation as `node_loopbacks` but from
-/// `cluster.tunnel_networks` - `None` when that section isn't configured (see
-/// `ClusterConfig::tunnel_networks`'s doc comment).
+/// The node's (v4, v6) tunnel addresses, derived the same way from `cluster.tunnel_networks`;
+/// `None` without them.
 pub fn node_tunnel_addresses(
     mesh: &MeshConfig,
     node_name: &str,
@@ -73,8 +69,7 @@ pub fn node_tunnel_addresses(
     )))
 }
 
-/// Full mesh minus self: every other node in `slipmesh.yaml`'s `nodes`, addressed by its IPv6
-/// loopback - ported from `slipmesh-core::desired_state::bgp_peers_from`.
+/// Full mesh minus self: every other node, addressed by its IPv6 loopback.
 pub fn bgp_peers_for(mesh: &MeshConfig, node_name: &str) -> Result<Vec<BgpPeerEntry>> {
     mesh.nodes
         .iter()
@@ -89,9 +84,8 @@ pub fn bgp_peers_for(mesh: &MeshConfig, node_name: &str) -> Result<Vec<BgpPeerEn
         .collect()
 }
 
-/// This node's bypass rules: every `slipmesh.yaml` `bypass[]` entry where `node == node_name`,
-/// gathered into one `BypassConfig`. `None` if this node has no bypass entries at all (a
-/// `router.yaml` with no `bypass` key is a normal, supported configuration).
+/// The node's bypass rules, every `bypass` entry for it in one `BypassConfig`; `None` when it has
+/// none.
 pub fn bypass_for(mesh: &MeshConfig, node_name: &str) -> Option<BypassConfig> {
     let entries: Vec<_> = mesh.bypass.iter().filter(|b| b.node == node_name).collect();
     if entries.is_empty() {
@@ -123,16 +117,8 @@ fn mesh_glob(mesh: &MeshConfig) -> String {
     format!("{}*", mesh.cluster.mesh_interface_prefix())
 }
 
-/// This node's `direct_interfaces`: its own override if set, else `cluster.direct_interfaces` - an
-/// override *replaces* the global value rather than extending it.
-///
-/// Whatever `slipmesh.yaml` says is the whole list: this generator adds nothing of its own. It used to
-/// add two things implicitly - a `"cni*"` serde default and a `"mesh-*"` appended whenever
-/// `tunnel_networks` was set - and both were removed deliberately. `"cni*"` named an interface
-/// owned by whichever CNI plugin happened to be installed, which stopped existing the moment that
-/// choice changed; `"mesh-*"` was correct but invisible, so a reader of `slipmesh.yaml` could not tell
-/// what a node would actually announce without reading this file too. An operator-visible list
-/// that is wrong gets noticed; an implicit one that is wrong does not.
+/// The node's own `direct_interfaces`, which replace the cluster's, else the cluster's. Nothing is
+/// added to the list: what a node announces has to be readable in the file.
 fn direct_interfaces_for(mesh: &MeshConfig, node_name: &str) -> Result<Vec<String>> {
     Ok(mesh
         .node(node_name)?
@@ -141,10 +127,7 @@ fn direct_interfaces_for(mesh: &MeshConfig, node_name: &str) -> Result<Vec<Strin
         .unwrap_or_else(|| mesh.cluster.direct_interfaces.clone()))
 }
 
-/// This cluster's `announce` routes - currently just the Kubernetes service CIDR, if configured
-/// (see `ClusterConfig::service_subnet`'s doc comment for why it's static here rather than
-/// live-discovered the way the old k8s-CRD `router` did it). Same on every node, matching
-/// `direct_interfaces_for`'s reasoning for `cni*`: this isn't a per-node concern.
+/// The cluster's announced routes: the Kubernetes service range, when configured, from every node.
 fn announce_for(mesh: &MeshConfig) -> Vec<AnnounceEntry> {
     mesh.cluster
         .service_subnet
@@ -158,14 +141,8 @@ fn announce_for(mesh: &MeshConfig) -> Vec<AnnounceEntry> {
         .unwrap_or_default()
 }
 
-/// This cluster's kernel-`learn` scope - the pod range, if configured. See
-/// `ClusterConfig::pod_subnet`'s doc comment for why the node's own podCIDR arrives this way
-/// rather than through `direct_interfaces`. Same on every node, for the same reason
-/// `announce_for` is.
-///
-/// Non-empty `learn` is also what switches on `bird.conf`'s `if source = RTS_INHERIT then accept`
-/// in the iBGP export filter - the two are one mechanism, not two, so there's deliberately no way
-/// to configure a `learn` scope that gets imported but never re-announced.
+/// The cluster's kernel `learn` scope: the pod range, when configured, on every node. A non-empty
+/// `learn` also re-announces what it learns over iBGP; the two are one mechanism.
 fn learn_for(mesh: &MeshConfig) -> Vec<String> {
     mesh.cluster
         .pod_subnet
@@ -177,20 +154,9 @@ fn learn_for(mesh: &MeshConfig) -> Vec<String> {
 pub fn render_router_config(mesh: &MeshConfig, node_name: &str) -> Result<RouterConfig> {
     let (v4, v6) = node_loopbacks(mesh, node_name)?;
     let direct_interfaces = direct_interfaces_for(mesh, node_name)?;
-    // Checked, not silently fixed up. OSPF here is `ospf v3` (IPv6-only - see `bird.conf`'s
-    // `protocol ospf v3 mesh6`): it never sees, let alone redistributes, an IPv4 address on a
-    // `mesh-*` interface at all (BIRD's own `ospf_get_af` filters out addresses of the "wrong"
-    // family before stub-network advertisement even runs). So the tunnel IPv4 address
-    // `mesh_interfaces_for` puts on every `mesh-*` interface (see `node_tunnel_addresses`) would
-    // otherwise exist purely locally - reachable on no other node, meaning replies masqueraded
-    // through it can never route back. `protocol direct` doesn't have this family restriction
-    // (that's exactly how `router-lo`'s own IPv4 loopback already reaches the rest of the mesh, via
-    // the `direct1` block `bird.conf` always renders), so `tunnel_networks` and a `mesh-*` entry in
-    // `direct_interfaces` have to travel together.
-    //
-    // This used to append `mesh-*` itself when it was missing. That silently produced a config
-    // `slipmesh.yaml` didn't ask for, which is how the whole `direct_interfaces` mechanism came to hide
-    // what a node actually announces - so the pairing is now enforced by refusing to render instead.
+    // Refused rather than fixed up: OSPFv3 carries no IPv4, so the tunnel IPv4 address of a mesh
+    // interface reaches other nodes only through `protocol direct` on the mesh glob. Without it,
+    // replies masqueraded through that address never route back.
     let glob = mesh_glob(mesh);
     if node_tunnel_addresses(mesh, node_name)?.is_some() && !direct_interfaces.contains(&glob) {
         anyhow::bail!(
@@ -220,13 +186,9 @@ pub fn render_router_config(mesh: &MeshConfig, node_name: &str) -> Result<Router
     })
 }
 
-/// This node's mesh-link interfaces: one full-tunnel `InterfaceEntry` per `mesh.links` entry it's
-/// party to, named after the *peer's own node name* (`mesh-<peer_name>`) - purely a local, kernel-
-/// side label, never exchanged over the wire (AmneziaWG/WireGuard identify peers by public key, not
-/// interface name), so there's no interop reason to keep it opaque/hex like the old system's
-/// `short_id`-based naming did. `sliplib_config::awg::validate`'s `IFNAMSIZ` check (name.len() <= 15) still
-/// applies - `mesh-` (5 bytes) plus a node name over 10 bytes fails generation loudly rather than
-/// silently truncating; every current `slipmesh.yaml` node name fits comfortably.
+/// The node's mesh interfaces: one full-tunnel interface per link it is on, named after the peer
+/// (`mesh-<peer>`). The name stays local - peers know each other by key - and must fit `IFNAMSIZ`,
+/// which the awg check enforces.
 fn mesh_interfaces_for(
     mesh: &MeshConfig,
     node_name: &str,
@@ -235,12 +197,9 @@ fn mesh_interfaces_for(
     let (_, own_loopback) = node_loopbacks(mesh, node_name)?;
     let own_link_local = addressing::link_local_from_loopback(own_loopback);
     let own_tunnel = node_tunnel_addresses(mesh, node_name)?;
-    // When `tunnel_networks` is configured, its IPv6 half does double duty as the interface's sole
-    // scope-link address, replacing the loopback-derived one - both are equally valid SCOPE_LINK
-    // candidates for OSPFv3 (`ospf_ifa_notify3` only cares about scope, not which address), and
-    // carrying two at once leaves it ambiguous which one BIRD actually sources Hello/LSA packets
-    // from. Falls back to the loopback-derived link-local when `tunnel_networks` isn't set, so OSPF
-    // keeps working unchanged for any `slipmesh.yaml` that hasn't opted into the new scheme.
+    // With `tunnel_networks`, its IPv6 half is the interface's only link-local, replacing the one
+    // derived from the loopback: OSPFv3 takes any link-scoped address, and with two it is unclear
+    // which one BIRD sends from.
     let (interface_link_local, tunnel_v4) = match own_tunnel {
         Some((v4, v6)) => (v6, Some(v4)),
         None => (own_link_local, None),
@@ -418,10 +377,8 @@ fn minted_obfuscation(read: Option<&Obfuscation>, plain: bool, what: &str) -> Re
     Ok(obfuscation)
 }
 
-/// A metrics listener for this node, when the given port says there is one. The address is
-/// derived, never configured: it comes from the same `node_loopbacks` call that renders
-/// `node.loopback_addresses` for `ext-router`, so no daemon's listener can drift from the address
-/// `ext-router` actually brings up on `router-lo`.
+/// A metrics listener for this node, when the port says there is one, on the node's own IPv4
+/// loopback - the address the router daemon brings up, so no listener can drift from it.
 fn metrics_for(
     mesh: &MeshConfig,
     node_name: &str,
@@ -431,9 +388,8 @@ fn metrics_for(
     let Some(port) = port else {
         return Ok(None);
     };
-    // Caught here rather than left to the daemon's own validate on the node: unset already means
-    // "serve nothing", so a port of 0 is never anything but a mistake, and it should fail where it
-    // was written instead of on five nodes at once.
+    // Refused here, not by the daemon: unset already serves nothing, so 0 is a mistake, better
+    // caught where it was written than on every node at once.
     anyhow::ensure!(
         port != 0,
         "cluster.{field} is 0 - remove the field to serve no metrics"
@@ -474,8 +430,7 @@ bypass:
         let mesh: MeshConfig = sliplib_yaml::from_str(three_node_mesh_yaml()).unwrap();
         let (v4, v6) = node_loopbacks(&mesh, "a").unwrap();
         assert_eq!(v4.to_string(), "198.51.100.1");
-        // node_id "198.51.100.1" is the full 32-bit value (0xc6336401), not just its last octet, so
-        // it ORs into the v6 host bits as "c633:6401" - matches `ipv6_loopback`'s ported formula.
+        // node_id 198.51.100.1 is all 32 bits, 0xc6336401, not just its last octet.
         assert_eq!(v6.to_string(), "3fff::c633:6401");
     }
 
@@ -539,7 +494,7 @@ bypass:
 
     #[test]
     fn render_router_config_direct_interfaces_has_no_default() {
-        // An omitted list announces nothing - it does not resurrect the old `cni*` default.
+        // An omitted list announces nothing.
         let mesh: MeshConfig = sliplib_yaml::from_str(three_node_mesh_yaml()).unwrap();
         let cfg_a = render_router_config(&mesh, "a").unwrap();
         let cfg_b = render_router_config(&mesh, "b").unwrap();
@@ -627,9 +582,8 @@ bypass:
         }
     }
 
-    /// `pod_subnet` and `direct_interfaces` are independent knobs: dropping `cni*` is what makes
-    /// `learn` the *only* source of this node's podCIDR, which is the whole point of stating both
-    /// in `slipmesh.yaml` rather than having one imply the other.
+    /// `pod_subnet` and `direct_interfaces` are independent: `learn` alone carries the node's
+    /// podCIDR.
     #[test]
     fn render_router_config_learns_pod_subnet_with_direct_interfaces_emptied() {
         let mut mesh: MeshConfig = sliplib_yaml::from_str(three_node_mesh_yaml()).unwrap();
@@ -793,11 +747,8 @@ mesh:
 
     #[test]
     fn render_router_config_rejects_tunnel_networks_without_the_mesh_glob() {
-        // The tunnel IPv4 address `mesh_interfaces_for` assigns is redistributed by nothing else -
-        // OSPF here is IPv6-only (`ospf v3`) and silently ignores IPv4 addresses entirely, so
-        // `protocol direct` on `mesh-*` is the only thing that can get it into BGP, same as
-        // `direct1` already does for `router-lo`'s own IPv4 loopback. Previously appended
-        // silently; now a hard error, so `slipmesh.yaml` states what a node announces.
+        // The tunnel IPv4 address reaches other nodes only through `protocol direct` on the mesh
+        // glob: OSPFv3 carries no IPv4.
         let mesh: MeshConfig =
             sliplib_yaml::from_str(mesh_and_roadwarriors_with_tunnel_networks_yaml()).unwrap();
         let err = render_router_config(&mesh, "a").unwrap_err().to_string();
@@ -891,8 +842,8 @@ mesh:
 
     #[test]
     fn every_rendered_peer_carries_the_name_it_has_in_mesh_yaml() {
-        // Straight from slipmesh.yaml: the node on the far end of a link, the client's own name in a
-        // pool. It only ever reaches the `peer_name` metric label - nothing decides on it.
+        // Straight from slipmesh.yaml: the node on the far end of a link, the client's own name in
+        // a pool. It only ever reaches the `peer_name` metric label - nothing decides on it.
         let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
         let resolved = resolved_for(&mesh);
         let cfg = render_awg_config(&mesh, "a", &resolved).unwrap();
@@ -969,8 +920,8 @@ mesh:
         let mesh: MeshConfig = sliplib_yaml::from_str(&yaml).unwrap();
         let resolved = resolved_for(&mesh);
 
-        // The same address `node_loopbacks` hands `ext-router` as node.loopback_addresses, so the
-        // two cannot drift: node b's own identity, not node a's, not the network's.
+        // The same address `node_loopbacks` gives the router daemon as node.loopback_addresses, so
+        // the two cannot drift: node b's own identity, not node a's, not the network's.
         let cfg = render_awg_config(&mesh, "b", &resolved).unwrap();
         assert_eq!(
             cfg.metrics.as_ref().map(|m| m.listen.as_str()),
