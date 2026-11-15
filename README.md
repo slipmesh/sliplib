@@ -93,14 +93,16 @@ every tool that configures a node of any platform.
 
 - `secrets::read` takes the secrets the file sets: each node's mesh private key, each pool's
   private key, and each link's and pool's obfuscation layered over the topology's. It never
-  creates one; a missing one is absent from `ResolvedSecrets`.
+  creates one; a missing one is absent from `ResolvedSecrets`. `secrets::unminted` names the
+  fields an obfuscation lacks of those every link and pool that is not `plain` carries once its
+  secrets are minted - `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
-  node checks it. Rendering refuses a node, peer or pool without its key, and a link or pool that
-  is not `plain` without every field of `secrets::MINTED_OBFUSCATION`, naming what lacks it.
-  `render_awg_config` and `render_router_config` are the two halves.
+  node checks it. It refuses a node, peer or pool without its key, and a link or pool that is not
+  `plain` with an obfuscation `unminted` finds fields in, naming what lacks what. It refuses only
+  what the rendered node needs, so a file may lack the secrets of nodes that are not rendered.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
   crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits.
-- `addressing` derives a node's loopbacks from its `node_id`, the link-local of a loopback, and
+- `addressing` gives a node's IPv4 loopback from its `node_id`, the link-local of a loopback, and
   an endpoint to dial.
 
 ### `sliplib-runtime`

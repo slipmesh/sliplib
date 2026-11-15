@@ -26,12 +26,12 @@ pub fn link_key(pair: &[String; 2]) -> String {
 }
 
 /// Whether one field of an obfuscation is set.
-pub type FieldIsSet = fn(&Obfuscation) -> bool;
+pub(crate) type FieldIsSet = fn(&Obfuscation) -> bool;
 
 /// The obfuscation fields a link or pool that is not `plain` carries once its secrets are minted.
 /// One that lacks any of them has not been minted yet: a config rendered from it would differ from
 /// the one rendered after minting.
-pub const MINTED_OBFUSCATION: [(&str, FieldIsSet); 9] = [
+pub(crate) const MINTED_OBFUSCATION: [(&str, FieldIsSet); 9] = [
     ("jc", |o| o.jc.is_some()),
     ("jmin", |o| o.jmin.is_some()),
     ("jmax", |o| o.jmax.is_some()),
@@ -43,7 +43,8 @@ pub const MINTED_OBFUSCATION: [(&str, FieldIsSet); 9] = [
     ("h4", |o| o.h4.is_some()),
 ];
 
-/// The fields of [`MINTED_OBFUSCATION`] that `obfuscation` lacks, in that order.
+/// The fields `obfuscation` lacks of those a minted one carries - `jc`, `jmin`, `jmax`, `s1`, `s2`
+/// and `h1` to `h4` - in that order.
 pub fn unminted(obfuscation: &Obfuscation) -> Vec<&'static str> {
     MINTED_OBFUSCATION
         .iter()

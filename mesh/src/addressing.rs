@@ -19,7 +19,7 @@ pub fn ipv4_loopback(network: Ipv4Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ip
 
 /// Same `network | node_id` idea as `ipv4_loopback`, embedding `node_id`'s 32 bits into the low 32
 /// bits of `network/prefix_len`'s host portion.
-pub fn ipv6_loopback(network: Ipv6Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv6Addr {
+pub(crate) fn ipv6_loopback(network: Ipv6Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv6Addr {
     let mask: u128 = if prefix_len == 0 {
         0
     } else {

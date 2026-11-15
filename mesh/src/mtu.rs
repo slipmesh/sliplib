@@ -13,10 +13,10 @@ use sliplib_config::mesh_config::{AddressFamily, MeshConfig, MeshLink, NodeEntry
 use std::net::IpAddr;
 
 /// An uplink's MTU when `nodes[].uplink_mtu` does not say.
-pub const DEFAULT_UPLINK_MTU: u32 = 1500;
+pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
 
 /// The least MTU IPv6 allows a link (RFC 8200); the mesh carries OSPFv3 over IPv6 link-locals.
-pub const MIN_MESH_MTU: u32 = 1280;
+pub(crate) const MIN_MESH_MTU: u32 = 1280;
 
 /// The MTU of every mesh interface: `cluster.mesh_mtu` when it fits every link, else the least
 /// link limit. None for a mesh without links, which has no mesh interface to give it to.
@@ -24,7 +24,7 @@ pub fn mesh_mtu(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Result<Option<
     let mut least: Option<(u32, &MeshLink)> = None;
     for link in &mesh.mesh.links {
         let limit = link_limit(mesh, link, resolved)
-            .with_context(|| format!("mesh link {}", name(link)))?;
+            .with_context(|| format!("mesh link {}", link_name(link)))?;
         if least.is_none_or(|(least, _)| limit < least) {
             least = Some((limit, link));
         }
@@ -41,7 +41,7 @@ pub fn mesh_mtu(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Result<Option<
             ensure!(
                 mtu <= limit,
                 "cluster.mesh_mtu {mtu} is above {limit}, the limit of mesh link {}",
-                name(link)
+                link_name(link)
             );
             ensure!(
                 mtu >= MIN_MESH_MTU,
@@ -54,7 +54,7 @@ pub fn mesh_mtu(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Result<Option<
                 limit >= MIN_MESH_MTU,
                 "mesh link {} limits the mesh MTU to {limit}, below {MIN_MESH_MTU}, the least \
                  IPv6 allows a link",
-                name(link)
+                link_name(link)
             );
             limit
         }
@@ -122,7 +122,8 @@ fn endpoint_family(node: &NodeEntry) -> Result<Option<AddressFamily>> {
     Ok(Some(family))
 }
 
-fn name(link: &MeshLink) -> String {
+/// A link as `mesh.links` writes its pair.
+pub(crate) fn link_name(link: &MeshLink) -> String {
     format!("{}-{}", link.pair[0], link.pair[1])
 }
 
@@ -131,7 +132,8 @@ mod tests {
     use super::*;
     use crate::secrets;
 
-    /// Two nodes `a` and `b` and one link between them, plain unless `obfuscation` gives it some.
+    /// Two nodes `a` and `b` and one link between them: `a`, `b` and `link` add fields to each,
+    /// `cluster` adds lines to the cluster block.
     fn mesh(a: &str, b: &str, link: &str, cluster: &str) -> MeshConfig {
         let yaml = format!(
             "cluster:\n  bgp_as: 64512\n  loopback_networks: {{ipv4: \"198.51.100.0/25\", \
@@ -181,7 +183,9 @@ mod tests {
     fn endpoints_of_two_families_on_one_link_are_an_error_naming_it() {
         let err = error(V4, V6, PLAIN, "");
         assert!(
-            err.contains("a") && err.contains("b") && err.contains("family"),
+            err.contains("mesh link a-b")
+                && err.contains(r#""a" and "b""#)
+                && err.contains("family"),
             "{err}"
         );
     }
@@ -189,7 +193,10 @@ mod tests {
     #[test]
     fn a_link_with_no_endpoint_on_either_side_is_an_error_naming_it() {
         let err = error("", "", PLAIN, "");
-        assert!(err.contains("endpoint"), "{err}");
+        assert!(
+            err.contains("mesh link a-b") && err.contains(r#"neither "a" nor "b""#),
+            "{err}"
+        );
     }
 
     #[test]
@@ -202,7 +209,7 @@ mod tests {
     #[test]
     fn an_address_family_that_contradicts_a_literal_endpoint_is_an_error() {
         let err = error(&format!("{V4}, address_family: ipv6"), "", PLAIN, "");
-        assert!(err.contains("address_family"), "{err}");
+        assert!(err.contains(r#"node "a": address_family"#), "{err}");
         assert_eq!(
             mtu(&format!("{V4}, address_family: ipv4"), "", PLAIN, ""),
             1440
@@ -255,7 +262,7 @@ mod tests {
     fn a_mesh_mtu_above_the_least_link_is_an_error_naming_the_link_and_its_limit() {
         let err = error(V4, "", PLAIN, "  mesh_mtu: 1441\n");
         assert!(err.contains("1441") && err.contains("1440"), "{err}");
-        assert!(err.contains("a") && err.contains("b"), "{err}");
+        assert!(err.contains("the limit of mesh link a-b"), "{err}");
     }
 
     #[test]
@@ -263,6 +270,7 @@ mod tests {
         assert_eq!(mtu(V4, ", uplink_mtu: 1340", PLAIN, ""), 1280);
         let err = error(V4, ", uplink_mtu: 1339", PLAIN, "");
         assert!(err.contains("1279") && err.contains("1280"), "{err}");
+        assert!(err.contains("mesh link a-b limits"), "{err}");
         let err = error(V4, "", PLAIN, "  mesh_mtu: 1279\n");
         assert!(err.contains("1279") && err.contains("1280"), "{err}");
     }
