@@ -3,7 +3,7 @@
 //!
 //! Every document carries a `slipmesh:` block saying what it is for. `network` is the topology,
 //! exactly one of it. `roadwarriors` is one pool per document. `patch` is a Talos document, aimed
-//! at hosts by `include`/`exclude`. The block is addressed to this tool and never reaches a patch
+//! at hosts by `include`/`exclude`. The block is for the file's reader and never reaches a patch
 //! file.
 
 use crate::mesh_config::{self, MeshConfig, RoadwarriorPool};
@@ -12,13 +12,12 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use sliplib_yaml::{MultiDoc, Value};
 
-/// The generator's own top-level block in every document: what the document is for and which
-/// hosts it reaches.
+/// The top-level block of every document: what the document is for and which hosts it reaches.
 pub const META_KEY: &str = "slipmesh";
 
-/// The `ExtensionServiceConfig`s this tool generates, by name, with the file each one mounts. Talos
-/// keeps `name` unique per `kind`, so a `patch` document of one of these names is that same
-/// document: it may add files to it, and nothing else - not the generated file itself.
+/// The `ExtensionServiceConfig`s generated from the network, by name, with the file each one
+/// mounts. Talos keeps `name` unique per `kind`, so a `patch` document of one of these names is
+/// that same document: it may add files to it, and nothing else - not the generated file itself.
 pub const GENERATED: [(&str, &str); 2] = [
     ("awg", "/etc/talos-extensions/awg.yaml"),
     ("router", "/etc/talos-extensions/router.yaml"),
@@ -29,7 +28,7 @@ pub const GENERATED: [(&str, &str); 2] = [
 enum Kind {
     Network,
     Roadwarriors,
-    /// No longer a kind of its own: read only to say where its ruleset went.
+    /// Read only to refuse it, naming where its ruleset goes.
     Nftables,
     Patch,
 }
@@ -112,7 +111,7 @@ pub struct HostDocument {
     /// `kind`, plus `/name` when the document has one.
     pub identity: String,
     pub text: String,
-    /// What `text` serializes - for the documents whose fields this tool reads on.
+    /// What `text` serializes - for a caller that reads its fields.
     pub value: Value,
 }
 

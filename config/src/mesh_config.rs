@@ -1,12 +1,6 @@
-//! Schema for `slipmesh.yaml` - the single source of truth this whole generator renders per-node
-//! `awg`/`router` `ExtensionServiceConfig` content from. Deliberately one file for all three
-//! concerns (mesh links, roadwarriors, BGP/OSPF) rather than one file per daemon -
-//! they already share the same node/topology facts (`nodes`, `cluster.loopback_networks`), and
-//! keeping them apart would just mean re-stating those facts in multiple places.
-//!
-//! Ported from (not identical to) the older Kubernetes-CRD system's schema
-//! (`slipmesh-core::mesh_types`/`node_config_types`/`router_types`/`cluster_config_types`) - see
-//! `render.rs`'s module doc comment for exactly what changed and why.
+//! The topology `slipmesh.yaml` describes: the cluster's settings, its nodes, the mesh links
+//! between them, roadwarriors pools and bypass entries, with `validate`, the checks across them.
+//! One schema for every concern, since they all name the same nodes and addresses.
 
 use crate::Obfuscation;
 use crate::router::{BfdSettings, BypassSourceEntry};
@@ -19,8 +13,8 @@ use std::net::Ipv4Addr;
 pub struct BfdConfig {
     #[serde(default)]
     pub enable: bool,
-    /// Flattened, so `bfd:` in slipmesh.yaml reads as one block: `enable`, then any of `min_rx_ms`,
-    /// `min_tx_ms`, `multiplier`. Omitted settings take the defaults stated on `BfdSettings`.
+    /// Flattened, so `bfd:` reads as one block: `enable`, then any of the settings, which default
+    /// as `BfdSettings` says.
     #[serde(default, flatten)]
     pub settings: BfdSettings,
 }
@@ -76,9 +70,8 @@ impl ClusterConfig {
 #[serde(deny_unknown_fields)]
 pub struct MeshConfig {
     pub cluster: ClusterConfig,
-    /// Off unless asked for: BFD trades constant control traffic on every mesh link for
-    /// detecting a dead one in seconds instead of at OSPF's dead timer, which is worth it only
-    /// where the links actually fail. See `router`'s `bird.conf` template for the intervals.
+    /// Off unless asked for: BFD trades constant control traffic on every mesh link for detecting a
+    /// dead link in seconds rather than at OSPF's dead timer.
     #[serde(default)]
     pub bfd: BfdConfig,
     #[serde(default)]
@@ -93,106 +86,55 @@ pub struct MeshConfig {
     pub bypass: Vec<BypassEntry>,
 }
 
-/// Strict, unlike the documents this generator writes: those are read by daemons that may be
-/// older than the field they are given, so they ignore what they do not know. This one is read
-/// only here, by a tool versioned with it - a name that no longer exists is a mistake, and
-/// silently ignoring it is how a renamed field turns into a listener that quietly stops being
-/// rendered on every node at once.
+/// Strict, unlike the daemons' configs: a daemon may be older than a field it is given and ignores
+/// it, but this file is read by tools built with its schema, so an unknown key is a mistake.
+/// Ignored, a renamed key would stop rendering what it configures on every node at once.
 #[derive(Deserialize, Debug, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ClusterConfig {
     #[serde(default)]
     pub bgp_as: u32,
-    /// The MTU every mesh interface gets, at most the least limit of the mesh's links; that least
-    /// limit when unset. See `mtu.rs`.
+    /// The MTU of every mesh interface, at most the least limit of the mesh's links; that limit
+    /// when unset.
     #[serde(default)]
     pub mesh_mtu: Option<u32>,
-    /// What the names of this generator's interfaces start with, by kind; see
-    /// `InterfacePrefix`. Published to every node as an annotation.
     #[serde(default)]
     pub interface_prefix: InterfacePrefix,
-    /// The protocol number the kernel routes of each kind carry, `proto` in `ip route`; see
-    /// `RouteProtoId`. Published to every node as an annotation.
+    /// The `proto` of the kernel routes of each kind, as `ip route` shows it.
     #[serde(default)]
     pub route_proto_id: RouteProtoId,
     #[serde(default)]
     pub loopback_networks: LoopbackNetworks,
     #[serde(default)]
     pub bypass_refresh_interval_secs: Option<u64>,
-    /// TCP ports every node serves Prometheus metrics on, one per daemon, each bound to that
-    /// node's own v4 loopback - the address kubelet already reports as `InternalIP`, so node
-    /// discovery plus a port relabel reaches them exactly the way node-exporter is reached today.
-    /// Global rather than per-node: one scrape config for the fleet, and a port that differs by
-    /// node is a port someone has to look up. Unset means that daemon listens nowhere - neither
-    /// opens anything it wasn't told to.
-    ///
-    /// Two ports rather than one because two processes cannot bind the same one, and they answer
-    /// for different things: `awg` for tunnel liveness, `router` for BIRD's protocol state.
+    /// TCP ports every node serves Prometheus metrics on, one per daemon since two processes cannot
+    /// bind one, each on the node's own IPv4 loopback. Unset, that daemon serves no metrics.
     #[serde(default)]
     pub awg_metrics_port: Option<u16>,
     #[serde(default)]
     pub router_metrics_port: Option<u16>,
-    /// Interfaces every node's `router.yaml` should treat as `protocol direct` sources (see
-    /// `router::config::RouterConfig::direct_interfaces`'s own doc comment) - global, not per-node,
-    /// since the interface naming is the same on every node by construction. `protocol direct` is
-    /// inert until a matching interface appears, so listing one a given node lacks is harmless.
+    /// Interfaces whose connected prefixes every node announces (BIRD's `protocol direct`). One
+    /// that a node lacks matches nothing there. Empty announces nothing: no interface is implied.
     ///
-    /// No default: an empty/omitted list means "announce nothing from interfaces", not "announce
-    /// the usual suspects". This used to default to `cni*`, naming the pod bridge of whichever CNI
-    /// plugin was installed - which is precisely the coupling that broke when the CNI changed, and
-    /// broke *silently*, because a glob that matches nothing looks exactly like a glob that was
-    /// never configured. `render.rs` likewise no longer appends `mesh-*` on its own.
-    ///
-    /// Must include `"mesh-*"` whenever `tunnel_networks` is set - `render_router_config` refuses
-    /// to render otherwise; see the check there for why the two travel together.
-    ///
-    /// Note this is *not* where a node's own podCIDR comes from. That arrives through `pod_subnet`
-    /// and the kernel `learn` scope it drives, for reasons spelled out on that field.
+    /// Must include the mesh glob whenever `tunnel_networks` is set, or rendering refuses. A node's
+    /// podCIDR comes through `pod_subnet`, not from here.
     #[serde(default)]
     pub direct_interfaces: Vec<String>,
-    /// Kubernetes' ClusterIP range (Talos's own `cluster.network.serviceSubnets`, stated here too
-    /// since `router.yaml` has no live Kubernetes API access to discover it, by design - no daemon
-    /// in this workspace has one). Ported from the old k8s-CRD system's `router`, which read
-    /// this live from a `ServiceCIDR` object and re-announced it over iBGP as `AnnounceRoute{label:
-    /// "k8s-services"}` (`slipmesh/operators/router/src/main.rs`) - here it's a static value instead
-    /// (unlike podCIDR, the service range is fixed at cluster-bootstrap time, not dynamically
-    /// allocated per node, so there's no live-discovery requirement to begin with). `None` by
-    /// default (unlike `direct_interfaces`'s `cni*`) - there's no universally-sensible default
-    /// service CIDR the way there's a de-facto-standard CNI bridge naming convention.
+    /// Kubernetes' ClusterIP range, announced from every node. Stated here because no daemon reads
+    /// the Kubernetes API; it is fixed when the cluster is created. Unset announces none.
     #[serde(default)]
     pub service_subnet: Option<String>,
-    /// Kubernetes' pod range (Talos's own `cluster.network.podSubnets`), stated here for the same
-    /// reason `service_subnet` is - `router.yaml` has no live Kubernetes API access. Drives the
-    /// kernel `learn` scope in `router.yaml`, which is how this node's *own* podCIDR reaches iBGP.
-    ///
-    /// Why `learn` and not `direct_interfaces`: every CNI installs a route for the node's podCIDR
-    /// into the main table, but only some of them also put an address carrying that prefix on an
-    /// interface. `bridge`/`host-local` does (`203.0.113.145/28` on `cni0`), which is why `protocol
-    /// direct` on `cni*` worked at all; Cilium does not (`cilium_host` carries a `/32`, the podCIDR
-    /// exists only as `203.0.113.144/28 via 203.0.113.145 dev cilium_host`). Learning by prefix
-    /// reads the route itself rather than an interface-address side effect of one particular
-    /// plugin, so it holds for any CNI and doesn't couple this generator to a foreign interface
-    /// name.
-    ///
-    /// A *range*, not this node's own `/28`: which sub-prefix kube-controller-manager hands a node
-    /// isn't knowable at render time (unlike `service_subnet`, fixed at cluster bootstrap), so the
-    /// filter covers the whole pod range and the kernel supplies the specific one. `None` by
-    /// default - same reasoning as `service_subnet`, there's no sensible universal value.
+    /// Kubernetes' pod range. Every node learns the kernel routes inside it and announces them,
+    /// which is how its own podCIDR reaches iBGP: every CNI routes a node's podCIDR, but not every
+    /// CNI puts an address of it on an interface, so `direct_interfaces` cannot carry it. A range,
+    /// because which part of it a node gets is decided at runtime. Unset learns nothing.
     #[serde(default)]
     pub pod_subnet: Option<String>,
-    /// A second `node_id`-derived address pair, distinct from `loopback_networks`, hung on every
-    /// `mesh-*`/awg tunnel interface (not just `router-lo`). The IPv4 half is the confirmed fix this
-    /// exists for: `mesh-*` interfaces otherwise carry no IPv4 address at all, so NAT/MASQUERADE has
-    /// nothing valid to pick as a source when service-subnet traffic egresses via one. The IPv6 half
-    /// is deliberately ALSO link-local-scoped (`slipmesh.yaml`'s value lives inside `fe80::/10`, same as
-    /// the interface's existing OSPFv3-driving link-local) rather than a globally-scoped address -
-    /// there's no live IPv6 masquerade need in this cluster (`service_subnet` is IPv4-only). Being
-    /// link-local lets it *replace* rather than duplicate the loopback-derived link-local `render.rs`
-    /// would otherwise put on every `mesh-*` interface (see `mesh_interfaces_for`) - one scope-link
-    /// address doing double duty (tunnel identity + OSPFv3 Hello/LSA source) instead of two competing
-    /// ones on the same interface, which would leave it ambiguous which one BIRD actually uses.
-    /// `None` (unlike `loopback_networks`, which is always present) preserves today's link-local-only
-    /// behavior for any `slipmesh.yaml` that hasn't opted in yet.
+    /// A second address pair derived from `node_id`, put on every mesh interface. The IPv4 half
+    /// gives masquerade a source address there, where there is no IPv4 otherwise. The IPv6 half is
+    /// link-local and replaces the one derived from the loopback, so OSPFv3 has one link-local per
+    /// interface to send from. Unset, a mesh interface carries the loopback-derived link-local
+    /// alone.
     #[serde(default)]
     pub tunnel_networks: Option<TunnelNetworks>,
 }
@@ -205,8 +147,7 @@ pub struct LoopbackNetworks {
     pub ipv6: String,
 }
 
-/// Same shape as `LoopbackNetworks` - see `ClusterConfig::tunnel_networks`'s doc comment for what
-/// this is for.
+/// The networks of [`ClusterConfig::tunnel_networks`].
 #[derive(Deserialize, Debug, Default, PartialEq)]
 pub struct TunnelNetworks {
     #[serde(default)]
@@ -218,31 +159,22 @@ pub struct TunnelNetworks {
 #[derive(Deserialize, Debug, PartialEq)]
 pub struct NodeEntry {
     pub name: String,
-    /// Host-bits identity, same scheme the old CRD system used (`nodeId`) - an IPv4-shaped value
-    /// ORed onto `cluster.loopback_networks.{ipv4,ipv6}` to derive this node's own loopback
-    /// addresses. Not a real routable IPv4 address on its own.
+    /// An IPv4-shaped identity, not an address: its bits fill the host part of
+    /// `cluster.loopback_networks` to give the node its loopback addresses.
     pub node_id: String,
-    /// Publicly reachable hostname or IP, no port - `render.rs` appends the specific mesh link's
-    /// own `port` per interface, since one node can have several mesh links each listening on a
-    /// different port (a fixed `host:port` here couldn't represent more than one of them). Omitted
-    /// for a node behind NAT, with no reachable address of its own: such a node can still be
-    /// the *desired* end of a mesh link, it just never appears as `endpoint` on the peer's side.
+    /// The host or IP a peer dials, without a port: each mesh link adds its own. Unset for a node
+    /// behind NAT, which can still be on a link - only its other end is dialed.
     #[serde(default)]
     pub endpoint: Option<String>,
-    /// This node's mesh identity private key, shared across all of its `mesh.links` interfaces
-    /// (one identity per node, not per link - same as the old schema's per-node `NodeConfig`
-    /// public key). See `render.rs`'s idempotency handling for when this is left unset.
+    /// One identity for every mesh link of the node.
     #[serde(default)]
     pub mesh_private_key: Option<PrivateKey>,
-    /// Overrides (replaces, does not merge with) `cluster.direct_interfaces` for this node only -
-    /// for a node whose physically-connected interfaces don't follow the fleet-wide CNI-bridge
-    /// convention the global default is for (e.g. a non-Talos mesh peer with its own LAN-facing
-    /// interface name). `None` means "use the global default", not "announce nothing".
+    /// Replaces, not extends, `cluster.direct_interfaces` for this node; unset means the cluster's
+    /// list.
     #[serde(default)]
     pub direct_interfaces: Option<Vec<String>>,
-    /// The MTU of this node's uplink, which bounds the mesh MTU of every link it is on; 1500 when
-    /// unset. Set it on a node whose uplink is narrower, such as one behind a tunnel of its
-    /// provider's.
+    /// The MTU of the node's uplink, which bounds every link it is on; 1500 when unset. Set it on a
+    /// node whose uplink is narrower, such as one behind a tunnel of its provider's.
     #[serde(default)]
     pub uplink_mtu: Option<u32>,
     /// The family a peer dials `endpoint` over, when `endpoint` is a hostname; IPv6 when unset. An
@@ -267,21 +199,15 @@ pub struct MeshTopology {
 
 #[derive(Deserialize, Debug, PartialEq)]
 pub struct MeshLink {
-    /// Exactly two node names, referencing `nodes[].name`. Order doesn't carry addressing
-    /// significance (same as the old schema) - only used to derive a deterministic interface name/
-    /// link-local address, see `render.rs`.
+    /// Two names of `nodes`; their order carries no meaning.
     pub pair: [String; 2],
-    /// Shared UDP port, both ends - always explicit, never generated: a port is an operator
-    /// decision, not state this tool invents.
+    /// The UDP port of both ends. Never generated: which port a link takes is the operator's
+    /// decision.
     pub port: u16,
     #[serde(default)]
     pub obfuscation: Obfuscation,
-    /// This link is plain WireGuard, no AmneziaWG obfuscation at all - for a peer that can't do
-    /// AmneziaWG's extensions (e.g. RouterOS, which only speaks stock WireGuard). Skips obfuscation
-    /// generation/resolution entirely rather than resolving to an all-fields-`None` `Obfuscation`
-    /// that then gets silently overwritten by a *future* run's random generation the moment nothing
-    /// else fills a field in - `secrets::resolve` checks this before even calling
-    /// `resolve_obfuscation`, so a plain link never round-trips through generation at all.
+    /// Stock WireGuard, no AmneziaWG obfuscation, for a peer that cannot speak AmneziaWG, such as
+    /// RouterOS. The link carries no obfuscation, whatever the topology's default says.
     #[serde(default)]
     pub plain: bool,
 }
@@ -291,8 +217,7 @@ pub struct MeshLink {
 #[serde(deny_unknown_fields)]
 pub struct RoadwarriorPool {
     pub name: String,
-    /// Which nodes terminate connections for this pool - each gets its own `InterfaceEntry` for
-    /// it, see `render.rs`.
+    /// The nodes that terminate the pool, each on an interface of its own.
     pub node_hostnames: Vec<String>,
     pub address: String,
     #[serde(default)]
@@ -300,22 +225,16 @@ pub struct RoadwarriorPool {
     pub listen_port: u16,
     #[serde(default)]
     pub handshake_stale_secs: Option<u64>,
-    /// Shared identity across every node in `node_hostnames` - same precedent as the old schema's
-    /// single roadwarriors device key, not per-node.
+    /// One identity for the pool on every node of `node_hostnames`.
     #[serde(default)]
     pub private_key: Option<PrivateKey>,
-    /// This pool is plain WireGuard, no AmneziaWG obfuscation at all - for clients that can't do
-    /// AmneziaWG's extensions (a phone/laptop running a stock WireGuard app, not the AmneziaWG
-    /// app). Same precedent and same reason as `MeshLink::plain`.
+    /// Stock WireGuard, for clients of a stock WireGuard app; as [`MeshLink::plain`].
     #[serde(default)]
     pub plain: bool,
     #[serde(default)]
     pub obfuscation: Obfuscation,
-    /// Client-side `DNS =` for this pool's exported configs - a client-local resolver setting,
-    /// never rendered into the server's own `awg` interface config (`render.rs` never reads this
-    /// field). `None` falls back to the cluster's own CoreDNS ClusterIP, derived from
-    /// `cluster.service_subnet` (the well-known `.10` convention kubeadm/most distros use) - see
-    /// `roadwarrior::resolve_dns`.
+    /// The `DNS =` of the pool's client configs; no server config carries it. Unset, a client gets
+    /// the cluster's CoreDNS address, `.10` of `cluster.service_subnet`.
     #[serde(default)]
     pub dns: Option<String>,
     #[serde(default)]
@@ -323,8 +242,8 @@ pub struct RoadwarriorPool {
 }
 
 /// A client is written down by one of its keys: `public_key` when its private key stays with the
-/// client, `private_key` when `rw-add --keep-private` kept it here - the public key is then derived
-/// from it, so the two can never disagree.
+/// client, `private_key` when the file keeps it - the public key is then derived from it, so the
+/// two cannot disagree.
 #[derive(Deserialize, Debug, PartialEq)]
 #[serde(try_from = "ClientEntry")]
 pub struct RoadwarriorClient {
@@ -379,8 +298,7 @@ impl TryFrom<ClientEntry> for RoadwarriorClient {
 
 #[derive(Deserialize, Debug, PartialEq)]
 pub struct BypassEntry {
-    /// References `nodes[].name` - bypass config is per-node, same as the old schema's
-    /// `BypassSource.spec.node`.
+    /// The node whose router config gets these lists.
     pub node: String,
     #[serde(default)]
     pub include: Vec<BypassSourceEntry>,
@@ -388,13 +306,10 @@ pub struct BypassEntry {
     pub exclude: Vec<BypassSourceEntry>,
 }
 
-/// Pure validation, no I/O: referential integrity across `slipmesh.yaml`'s own cross-references
-/// (`mesh.links[].pair`, `roadwarriors[].node_hostnames`, `bypass[].node` must all name real
-/// `nodes[].name` entries) plus structural invariants this generator's own rendering logic
-/// depends on (unique ports per node, non-empty `nodes`). Does **not** validate the
-/// awg/router config this would render into - `render.rs` computes that separately, and
-/// `patch_file.rs` runs `awg::config::validate`/`router::config::validate` on the *result*, which is the real, authoritative check that the daemons would actually accept
-/// it.
+/// The references across the topology - link pairs, pool nodes and bypass nodes name real nodes -
+/// and the invariants rendering relies on: distinct node names and `node_id`s, a port used once per
+/// node, a usable mesh prefix and egress protocol. The configs rendered from it are the daemons'
+/// checks to make.
 pub fn validate(cfg: &MeshConfig) -> anyhow::Result<()> {
     anyhow::ensure!(!cfg.nodes.is_empty(), "nodes must not be empty");
     let prefix = cfg.cluster.mesh_interface_prefix();
@@ -444,8 +359,6 @@ pub fn validate(cfg: &MeshConfig) -> anyhow::Result<()> {
     }
     let known_node = |name: &str| seen_node_names.contains(name);
 
-    // port -> set of node names already using it, so a port collision names both offending nodes,
-    // not just the second one seen.
     let mut ports_by_node: std::collections::HashMap<&str, HashSet<u16>> =
         std::collections::HashMap::new();
 
@@ -662,9 +575,7 @@ listen-port: 1
 
     #[test]
     fn rejects_duplicate_node_id() {
-        // Two distinct nodes sharing a node_id would silently collide onto the same loopback
-        // address and the same mesh interface name on any node linked to both - must fail here,
-        // not surface downstream as a confusing "duplicate interface name" from awg::config.
+        // Two nodes of one node_id would share a loopback address.
         let mut cfg: MeshConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
         cfg.nodes[1].node_id = cfg.nodes[0].node_id.clone();
         let err = validate(&cfg).unwrap_err();
