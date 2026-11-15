@@ -1,6 +1,7 @@
 //! The topology's secrets as `slipmesh.yaml` sets them: every node's mesh private key, every
-//! link's and pool's obfuscation, every pool's private key. They are read, never generated - a
-//! secret the file lacks is absent here, and rendering a config that needs it is refused.
+//! link's and pool's obfuscation, every pool's private key. They are read, never generated: a key
+//! the file lacks is absent here, every link and pool gets an obfuscation entry - empty when
+//! nothing is set or it is `plain` - and rendering a config that needs what is missing is refused.
 //!
 //! They are read once for the whole topology, not per node: a link's two ends need the same
 //! obfuscation, and rendering node A's config needs node B's private key to derive the public key

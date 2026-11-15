@@ -91,18 +91,21 @@ their checks only; reading and writing the files is `sliplib-yaml`'s.
 What a node's daemons are configured with, computed from the topology `sliplib-config` reads, for
 every tool that configures a node of any platform.
 
-- `secrets::read` takes the secrets the file sets: each node's mesh private key, each pool's
-  private key, and each link's and pool's obfuscation layered over the topology's. It never
-  creates one; a missing one is absent from `ResolvedSecrets`. `secrets::unminted` names the
-  fields an obfuscation lacks of those every link and pool that is not `plain` carries once its
-  secrets are minted - `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`.
+- `secrets::read` takes the secrets the file sets: each node's mesh private key, each pool's private
+  key, and each link's and pool's obfuscation layered over the topology's. It never creates one: a
+  key the file lacks is absent from `ResolvedSecrets`, while every link and pool gets an obfuscation
+  entry, empty when nothing is set or it is `plain`. `secrets::unminted` names the fields an
+  obfuscation lacks of those every link and pool that is not `plain` carries once its secrets are
+  minted - `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
   node checks it. It needs the node's own mesh key always; for each of its links, the peer's key
   and the link's obfuscation; for each pool on it, the pool's key and obfuscation. It refuses what
   of these is missing, or an obfuscation not `plain` that `unminted` finds fields in, naming what
-  lacks what; the secrets of nodes, links and pools the node is not on may be missing.
+  lacks what; it refuses nothing for the secrets of nodes, links and pools the node is not on.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
-  crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits.
+  crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits. It reads every
+  link's obfuscation through its `s4`, links the node is not on included; a missing entry counts as
+  no junk.
 - `addressing` gives a node's IPv4 loopback from its `node_id`, the link-local of a loopback, and
   an endpoint to dial.
 

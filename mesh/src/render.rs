@@ -857,9 +857,6 @@ mesh:
         assert_eq!(rw_iface.peers[0].name.as_deref(), Some("alice"));
     }
 
-    /// Same three states the metrics port has, on the router side: absent runs nothing, a port
-    /// binds this node's own v4 loopback, and zero is a mistake caught where it was written
-    /// rather than on every node at once.
     #[test]
     fn render_router_config_runs_the_exporter_only_on_a_configured_port() {
         let base = mesh_and_roadwarriors_yaml();
@@ -1179,10 +1176,10 @@ mesh:
             );
         let mesh: MeshConfig = sliplib_yaml::from_str(&yaml).unwrap();
         let mut resolved = resolved_for(&mesh);
-        resolved.mesh_private_keys.remove("c");
-        resolved.mesh_link_obfuscation.remove("a|c");
-        resolved.roadwarrior_private_keys.remove("north");
-        resolved.roadwarrior_obfuscation.remove("north");
+        assert!(resolved.mesh_private_keys.remove("c").is_some());
+        assert!(resolved.mesh_link_obfuscation.remove("a|c").is_some());
+        assert!(resolved.roadwarrior_private_keys.remove("north").is_some());
+        assert!(resolved.roadwarrior_obfuscation.remove("north").is_some());
         node_configs(&mesh, "b", &resolved).unwrap();
     }
 }
