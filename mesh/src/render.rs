@@ -209,6 +209,11 @@ fn mesh_interfaces_for(
         .mesh_private_keys
         .get(node_name)
         .with_context(|| format!("node {node_name:?}: mesh_private_key is not set"))?;
+    // The node's own key reaches its config as written and is decoded only on the node, where a
+    // refusal takes every mesh interface down.
+    own_private_key
+        .public_key()
+        .with_context(|| format!("node {node_name:?}: mesh_private_key"))?;
 
     let mtu = crate::mtu::mesh_mtu(mesh, resolved)?;
     let mut out = Vec::new();
@@ -245,7 +250,9 @@ fn mesh_interfaces_for(
             handshake_stale_secs: None,
             mtu,
             peers: vec![PeerEntry {
-                public_key: peer_private_key.public_key()?,
+                public_key: peer_private_key
+                    .public_key()
+                    .with_context(|| format!("node {peer_name:?}: mesh_private_key"))?,
                 name: Some(peer_name.clone()),
                 endpoint: peer_node
                     .endpoint
@@ -954,6 +961,32 @@ mesh:
         says(
             &refusal(&mesh, &resolved, "a"),
             &["node \"b\"", "mesh_private_key"],
+        );
+    }
+
+    #[test]
+    fn a_node_whose_own_key_does_not_decode_is_refused_naming_it_and_the_key() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        resolved
+            .mesh_private_keys
+            .insert("c".to_owned(), "not a key".into());
+        says(
+            &refusal(&mesh, &resolved, "c"),
+            &["node \"c\": mesh_private_key"],
+        );
+    }
+
+    #[test]
+    fn a_node_whose_peers_key_does_not_decode_is_refused_naming_the_peer_and_the_key() {
+        let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
+        let mut resolved = resolved_for(&mesh);
+        resolved
+            .mesh_private_keys
+            .insert("b".to_owned(), "not a key".into());
+        says(
+            &refusal(&mesh, &resolved, "a"),
+            &["node \"b\": mesh_private_key"],
         );
     }
 
