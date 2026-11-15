@@ -47,44 +47,7 @@ impl Minted {
 /// for why that only ever fills in the "original nine" fields - and returns the fields generated,
 /// `None` when there were none.
 fn mint_obfuscation(obfuscation: &mut Obfuscation) -> Option<Obfuscation> {
-    let fresh = obfuscation_gen::generate();
-    let mut generated = Obfuscation::default();
-    macro_rules! field {
-        ($($f:ident),*) => {
-            $(if obfuscation.$f.is_none() {
-                generated.$f = fresh.$f.clone();
-                obfuscation.$f = fresh.$f.clone();
-            })*
-        };
-    }
-    field!(
-        jc,
-        jmin,
-        jmax,
-        s1,
-        s2,
-        s3,
-        s4,
-        h1,
-        h2,
-        h3,
-        h4,
-        i1,
-        i2,
-        i3,
-        i4,
-        i5,
-        header_protection_key,
-        content_padding_addition,
-        rekey_after_time,
-        rekey_timeout,
-        reject_after_time,
-        keepalive_timeout,
-        max_handshake_attempts,
-        random_trailers,
-        disable_cookies
-    );
-    (generated != Obfuscation::default()).then_some(generated)
+    secrets::fill(obfuscation, &obfuscation_gen::generate())
 }
 
 /// The secrets `topology` sets, with the rest generated. A `plain` link or pool gets no

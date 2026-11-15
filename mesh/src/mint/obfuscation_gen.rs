@@ -7,8 +7,8 @@
 //! safe default exists for them, and `header_protection_key` specifically must match between both
 //! ends of a link, which a per-node independent random draw cannot guarantee on its own.
 
+use crate::secrets::Fresh;
 use rand::{Rng, RngExt};
-use sliplib_config::Obfuscation;
 
 /// From 5 up, the floor the kernel module's README recommends: 1..4 are WireGuard's own message
 /// types, `sliplib_config::DEFAULT_MAGIC_HEADERS`, which amneziawg-tools' generator avoids too.
@@ -25,7 +25,7 @@ fn random_magic_headers(rng: &mut impl Rng) -> [u32; 4] {
 
 /// Every range is the recommended one from the kernel module's README. The s1/s2 floor of 15
 /// also leaves room for the 12-byte header protection nonce, should `slipmesh.yaml` set a key.
-pub fn generate() -> Obfuscation {
+pub fn generate() -> Fresh {
     let mut rng = rand::rng();
     let jmin: u16 = rng.random_range(10..=100);
     let jmax: u16 = jmin + rng.random_range(1..=900);
@@ -38,34 +38,35 @@ pub fn generate() -> Obfuscation {
         }
     };
     let [h1, h2, h3, h4] = random_magic_headers(&mut rng);
-    Obfuscation {
-        jc: Some(rng.random_range(4..=12)),
-        jmin: Some(jmin),
-        jmax: Some(jmax),
-        s1: Some(s1),
-        s2: Some(s2),
-        h1: Some(h1),
-        h2: Some(h2),
-        h3: Some(h3),
-        h4: Some(h4),
-        ..Obfuscation::default()
+    Fresh {
+        jc: rng.random_range(4..=12),
+        jmin,
+        jmax,
+        s1,
+        s2,
+        h1,
+        h2,
+        h3,
+        h4,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secrets;
+    use sliplib_config::Obfuscation;
 
     #[test]
     fn generates_jmin_less_than_jmax() {
         let o = generate();
-        assert!(o.jmin.unwrap() < o.jmax.unwrap());
+        assert!(o.jmin < o.jmax);
     }
 
     #[test]
     fn generates_four_distinct_magic_headers_avoiding_reserved_message_types() {
         let o = generate();
-        let headers = [o.h1.unwrap(), o.h2.unwrap(), o.h3.unwrap(), o.h4.unwrap()];
+        let headers = [o.h1, o.h2, o.h3, o.h4];
         for h in headers {
             assert!(!sliplib_config::DEFAULT_MAGIC_HEADERS.contains(&h));
         }
@@ -81,53 +82,19 @@ mod tests {
     fn generates_values_in_the_documented_ranges() {
         for _ in 0..2000 {
             let o = generate();
-            assert!((4..=12).contains(&o.jc.unwrap()), "{o:?}");
+            assert!((4..=12).contains(&o.jc), "{o:?}");
+            assert!(o.jmin < o.jmax && o.jmax <= 1280, "{o:?}");
             assert!(
-                o.jmin.unwrap() < o.jmax.unwrap() && o.jmax.unwrap() <= 1280,
+                (15..=150).contains(&o.s1) && (15..=150).contains(&o.s2),
                 "{o:?}"
             );
-            let (s1, s2) = (o.s1.unwrap(), o.s2.unwrap());
-            assert!(
-                (15..=150).contains(&s1) && (15..=150).contains(&s2),
-                "{o:?}"
-            );
-            assert_ne!(s1 + 56, s2, "{o:?}");
+            assert_ne!(o.s1 + 56, o.s2, "{o:?}");
             for h in [o.h1, o.h2, o.h3, o.h4] {
-                assert!((5..=2_147_483_647).contains(&h.unwrap()), "{o:?}");
+                assert!((5..=2_147_483_647).contains(&h), "{o:?}");
             }
-            o.validate().unwrap();
+            let mut filled = Obfuscation::default();
+            secrets::fill(&mut filled, &o);
+            filled.validate().unwrap();
         }
-    }
-
-    #[test]
-    fn leaves_amneziawg_3_0_fields_unset() {
-        let o = generate();
-        assert_eq!(o.s3, None);
-        assert_eq!(o.s4, None);
-        assert_eq!(o.i1, None);
-        assert_eq!(o.header_protection_key, None);
-        assert_eq!(o.content_padding_addition, None);
-    }
-
-    /// A rendered link or pool is refused unless it carries every minted field, so what is
-    /// generated has to be that set: anything less is refused, anything more is a field no one
-    /// asked for.
-    #[test]
-    fn generates_exactly_the_fields_a_minted_obfuscation_carries() {
-        let o = generate();
-        assert!(crate::secrets::unminted(&o).is_empty(), "{o:?}");
-        let minted_only = Obfuscation {
-            jc: o.jc,
-            jmin: o.jmin,
-            jmax: o.jmax,
-            s1: o.s1,
-            s2: o.s2,
-            h1: o.h1,
-            h2: o.h2,
-            h3: o.h3,
-            h4: o.h4,
-            ..Obfuscation::default()
-        };
-        assert_eq!(o, minted_only);
     }
 }
