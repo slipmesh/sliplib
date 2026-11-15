@@ -222,16 +222,3 @@ impl<'de, K: DeserializeSeed<'de>> Visitor<'de> for KeySeed<'_, '_, K> {
 pub fn join(documents: &[String]) -> String {
     documents.join("---\n")
 }
-
-/// `text` with `documents` added after its last line.
-pub fn append(text: &str, documents: &[String]) -> String {
-    let mut out = text.to_owned();
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
-    }
-    for document in documents {
-        out.push_str("---\n");
-        out.push_str(document);
-    }
-    out
-}

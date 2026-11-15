@@ -329,14 +329,6 @@ impl SlipmeshFile {
             .collect()
     }
 
-    /// Whether a `patch` document, for whichever hosts, sets the file `mount_path` of
-    /// `ExtensionServiceConfig` `service`.
-    pub fn sets_file(&self, service: &str, mount_path: &str) -> bool {
-        self.patches
-            .iter()
-            .any(|p| talos::sets_file(&p.value, service, mount_path))
-    }
-
     fn ensure_host(&self, host: &str) -> Result<()> {
         ensure!(
             self.hosts.iter().any(|h| h == host),
@@ -783,13 +775,5 @@ name: {name}
         let parsed = SlipmeshFile::parse(NETWORK).unwrap();
         assert!(parsed.effective_for("node-x").is_err());
         assert!(parsed.patches_for("node-x").is_err());
-    }
-
-    #[test]
-    fn a_file_is_set_only_by_a_patch_that_sets_it() {
-        let parsed = SlipmeshFile::parse(&file(&[NETWORK, &ruleset("", "t")])).unwrap();
-        assert!(parsed.sets_file("nftables", crate::nftables::TEMPLATE_PATH));
-        assert!(!parsed.sets_file("nftables", "/etc/talos-extensions/other.conf"));
-        assert!(!parsed.sets_file("router", crate::nftables::TEMPLATE_PATH));
     }
 }

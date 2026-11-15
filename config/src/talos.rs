@@ -92,17 +92,6 @@ pub struct ConfigFile {
     pub content: String,
 }
 
-/// Whether `document` is the `ExtensionServiceConfig` of `service` and sets its file `mount_path`.
-pub fn sets_file(document: &Value, service: &str, mount_path: &str) -> bool {
-    Identity::of(document).is_extension_service(service)
-        && document
-            .get("configFiles")
-            .and_then(Value::as_sequence)
-            .into_iter()
-            .flatten()
-            .any(|f| f.get("mountPath").and_then(Value::as_str) == Some(mount_path))
-}
-
 /// Replaces each `configFiles[].content` of `document` written as a mapping or a list with that
 /// YAML's text: Talos takes only a string there.
 pub fn contents_as_text(document: &mut Value) -> Result<()> {

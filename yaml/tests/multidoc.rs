@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use sliplib_yaml::{MultiDoc, Value, append, join};
+use sliplib_yaml::{MultiDoc, Value, join};
 
 #[test]
 fn documents_keep_their_position_and_line_and_comment_only_ones_are_skipped() {
@@ -87,10 +87,4 @@ fn documents_join_into_one_text() {
         join(&["a: 1\n".into(), "b: 2\n".into()]),
         "a: 1\n---\nb: 2\n"
     );
-}
-
-#[test]
-fn documents_append_after_the_last_line() {
-    assert_eq!(append("a: 1", &["b: 2\n".into()]), "a: 1\n---\nb: 2\n");
-    assert_eq!(append("a: 1\n", &["b: 2\n".into()]), "a: 1\n---\nb: 2\n");
 }
