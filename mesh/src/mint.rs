@@ -274,7 +274,7 @@ roadwarriors:
         for node in &mut topology.nodes {
             node.mesh_private_key = Some(PrivateKey::generate());
         }
-        topology.mesh.links[0].plain = true;
+        topology.mesh.links[0].obfuscation = crate::test_support::minted_obfuscation();
         for pool in &mut topology.roadwarriors {
             pool.private_key = Some(PrivateKey::generate());
         }

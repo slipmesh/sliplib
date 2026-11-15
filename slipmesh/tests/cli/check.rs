@@ -131,6 +131,11 @@ fn a_key_that_does_not_decode_is_refused_on_its_owners_line_and_its_peers() {
             &["for node \"c\"", not_a_key],
         ],
     );
+    assert!(
+        !checked.stderr.contains("slipmesh mint"),
+        "{}",
+        checked.stderr
+    );
 }
 
 #[test]
@@ -215,27 +220,45 @@ fn pool(settings: &str) -> String {
 }
 
 #[test]
-fn a_refusal_for_a_secret_the_file_lacks_names_the_command_that_creates_it() {
+fn a_refusal_for_a_secret_the_file_lacks_names_it_and_the_command_that_creates_it() {
     let keyed = format!("private_key: \"{}\"\n", PrivateKey::generate().expose());
-    let cases = [
-        ("the node's own key", network("", &["a"]), 1),
-        ("a peer's key", network("", &["c"]), 2),
+    let link = "mesh link b-c: obfuscation lacks";
+    let cases: [(&str, String, &[&str]); 5] = [
+        (
+            "the node's own key",
+            network("", &["a"]),
+            &["node \"a\": mesh_private_key is not set"],
+        ),
+        (
+            "a peer's key",
+            network("", &["c"]),
+            &[
+                "node \"c\": mesh_private_key is not set",
+                "node \"c\": mesh_private_key is not set",
+            ],
+        ),
         (
             "a link's obfuscation",
             network("", &[]).replace(&format!(", obfuscation: {OBFUSCATION}"), ""),
-            2,
+            &[link, link],
         ),
-        ("a pool's key", network("", &[]) + &pool("plain: true\n"), 1),
-        ("a pool's obfuscation", network("", &[]) + &pool(&keyed), 1),
+        (
+            "a pool's key",
+            network("", &[]) + &pool("plain: true\n"),
+            &["roadwarriors pool \"north\": private_key is not set"],
+        ),
+        (
+            "a pool's obfuscation",
+            network("", &[]) + &pool(&keyed),
+            &["roadwarriors pool \"north\": obfuscation lacks"],
+        ),
     ];
-    for (lacking, content, refused) in cases {
+    for (lacking, content, missing) in cases {
         let (checked, _) = check(&content);
         assert_eq!(checked.code, Some(1), "{lacking}");
-        let refusals: Vec<&str> = checked.stderr.lines().collect();
-        assert_eq!(refusals.len(), refused, "{lacking}: {}", checked.stderr);
-        for refusal in refusals {
-            assert!(refusal.contains("`slipmesh mint`"), "{lacking}: {refusal}");
-        }
+        let named: Vec<[&str; 2]> = missing.iter().map(|m| [*m, "`slipmesh mint`"]).collect();
+        let named: Vec<&[&str]> = named.iter().map(|n| &n[..]).collect();
+        refusals(&checked.stderr, &named);
     }
 }
 

@@ -11,7 +11,7 @@ fn documents(config: &Config) -> Vec<Value> {
 }
 
 #[test]
-fn rekey_gives_the_node_a_new_key_and_changes_nothing_else() {
+fn rekey_gives_the_node_a_new_key_and_changes_no_other_value() {
     let config = Config::holding(SLIPMESH);
     mint(&config);
     let before = documents(&config);
@@ -36,6 +36,20 @@ fn rekey_gives_the_node_a_new_key_and_changes_nothing_else() {
         "{}",
         ran.stdout
     );
+}
+
+#[test]
+fn rekey_gives_a_key_to_a_node_that_had_none_and_to_no_other() {
+    let config = Config::holding(SLIPMESH);
+    let ran = config.run(&["rekey", "--node", "c"]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    let keyed: Vec<bool> = documents(&config)[0]["nodes"]
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|node| node.get("mesh_private_key").is_some())
+        .collect();
+    assert_eq!(keyed, [false, false, true, false]);
 }
 
 #[test]
