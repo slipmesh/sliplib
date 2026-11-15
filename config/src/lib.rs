@@ -1,11 +1,14 @@
-//! The patch format: what the generator writes for a node and what reads it - Talos, the daemons
-//! on the node, and the RouterOS side. Types and their checks only; reading and writing files is
-//! `sliplib-yaml`'s.
+//! `slipmesh.yaml`, which every tool reads, and the patch format: what the generator writes for a
+//! node and what reads it - Talos, the daemons on the node, and the RouterOS side. Types and their
+//! checks only; reading and writing files is `sliplib-yaml`'s.
 
 pub mod awg;
+pub mod mesh_config;
 mod metrics;
+pub mod nftables;
 mod obfuscation;
 pub mod router;
+pub mod slipmesh_file;
 pub mod talos;
 
 pub use metrics::MetricsConfig;
