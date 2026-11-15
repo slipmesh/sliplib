@@ -1,8 +1,7 @@
 //! Random values for the minted fields of an AmneziaWG obfuscation: `jc`, `jmin`, `jmax`, `s1`,
 //! `s2` and `h1` to `h4`, the only parameters the kernel module's README gives a recommended range
-//! for. `s3`, `s4`, `i1` to `i5` and the timing knobs have no established safe default, and
-//! `header_protection_key` is a secret both ends share by other means, so none of them is ever
-//! generated.
+//! for. `s3`, `s4`, `i1` to `i5`, `header_protection_key` and the timing knobs have no established
+//! safe default, so none of them is ever generated.
 
 use crate::secrets::Fresh;
 use rand::{Rng, RngExt};

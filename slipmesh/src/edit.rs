@@ -96,7 +96,6 @@ fn write_obfuscation(owner: &mut Value, generated: &Obfuscation) -> Result<()> {
     Ok(())
 }
 
-/// Sets `key` of the mapping `entry` to `value`.
 fn set(entry: &mut Value, key: &str, value: Value) -> Result<()> {
     entry
         .as_mapping_mut()
@@ -105,7 +104,6 @@ fn set(entry: &mut Value, key: &str, value: Value) -> Result<()> {
     Ok(())
 }
 
-/// Document `index` of `yaml`, to edit.
 fn document(yaml: &mut MultiDoc, index: usize) -> Result<&mut Value> {
     yaml.document_mut(index)
         .with_context(|| format!("no document at position {index}"))

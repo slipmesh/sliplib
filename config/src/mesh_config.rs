@@ -20,9 +20,9 @@ pub struct BfdConfig {
     pub settings: BfdSettings,
 }
 
-pub const DEFAULT_MESH_INTERFACE_PREFIX: &str = "mesh-";
+pub(crate) const DEFAULT_MESH_INTERFACE_PREFIX: &str = "mesh-";
 
-pub const DEFAULT_EGRESS_ROUTE_PROTO_ID: u8 = 152;
+pub(crate) const DEFAULT_EGRESS_ROUTE_PROTO_ID: u8 = 152;
 
 /// Strict for the same reason `ClusterConfig` is.
 #[derive(Deserialize, Debug, Default, PartialEq)]

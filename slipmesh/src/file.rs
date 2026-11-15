@@ -5,7 +5,6 @@ use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_yaml::MultiDoc;
 use std::path::Path;
 
-/// `slipmesh.yaml`, parsed for editing, and read.
 pub fn read_slipmesh(config_path: &Path) -> Result<(MultiDoc, SlipmeshFile)> {
     let yaml = MultiDoc::read(config_path)?;
     let file =
