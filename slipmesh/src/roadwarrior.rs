@@ -617,6 +617,16 @@ roadwarriors:
     }
 
     #[test]
+    fn add_keeps_the_generated_private_key_in_the_entry_only_when_asked() {
+        let exported = add_to_plain(None, true, false).unwrap();
+        assert!(exported.client.private_key.is_none());
+
+        let kept = add_to_plain(None, false, true).unwrap();
+        let private = kept.client.private_key.unwrap();
+        assert_eq!(private.public_key().unwrap(), kept.client.public_key);
+    }
+
+    #[test]
     fn render_qr_invert_actually_swaps_dark_and_light() {
         let normal = render_qr("[Interface]\nPrivateKey = x\n", false).unwrap();
         let inverted = render_qr("[Interface]\nPrivateKey = x\n", true).unwrap();
