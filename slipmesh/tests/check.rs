@@ -133,6 +133,25 @@ fn a_link_without_its_obfuscation_refuses_both_its_ends_naming_the_link() {
 }
 
 #[test]
+fn a_key_that_does_not_decode_is_refused_on_its_owners_line_and_its_peers() {
+    let content = network("", &["b"]).replace(
+        "endpoint: \"192.0.2.2\"}",
+        "endpoint: \"192.0.2.2\", mesh_private_key: \"not a key\"}",
+    );
+    let (checked, _) = check(&content);
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stdout, "a: ok\nd: ok\n");
+    let not_a_key = "node \"b\": mesh_private_key: key is not valid base64";
+    refusals(
+        &checked.stderr,
+        &[
+            &["for node \"b\"", not_a_key],
+            &["for node \"c\"", not_a_key],
+        ],
+    );
+}
+
+#[test]
 fn a_file_with_a_setting_the_loader_does_not_know_is_one_refusal_naming_the_file() {
     let (checked, path) = check(&network("  no_such_setting: 1\n", &[]));
     assert_eq!(checked.code, Some(1));
