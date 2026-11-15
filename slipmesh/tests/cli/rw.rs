@@ -1,4 +1,5 @@
 use crate::common::{Config, SLIPMESH, mint, topology};
+use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{MultiDoc, Value};
 
 const POOLS: &str = r#"---
@@ -124,25 +125,65 @@ fn rw_add_to_an_unknown_pool_names_the_pools_there_are() {
     );
 }
 
+/// A pool on node `a` named `lone`, with `settings` after its required ones.
+fn lone_pool(settings: &str) -> String {
+    format!(
+        "---\nslipmesh:\n  kind: roadwarriors\nname: lone\nnode_hostnames: [a]\naddress: \"203.0.113.65/27\"\nlisten_port: 51902\n{settings}"
+    )
+}
+
 #[test]
-fn rw_add_writes_down_the_pool_key_its_exported_config_was_built_with() {
-    // A pool key that went into the exported config but not into slipmesh.yaml would be minted
-    // anew by the next `mint`, and the exported config would never connect.
+fn rw_add_to_a_pool_without_its_key_or_obfuscation_is_refused_and_writes_nothing() {
+    let keyed = format!("private_key: \"{}\"\n", PrivateKey::generate().expose());
+    for (lacking, settings) in [("its key", "plain: true\n"), ("its obfuscation", &keyed)] {
+        let config = Config::holding(&format!("{SLIPMESH}{}", lone_pool(settings)));
+        let before = config.text();
+        for how in [&["--export"][..], &["--public-key", "DDD="][..]] {
+            let ran = config.run(
+                &[
+                    &["rw", "add", "--if", "lone", "--name", "dave"][..],
+                    &["--allowed-ips", "203.0.113.70"][..],
+                    how,
+                ]
+                .concat(),
+            );
+            assert_eq!(ran.code, Some(1), "{lacking}");
+            assert!(
+                ran.stderr.contains("\"lone\"") && ran.stderr.contains("`slipmesh mint`"),
+                "{lacking}: {}",
+                ran.stderr
+            );
+            assert_eq!(ran.stdout, "", "{lacking}");
+            assert_eq!(config.text(), before, "{lacking}");
+        }
+    }
+}
+
+#[test]
+fn rw_add_creates_nothing_but_the_clients_own_key() {
     let config = pools();
+    mint(&config);
+    let mut unkeyed = MultiDoc::parse(&config.text()).unwrap();
+    unkeyed.document_mut(0).unwrap()["nodes"]
+        .as_sequence_mut()
+        .unwrap()
+        .push(sliplib_yaml::from_str("{name: e, node_id: \"198.51.100.5\"}").unwrap());
+    std::fs::write(&config.path, unkeyed.text().unwrap()).unwrap();
+    let (before, first) = documents_and_pool(&config, "first");
+
     let ran = add_dave(&config, &["--export"]);
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
 
-    let written = topology(&config);
-    let pool_key = written.roadwarriors[0].private_key.as_ref().unwrap();
-    assert_eq!(written.roadwarriors[0].clients[0].name, "dave");
-    mint(&config);
-    let after = topology(&config);
-    assert_eq!(after.roadwarriors[0].private_key.as_ref(), Some(pool_key));
+    let (after, _) = documents_and_pool(&config, "first");
+    only_edited(&before, &after, first);
+    assert_eq!(client_names(&after[first]), ["dave"]);
+    assert!(!ran.stdout.contains("minted"), "{}", ran.stdout);
 }
 
 #[test]
 fn rw_add_keeping_the_private_key_lets_rw_inspect_render_the_config_in_full() {
     let config = pools();
+    mint(&config);
     let ran = add_dave(&config, &["--keep-private"]);
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
 

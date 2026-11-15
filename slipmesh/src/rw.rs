@@ -8,8 +8,8 @@ use clap::Subcommand;
 use sliplib_config::mesh_config;
 use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_mesh::mint;
+use sliplib_mesh::secrets::ResolvedSecrets;
 use sliplib_secrets::wireguard::PrivateKey;
-use sliplib_yaml::MultiDoc;
 use std::path::{Path, PathBuf};
 
 #[derive(Subcommand)]
@@ -155,9 +155,7 @@ fn rw_add(
     let (mut yaml, file) = read_slipmesh(config_path)?;
     let topology = file.topology();
     let document = pool_document(&file, topology, if_)?;
-    // Minted and written in along with the client: a pool key minted for the exported config has
-    // to be the one `generate` puts on the wire, not a key that dies with this process.
-    let (secrets, minted) = settle_secrets(&mut yaml, &file)?;
+    let secrets = written_secrets(topology, if_, config_path)?;
 
     let added = roadwarrior::add(
         topology,
@@ -173,7 +171,6 @@ fn rw_add(
     )?;
     edit::add_client(&mut yaml, document, &added.client)?;
     write_edits(config_path, &yaml)?;
-    report_minted(&minted, config_path);
     println!(
         "added {name:?} to roadwarriors pool {if_:?} in {}",
         config_path.display()
@@ -219,13 +216,7 @@ fn rw_inspect(
 ) -> Result<()> {
     let (_, file) = read_slipmesh(config_path)?;
     let topology = file.topology();
-    let (secrets, minted) = mint::resolve(topology);
-    // Only this pool's: a config rendered with a key that is never written down would not connect.
-    anyhow::ensure!(
-        !minted.pools.iter().any(|pool| pool.name == if_),
-        "{} lacks the secrets of pool {if_:?} - `slipmesh mint` creates and writes them",
-        config_path.display()
-    );
+    let secrets = written_secrets(topology, if_, config_path)?;
 
     let text = roadwarrior::inspect(topology, &secrets, if_, name, private_key, endpoint)?;
 
@@ -252,19 +243,19 @@ fn pool_document(
         .with_context(|| format!("pool {name:?} is in the topology but in no document"))
 }
 
-/// The whole topology's secrets, with whatever they had to mint recorded in `yaml`, in the fields
-/// it belongs to, and named in the second value - empty when nothing was minted.
-fn settle_secrets(
-    yaml: &mut MultiDoc,
-    file: &SlipmeshFile,
-) -> Result<(sliplib_mesh::secrets::ResolvedSecrets, String)> {
-    let (resolved, minted) = mint::resolve(file.topology());
-    edit::record(yaml, file, &minted)?;
-    Ok((resolved, minted.routes().join(", ")))
-}
-
-fn report_minted(routes: &str, config_path: &Path) {
-    if !routes.is_empty() {
-        println!("minted {routes} into {}", config_path.display());
-    }
+/// The secrets `topology` has written, once the key and the obfuscation of pool `name` are among
+/// them. Only that pool's: a client config built with a secret that is not written down would
+/// connect to nothing, and no other secret goes into it.
+fn written_secrets(
+    topology: &mesh_config::MeshConfig,
+    name: &str,
+    config_path: &Path,
+) -> Result<ResolvedSecrets> {
+    let (_, minted) = mint::resolve(topology);
+    anyhow::ensure!(
+        !minted.pools.iter().any(|pool| pool.name == name),
+        "{} lacks the secrets of pool {name:?} - `slipmesh mint` creates and writes them",
+        config_path.display()
+    );
+    Ok(sliplib_mesh::secrets::read(topology))
 }
