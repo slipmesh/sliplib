@@ -55,17 +55,44 @@ fn slipmesh() -> Command {
     Command::new(env!("CARGO_BIN_EXE_slipmesh"))
 }
 
-/// `slipmesh check` of a file holding `content`, the path given as the last argument.
+fn check_at(path: &Path) -> Checked {
+    slipmesh()
+        .args(["check", "--config"])
+        .arg(path)
+        .output()
+        .unwrap()
+        .into()
+}
+
+fn names_in(dir: &Path) -> Vec<std::ffi::OsString> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect()
+}
+
+/// What `check` gives for a file holding `content`, and the file's path. Whatever it gives, it
+/// has left the file as it was and nothing beside it.
 fn check(content: &str) -> (Checked, String) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("network.yaml");
     std::fs::write(&path, content).unwrap();
-    let output = slipmesh()
-        .args(["check", "--config"])
-        .arg(&path)
-        .output()
-        .unwrap();
-    (output.into(), path.display().to_string())
+    let checked = check_at(&path);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
+    assert_eq!(names_in(dir.path()), ["network.yaml"]);
+    (checked, path.display().to_string())
+}
+
+/// The lines of `stderr`, each of which has to name every one of `named` in its place.
+fn refusals<'a>(stderr: &'a str, named: &[&[&str]]) -> Vec<&'a str> {
+    let refusals: Vec<&str> = stderr.lines().collect();
+    assert_eq!(refusals.len(), named.len(), "{stderr}");
+    for (refusal, parts) in refusals.iter().zip(named) {
+        for part in *parts {
+            assert!(refusal.contains(part), "{part:?} missing from: {refusal}");
+        }
+    }
+    refusals
 }
 
 #[test]
@@ -81,23 +108,55 @@ fn every_refused_node_is_reported_and_the_others_still_pass() {
     let (checked, _) = check(&network("", &["a", "d"]));
     assert_eq!(checked.code, Some(1));
     assert_eq!(checked.stdout, "b: ok\nc: ok\n");
-    let refusals: Vec<&str> = checked.stderr.lines().collect();
-    assert_eq!(refusals.len(), 2, "{}", checked.stderr);
-    for (refusal, node) in refusals.iter().zip(["\"a\"", "\"d\""]) {
-        assert!(refusal.contains(node), "{refusal}");
-        assert!(refusal.contains("mesh_private_key"), "{refusal}");
-    }
+    refusals(
+        &checked.stderr,
+        &[
+            &["for node \"a\"", "node \"a\": mesh_private_key"],
+            &["for node \"d\"", "node \"d\": mesh_private_key"],
+        ],
+    );
 }
 
 #[test]
-fn a_file_that_does_not_parse_is_one_refusal_naming_the_file() {
+fn a_link_without_its_obfuscation_refuses_both_its_ends_naming_the_link() {
+    let content = network("", &[]).replace(&format!(", obfuscation: {OBFUSCATION}"), "");
+    let (checked, _) = check(&content);
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stdout, "a: ok\nd: ok\n");
+    refusals(
+        &checked.stderr,
+        &[
+            &["for node \"b\"", "mesh link b-c: obfuscation"],
+            &["for node \"c\"", "mesh link b-c: obfuscation"],
+        ],
+    );
+}
+
+#[test]
+fn a_file_with_a_setting_the_loader_does_not_know_is_one_refusal_naming_the_file() {
     let (checked, path) = check(&network("  no_such_setting: 1\n", &[]));
     assert_eq!(checked.code, Some(1));
     assert_eq!(checked.stdout, "");
-    let refusals: Vec<&str> = checked.stderr.lines().collect();
-    assert_eq!(refusals.len(), 1, "{}", checked.stderr);
-    assert!(refusals[0].contains(&path), "{}", refusals[0]);
-    assert!(refusals[0].contains("no_such_setting"), "{}", refusals[0]);
+    refusals(&checked.stderr, &[&[&path, "no_such_setting"]]);
+}
+
+#[test]
+fn a_file_that_is_not_yaml_is_one_refusal_naming_the_file() {
+    let (checked, path) = check("nodes: [unclosed\n");
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stdout, "");
+    refusals(&checked.stderr, &[&[&path]]);
+}
+
+#[test]
+fn a_file_that_is_not_there_is_one_refusal_naming_the_path_and_is_not_created() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("absent.yaml");
+    let checked = check_at(&path);
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stdout, "");
+    refusals(&checked.stderr, &[&[&path.display().to_string()]]);
+    assert!(names_in(dir.path()).is_empty());
 }
 
 #[test]

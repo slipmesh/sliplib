@@ -8,7 +8,6 @@ use sliplib_yaml::MultiDoc;
 use std::path::Path;
 use std::process::ExitCode;
 
-/// Every node of the file at `config_path`, in its order, with what refuses its configs.
 fn nodes(config_path: &Path) -> Result<Vec<(String, Result<()>)>> {
     let file = SlipmeshFile::read(&MultiDoc::read(config_path)?)
         .with_context(|| format!("reading {}", config_path.display()))?;
