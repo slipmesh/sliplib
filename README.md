@@ -38,10 +38,11 @@ word and the path after it:
 EDITOR="slipmesh mint --config"
 ```
 
-Writing anything rewrites the whole file from its values: comments outside block scalars, and
-documents of only comments, are not kept, and the layout becomes that of the YAML serializer. So
-the first write to a file written by hand changes most of its lines; [`fmt`](#fmt) makes that
-change alone. A command with nothing to write leaves the file as it is.
+Writing anything rewrites the whole file from its values, in the layout of the YAML serializer.
+Comments outside block scalars are not kept; a document that holds nothing - only comments, empty,
+or `~` - is dropped; an anchor and its aliases are written out as independent copies. So the first
+write to a file written by hand changes most of its lines; [`fmt`](#fmt) makes that change alone.
+A command with nothing to write leaves the file as it is.
 
 ### `check`
 
@@ -85,8 +86,9 @@ The file holds private keys in the clear; keep it where such files are kept.
 
 `fmt` rewrites the file in the form every writing command leaves it in and changes no value: it
 reads the text it is about to write and refuses to write it if any document's values differ from
-the file's. What a hand-written file loses is its layout, its comments outside block scalars and
-its documents of only comments. Committed on its own, that rewrite keeps a later `rekey` or
+the file's. What a hand-written file loses is its layout, its comments outside block scalars, its
+documents that hold nothing - only comments, empty, or `~` - and the link between an anchor and its
+aliases, each of which becomes a copy. Committed on its own, that rewrite keeps a later `rekey` or
 `rw add` down to the lines it edits. A file already in that form is not touched, and one that does
 not read is refused as it is. One line says whether the file was rewritten.
 

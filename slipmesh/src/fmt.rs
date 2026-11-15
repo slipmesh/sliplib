@@ -2,12 +2,11 @@
 //! the reformatting of a hand-written file can be a change of its own and a later edit shows as
 //! that edit alone.
 
-use crate::file::{read_slipmesh, write_edits};
+use crate::file::{parse_slipmesh, read_text, write_text};
 use anyhow::Result;
 use sliplib_yaml::{MultiDoc, Value};
 use std::path::Path;
 
-/// Whether `rewritten` holds, document by document, the values of `original`.
 fn holds_the_values_of(rewritten: &str, original: &MultiDoc) -> Result<bool> {
     let rewritten = MultiDoc::parse(rewritten)?;
     let values = |yaml: &MultiDoc| -> Vec<Value> {
@@ -17,20 +16,21 @@ fn holds_the_values_of(rewritten: &str, original: &MultiDoc) -> Result<bool> {
 }
 
 pub fn run(config_path: &Path) -> Result<()> {
-    let (yaml, _) = read_slipmesh(config_path)?;
+    let original = read_text(config_path)?;
+    let (yaml, _) = parse_slipmesh(config_path, &original)?;
     let rewritten = yaml.text()?;
     let path = config_path.display();
-    if rewritten == sliplib_yaml::read_or_empty(config_path)? {
+    if rewritten == original {
         println!("{path}: already in the form slipmesh writes");
         return Ok(());
     }
-    // The one promise of this command, so it is checked on the text about to be written rather
-    // than taken from the serializer.
+    // The one promise of this command, so it is checked on the very text that is then written
+    // rather than taken from the serializer.
     anyhow::ensure!(
         holds_the_values_of(&rewritten, &yaml)?,
         "{path}: rewriting it would change a value - not written"
     );
-    write_edits(config_path, &yaml)?;
+    write_text(config_path, &rewritten)?;
     println!("rewrote {path} in the form slipmesh writes");
     Ok(())
 }
@@ -51,7 +51,7 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_value_a_lost_document_or_another_order_is_not_held() {
+    fn a_changed_value_a_lost_document_or_documents_in_another_order_are_not_held() {
         assert!(!holds("a:\n  b: 2\n---\nc:\n- 2\n- 3\n"));
         assert!(!holds("a:\n  b: 1\n"));
         assert!(!holds("c:\n- 2\n- 3\n---\na:\n  b: 1\n"));
