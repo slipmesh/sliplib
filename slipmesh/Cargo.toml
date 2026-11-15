@@ -1,0 +1,20 @@
+[package]
+name = "slipmesh"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "The tool for slipmesh.yaml itself: checks the whole file the way the tools that configure its nodes read it"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+sliplib-config.workspace = true
+sliplib-mesh.workspace = true
+sliplib-yaml.workspace = true
+
+[dev-dependencies]
+sliplib-secrets.workspace = true
+tempfile.workspace = true
