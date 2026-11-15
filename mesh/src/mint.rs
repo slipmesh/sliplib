@@ -1,10 +1,10 @@
-//! The topology's secrets, with whatever `slipmesh.yaml` leaves unset generated: every node's mesh
-//! private key, every link's and pool's obfuscation, every pool's private key. What was generated
-//! comes back as `Minted`, for the caller to write into the field it belongs to - the next run
-//! finds it there and generates nothing.
+//! The secrets `slipmesh.yaml` leaves unset, generated: a node's mesh private key, a link's or a
+//! pool's obfuscation, a pool's private key. What was generated comes back as `Minted`, for the
+//! caller to write into the field it belongs to - the next run finds it there and generates
+//! nothing.
 //!
-//! They are resolved once for the whole topology, not per node: a link's two ends need the same
-//! obfuscation, and rendering node A's config needs node B's private key.
+//! The whole topology at once, not per node: a link's two ends share one obfuscation, and a node's
+//! config needs its peers' keys.
 
 use crate::secrets::{self, link_key};
 use sliplib_config::Obfuscation;

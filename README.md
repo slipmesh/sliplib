@@ -98,19 +98,20 @@ slipmesh rw del --if plain --name laptop
 
 `rw add` generates the client's key pair, writes the public half into the pool and prints a
 ready-to-import config with `--export`, a QR code of it in the terminal with `--qr`; `--invert`
-swaps the code's dark and light for a terminal theme whose polarity a scanner refuses. The private key leaves
-the tool only in that config, so without `--export`, `--qr` or `--keep-private` it refuses to
+swaps the code's dark and light for a terminal theme whose polarity a scanner refuses. A generated
+private key goes into that config, or with `--keep-private` into the file, and nowhere else: with
+none of `--export`, `--qr` and `--keep-private` the key would be lost, and `rw add` refuses to
 generate one. `--public-key` registers a client that has its own key pair. `--allowed-ips` takes
 networks separated by commas; an address without a prefix length is that one host.
 
 With `--keep-private` the entry holds the private key in place of the public one, never both, and
 `rw inspect` renders the config in full from it. Without it, `rw inspect` leaves a placeholder for
 the key unless `--private-key` gives it back, and refuses one that is not the client's. `rw
-inspect` writes nothing.
+inspect` prints the config when neither `--export` nor `--qr` is given, and writes nothing.
 
-A client's config is built with the pool's own key and obfuscation, so both commands refuse a pool
-that has either not written yet: `mint` writes them. `rw add` creates nothing but the client's
-key pair.
+A pool whose key or obfuscation is not written takes no client and shows none: `rw add` and
+`rw inspect` refuse it, whatever else they were asked for, until `mint` has written them. Only that
+pool's secrets matter to them. `rw add` creates nothing but the client's key pair.
 
 The config's `Endpoint` is the first of the pool's `node_hostnames`, with the pool's
 `listen_port`. `--endpoint` picks another of them, or names anything else - a DNS name in front of

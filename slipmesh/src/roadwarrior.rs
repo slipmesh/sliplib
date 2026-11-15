@@ -407,7 +407,6 @@ roadwarriors:
         sliplib_yaml::from_str(fixture()).unwrap()
     }
 
-    /// What `mesh` has written, and a key for each pool that has none.
     fn secrets(mesh: &MeshConfig) -> ResolvedSecrets {
         let mut secrets = sliplib_mesh::secrets::read(mesh);
         for pool in &mesh.roadwarriors {
