@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.14.0] - 2026-11-15
+
+### Added ✨
+
+- Compute a node's awg and router configs (#36)
+
 ## [0.13.0] - 2026-11-15
 
 ### Added ✨
