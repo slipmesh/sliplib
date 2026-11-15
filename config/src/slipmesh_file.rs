@@ -405,8 +405,6 @@ extraArgs:
         }
     }
 
-    // The file as a whole.
-
     #[test]
     fn hosts_come_from_the_network_document_in_its_order() {
         let parsed = SlipmeshFile::parse(NETWORK).unwrap();
@@ -469,7 +467,10 @@ extraArgs:
             "  kind: network\n  include: [node-a]\n",
         );
         let err = error(&network);
-        assert!(err.contains("include"), "{err}");
+        assert!(
+            err.contains("the `kind: network` document at line 1: `include`"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -479,7 +480,10 @@ extraArgs:
             "  kind: roadwarriors\n  exclude: [node-b]\n",
         );
         let err = error(&file(&[NETWORK, &pool]));
-        assert!(err.contains("exclude"), "{err}");
+        assert!(
+            err.contains("the `kind: roadwarriors` document at line 11: `include`/`exclude`"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -517,8 +521,6 @@ extraArgs:
         );
         SlipmeshFile::parse(&network).unwrap();
     }
-
-    // What one host's patch file gets.
 
     #[test]
     fn a_patch_without_include_reaches_every_host() {
@@ -622,7 +624,10 @@ extraArgs:
             NETWORK,
             "slipmesh:\n  kind: patch\nmachine:\n  install: {disk: /dev/vda}\n",
         ]));
-        assert!(err.contains("kind"), "{err}");
+        assert!(
+            err.contains("the `kind: patch` document at line 11: has no Talos `kind`"),
+            "{err}"
+        );
     }
 
     fn generated_with(name: &str, body: &str) -> String {
@@ -674,8 +679,6 @@ name: {name}
         let err = error(&file(&[NETWORK, &patch]));
         assert!(err.contains("/etc/talos-extensions/router.yaml"), "{err}");
     }
-
-    // The model each host is rendered from.
 
     #[test]
     fn pools_are_gathered_in_file_order() {
@@ -737,6 +740,10 @@ name: {name}
             NETWORK,
             "slipmesh:\n  kind: nftables\nruleset: |\n  table inet t {}\n",
         ]));
+        assert!(
+            err.contains("the `kind: nftables` document at line 11"),
+            "{err}"
+        );
         assert!(err.contains("kind: patch"), "{err}");
         assert!(
             err.contains("/etc/talos-extensions/nftables.conf.j2"),

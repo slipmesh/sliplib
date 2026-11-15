@@ -476,6 +476,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sliplib-mesh"
+version = "0.13.0"
+dependencies = [
+ "anyhow",
+ "sliplib-config",
+ "sliplib-net",
+ "sliplib-secrets",
+ "sliplib-yaml",
+]
+
+[[package]]
 name = "sliplib-net"
 version = "0.13.0"
 dependencies = [
