@@ -756,4 +756,34 @@ name: {name}
         let topology = parsed.topology();
         assert_eq!(topology.roadwarriors.len(), 1);
     }
+
+    #[test]
+    fn the_network_document_is_found_by_its_position_in_the_file() {
+        let parsed = SlipmeshFile::parse(&file(&[KUBELET, NETWORK])).unwrap();
+        assert_eq!(parsed.network_document(), 1);
+    }
+
+    #[test]
+    fn every_host_sees_the_whole_topology() {
+        let parsed = SlipmeshFile::parse(&file(&[NETWORK, &pool("first", 51820)])).unwrap();
+        let effective = parsed.effective_for("node-b").unwrap();
+        assert_eq!(effective.roadwarriors.len(), 1);
+        assert_eq!(&effective, parsed.topology());
+        assert_eq!(parsed.into_topology(), effective);
+    }
+
+    #[test]
+    fn a_host_the_network_document_does_not_have_is_refused() {
+        let parsed = SlipmeshFile::parse(NETWORK).unwrap();
+        assert!(parsed.effective_for("node-x").is_err());
+        assert!(parsed.patches_for("node-x").is_err());
+    }
+
+    #[test]
+    fn a_file_is_set_only_by_a_patch_that_sets_it() {
+        let parsed = SlipmeshFile::parse(&file(&[NETWORK, &ruleset("", "t")])).unwrap();
+        assert!(parsed.sets_file("nftables", crate::nftables::TEMPLATE_PATH));
+        assert!(!parsed.sets_file("nftables", "/etc/talos-extensions/other.conf"));
+        assert!(!parsed.sets_file("router", crate::nftables::TEMPLATE_PATH));
+    }
 }

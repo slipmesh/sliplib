@@ -863,4 +863,11 @@ listen-port: 1
         });
         validate(&cfg).unwrap();
     }
+
+    #[test]
+    fn a_node_is_found_by_its_name_and_an_unknown_one_refused() {
+        let cfg: MeshConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
+        assert_eq!(cfg.node("b").unwrap().node_id, "198.51.100.2");
+        assert!(cfg.node("c").is_err());
+    }
 }
