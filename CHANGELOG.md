@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.15.0] - 2026-11-15
+
+### Added ✨
+
+- Add the slipmesh tool, which checks slipmesh.yaml (#40)
+
+### CI/CD ⚙️
+
+- Call the shared workflows at slipmesh/.github@v3.2.2 (#38)
+
+### Fixed 🐛
+
+- Name the node whose key does not decode (#39)
+
 ## [0.14.0] - 2026-11-15
 
 ### Added ✨
