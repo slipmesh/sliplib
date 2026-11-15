@@ -1,6 +1,6 @@
 use sliplib_config::talos::{
     ConfigFile, ExtensionServiceConfig, Identity, annotate, contents_as_text, is_kube_node_config,
-    kube_node_config, merge,
+    kube_node_config, merge, sets_file,
 };
 use sliplib_yaml::{Mapping, Value, from_str, to_value};
 
@@ -107,6 +107,23 @@ fn a_malformed_extension_service_config_is_an_error_naming_it() {
         ExtensionServiceConfig::find(&documents, "awg").unwrap_err()
     );
     assert!(err.contains("\"awg\""), "{err}");
+}
+
+#[test]
+fn a_document_sets_a_file_of_its_own_service_only() {
+    let documents = documents(PATCH);
+    assert!(sets_file(&documents[0], "awg", "/etc/node-a/extra.conf"));
+    assert!(!sets_file(&documents[0], "awg", "/etc/node-a/router.yaml"));
+    assert!(!sets_file(
+        &documents[0],
+        "router",
+        "/etc/node-a/extra.conf"
+    ));
+    assert!(!sets_file(
+        &documents[1],
+        "router",
+        "/etc/node-a/router.yaml"
+    ));
 }
 
 #[test]
