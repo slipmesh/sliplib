@@ -9,7 +9,7 @@ generator, the RouterOS tool and the Kubernetes operators.
 | [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and written back |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
-| [`sliplib-config`](config) | The patch format: Talos documents and the daemons' configs, with their checks |
+| [`sliplib-config`](config) | `slipmesh.yaml` and the patch format: the schema and its loader, Talos documents and the daemons' configs, with their checks |
 
 The crates are one workspace with one version and one tag. A change to one crate moves the tag for
 all of them; for a consumer of another crate that update changes nothing.
@@ -58,10 +58,19 @@ mean.
 
 ### `sliplib-config`
 
-The patch format: what the config generator writes for a node, and what its readers take - Talos,
-the daemons on the node, and the RouterOS tool. Types and their checks only; reading and writing
-the files is `sliplib-yaml`'s.
+`slipmesh.yaml`, which every tool reads, and the patch format: what the config generator writes for
+a node, and what its readers take - Talos, the daemons on the node, and the RouterOS tool. Types and
+their checks only; reading and writing the files is `sliplib-yaml`'s.
 
+- `slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a `MultiDoc`
+  (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
+  `roadwarriors` document, and `patch` documents aimed at hosts by `include`/`exclude`. It gives the
+  hosts in order, the topology, and the Talos documents of one host (`patches_for`), merged defaults
+  first. `GENERATED` names the `ExtensionServiceConfig`s generated from the network, which a patch
+  may only add files to.
+- `mesh_config`: the topology - `MeshConfig` with its cluster settings, nodes, mesh links,
+  roadwarriors pools and bypass entries - and `validate`, the checks across them.
+- `nftables::TEMPLATE_PATH`, where the `nftables` service reads its ruleset template.
 - `talos`: `Identity` is what Talos keys a document by (`apiVersion`, `kind`, `name`).
   `ExtensionServiceConfig` and `ConfigFile` build and find the document that mounts a service's
   files; `sets_file` says whether a document sets one of them, and `contents_as_text` turns a file's
