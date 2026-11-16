@@ -276,11 +276,11 @@ interfaces:
         );
         assert_eq!(
             cfg.interfaces[1].obfuscation.content_padding_addition,
-            Some(128)
+            Some(128.into())
         );
         assert_eq!(
             cfg.interfaces[1].obfuscation.max_handshake_attempts,
-            Some(90)
+            Some(90.into())
         );
         validate(&cfg).unwrap();
     }

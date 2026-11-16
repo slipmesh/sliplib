@@ -11,7 +11,7 @@ use std::path::Path;
 
 pub fn run(config_path: &Path) -> Result<()> {
     let (mut yaml, file) = read_slipmesh(config_path)?;
-    let minted = sliplib_mesh::mint::create(file.topology());
+    let minted = sliplib_mesh::mint::create(file.topology())?;
     edit::record(&mut yaml, &file, &minted)?;
     let unset = missing_defaults(file.topology());
     edit::write_defaults(&mut yaml, &file, &unset)?;

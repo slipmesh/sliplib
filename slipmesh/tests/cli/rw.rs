@@ -215,6 +215,39 @@ fn rw_add_and_rw_inspect_need_no_secret_but_their_own_pools() {
     assert_eq!(client_names(&documents[ready]), ["carol", "dave"]);
 }
 
+/// The file with a link `mint` cannot complete: its one written header leaves no value for the
+/// three it lacks.
+fn with_a_link_that_has_no_room_for_a_header(rest: &str) -> Config {
+    let network = SLIPMESH.replace(
+        "{pair: [a, b], port: 51820}",
+        "{pair: [a, b], port: 51820, obfuscation: {h1: 5-2147483647}}",
+    );
+    assert_ne!(network, SLIPMESH);
+    Config::holding(&format!("{network}{rest}"))
+}
+
+#[test]
+fn rw_add_and_rw_inspect_are_not_held_up_by_an_entry_mint_cannot_complete() {
+    let ready = pool("ready", 51903, &format!("plain: true\n{}", keyed()));
+    let config = with_a_link_that_has_no_room_for_a_header(&ready);
+
+    let ran = config.run(&["rw", "inspect", "--if", "ready", "--name", "carol"]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+
+    let ran = config.run(&[
+        "rw",
+        "add",
+        "--if",
+        "ready",
+        "--name",
+        "dave",
+        "--allowed-ips",
+        "203.0.113.70",
+        "--export",
+    ]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+}
+
 /// `pool` without its `clients`.
 fn without_clients(pool: &Value) -> Value {
     let mut pool = pool.clone();

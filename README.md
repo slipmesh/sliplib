@@ -71,6 +71,11 @@ that leaves them unset. A `plain` link or pool gets no obfuscation. It writes th
 file leaves them out, and prints each entry it wrote into - `nodes[node-a].mesh_private_key`,
 `mesh.links[node-a|node-b].obfuscation` - never a value.
 
+A magic header is created outside every header the link or pool already holds, its own and the
+ones the network's `obfuscation` gives it. When those leave fewer values than the headers it lacks,
+`mint` writes nothing and names the entry, `mesh.links[node-a|node-b].obfuscation`: narrow the
+ranges written for it or for the network, or write all four of its headers.
+
 Before it writes, `mint` checks every node on the file as it would become, as `check` does, and
 writes nothing when one would be refused: a value that is written is never minted again. Where a
 setting of the file's own narrows what fits beside it, a further run draws again.
@@ -217,6 +222,11 @@ their checks only; reading and writing the files is `sliplib-yaml`'s.
   sources, and `validate`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would
   otherwise fail on; `MetricsConfig`, where a daemon serves its Prometheus endpoint.
+- `Range`, the type of the magic headers and the timing and padding values of `Obfuscation`. The
+  kernel module draws each of them from a range, written as one number or as `lo-hi`. A number
+  is rendered into a node's config as a number and a range as a string, which a daemon built
+  before ranges refuses: write a range only for nodes that run a release that reads it. No tool
+  here checks that.
 
 ### `sliplib-mesh`
 
@@ -235,8 +245,9 @@ every tool that configures a node of any platform.
   and pools the node is not on. Such a refusal carries `secrets::MissingSecret` in its chain
   (`anyhow::Error::is`), so a tool can add how its user creates the secret.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks,
-  created, each by the entry it belongs to. `slipmesh` builds with it; a tool that only reads the
-  file leaves it off, and that function is not in its build.
+  created, each by the entry it belongs to, or `NoHeaderLeft` when an entry's magic headers leave
+  no room for the ones it lacks. `slipmesh` builds with it; a tool that only reads the file leaves
+  it off, and that function is not in its build.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
   crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits. It reads every
   link's obfuscation through its `s4`, links the node is not on included; a missing entry counts as

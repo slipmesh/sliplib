@@ -10,6 +10,7 @@ use crate::secrets::{self, link_key};
 use sliplib_config::Obfuscation;
 use sliplib_config::mesh_config::MeshConfig;
 use sliplib_secrets::wireguard::PrivateKey;
+use std::fmt;
 
 mod obfuscation_gen;
 
@@ -43,15 +44,38 @@ impl Minted {
     }
 }
 
+/// The entry whose magic headers, its own and the network's it takes where it sets none, leave
+/// fewer values than the headers it lacks.
+#[derive(Debug, PartialEq, Eq)]
+pub struct NoHeaderLeft(String);
+
+impl fmt::Display for NoHeaderLeft {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: the magic headers it holds leave fewer values than the headers it lacks; they are its own h1..h4 and the ones the network's obfuscation gives it - narrow them where they are written, or write all four",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for NoHeaderLeft {}
+
 /// Generates the minted fields `obfuscation` lacks and returns them, `None` when it lacked none.
-fn mint_obfuscation(obfuscation: &mut Obfuscation) -> Option<Obfuscation> {
-    secrets::fill(obfuscation, &obfuscation_gen::generate())
+/// `entry` is how a message names what the obfuscation belongs to.
+fn mint_obfuscation(
+    obfuscation: &mut Obfuscation,
+    entry: &str,
+) -> Result<Option<Obfuscation>, NoHeaderLeft> {
+    let fresh =
+        obfuscation_gen::generate(obfuscation).ok_or_else(|| NoHeaderLeft(entry.to_string()))?;
+    Ok(secrets::fill(obfuscation, &fresh))
 }
 
 /// Whatever secrets `topology` lacks, generated, each by the entry it belongs to. A `plain` link
 /// or pool gets no obfuscation generated: it would turn "no obfuscation" back into an obfuscated
 /// one.
-pub fn create(topology: &MeshConfig) -> Minted {
+pub fn create(topology: &MeshConfig) -> Result<Minted, NoHeaderLeft> {
     let mut written = secrets::read(topology);
     let mut minted = Minted::default();
 
@@ -74,9 +98,10 @@ pub fn create(topology: &MeshConfig) -> Minted {
             .mesh_link_obfuscation
             .entry(pair.clone())
             .or_default();
-        if let Some(generated) = mint_obfuscation(obfuscation) {
+        let entry = format!("mesh.links[{pair}].obfuscation");
+        if let Some(generated) = mint_obfuscation(obfuscation, &entry)? {
             minted.link_obfuscation.push((index, generated));
-            minted.names.push(format!("mesh.links[{pair}].obfuscation"));
+            minted.names.push(entry);
         }
     }
 
@@ -88,6 +113,7 @@ pub fn create(topology: &MeshConfig) -> Minted {
                 .names
                 .push(format!("roadwarriors[{}].private_key", pool.name));
         }
+        let entry = format!("roadwarriors[{}].obfuscation", pool.name);
         let obfuscation = if pool.plain {
             None
         } else {
@@ -96,12 +122,11 @@ pub fn create(topology: &MeshConfig) -> Minted {
                     .roadwarrior_obfuscation
                     .entry(pool.name.clone())
                     .or_default(),
-            )
+                &entry,
+            )?
         };
         if obfuscation.is_some() {
-            minted
-                .names
-                .push(format!("roadwarriors[{}].obfuscation", pool.name));
+            minted.names.push(entry);
         }
         if private_key.is_some() || obfuscation.is_some() {
             minted.pools.push(PoolMinted {
@@ -112,7 +137,7 @@ pub fn create(topology: &MeshConfig) -> Minted {
         }
     }
 
-    minted
+    Ok(minted)
 }
 
 #[cfg(test)]
@@ -127,7 +152,9 @@ mod tests {
             random_trailers: Some(true),
             ..Obfuscation::default()
         };
-        let generated = mint_obfuscation(&mut resolved).unwrap();
+        let generated = mint_obfuscation(&mut resolved, "an entry")
+            .unwrap()
+            .unwrap();
         assert_eq!(resolved.random_trailers, Some(true));
         assert_eq!(resolved.disable_cookies, None);
         assert_eq!(generated.random_trailers, None);
@@ -136,7 +163,9 @@ mod tests {
     #[test]
     fn mint_obfuscation_generates_when_nothing_else_is_set() {
         let mut resolved = Obfuscation::default();
-        let generated = mint_obfuscation(&mut resolved).unwrap();
+        let generated = mint_obfuscation(&mut resolved, "an entry")
+            .unwrap()
+            .unwrap();
         assert!(resolved.jc.is_some());
         assert!(resolved.h1.is_some());
         assert_eq!(resolved, generated);
@@ -146,10 +175,12 @@ mod tests {
     fn mint_obfuscation_reports_as_generated_only_what_no_layer_set() {
         let mut resolved = Obfuscation {
             jc: Some(9),
-            h1: Some(42),
+            h1: Some(42.into()),
             ..Obfuscation::default()
         };
-        let generated = mint_obfuscation(&mut resolved).unwrap();
+        let generated = mint_obfuscation(&mut resolved, "an entry")
+            .unwrap()
+            .unwrap();
         assert_eq!((generated.jc, generated.h1), (None, None));
         assert_eq!(generated.jmin, resolved.jmin);
         assert!(generated.jmin.is_some());
@@ -184,10 +215,36 @@ roadwarriors:
     }
 
     #[test]
+    fn a_link_whose_headers_leave_none_to_create_is_refused_and_named() {
+        let mut topology = topology();
+        topology.mesh.links[0].obfuscation.h1 = Some("5-2147483647".parse().unwrap());
+        let err = create(&topology).err().unwrap().to_string();
+        let pair = link_key(&topology.mesh.links[0].pair);
+        assert!(
+            err.contains(&format!("mesh.links[{pair}].obfuscation")),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_pool_whose_headers_leave_none_to_create_is_refused_and_named() {
+        let mut topology = topology();
+        topology.roadwarriors[0].obfuscation = Obfuscation {
+            h1: Some("5-2147483647".parse().unwrap()),
+            ..Obfuscation::default()
+        };
+        let err = create(&topology).err().unwrap().to_string();
+        assert!(
+            err.contains("roadwarriors[obfuscated].obfuscation"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn a_node_with_a_key_written_gets_none() {
         let mut topology = topology();
         topology.nodes[0].mesh_private_key = Some("explicit-key".into());
-        let minted = create(&topology);
+        let minted = create(&topology).unwrap();
         assert_eq!(minted.node_keys.len(), 1);
         assert_eq!(minted.node_keys[0].0, 1);
     }
@@ -196,12 +253,12 @@ roadwarriors:
     fn a_plain_link_gets_no_obfuscation() {
         let mut topology = topology();
         topology.mesh.links[0].plain = true;
-        assert!(create(&topology).link_obfuscation.is_empty());
+        assert!(create(&topology).unwrap().link_obfuscation.is_empty());
     }
 
     #[test]
     fn a_link_that_is_not_plain_gets_the_minted_fields_it_lacks() {
-        let minted = create(&topology());
+        let minted = create(&topology()).unwrap();
         let (index, generated) = &minted.link_obfuscation[0];
         assert_eq!(*index, 0);
         assert!(secrets::unminted(generated).is_empty());
@@ -209,7 +266,7 @@ roadwarriors:
 
     #[test]
     fn a_plain_pool_gets_its_key_and_no_obfuscation() {
-        let minted = create(&topology());
+        let minted = create(&topology()).unwrap();
         let plain = minted.pools.iter().find(|p| p.name == "plain").unwrap();
         assert!(plain.private_key.is_some() && plain.obfuscation.is_none());
     }
@@ -218,14 +275,14 @@ roadwarriors:
     fn a_pool_that_is_not_plain_gets_the_minted_fields_it_lacks() {
         let mut topology = topology();
         topology.roadwarriors[0].obfuscation = Obfuscation::default();
-        let minted = create(&topology);
+        let minted = create(&topology).unwrap();
         let generated = minted.pools[0].obfuscation.as_ref().unwrap();
         assert!(secrets::unminted(generated).is_empty());
     }
 
     #[test]
     fn routes_name_each_value_by_what_it_belongs_to() {
-        let minted = create(&topology());
+        let minted = create(&topology()).unwrap();
         assert_eq!(
             minted.routes(),
             [
@@ -241,14 +298,14 @@ roadwarriors:
     #[test]
     fn a_pool_is_minted_for_its_key_or_its_obfuscation_alone() {
         let mut topology = topology();
-        let key_only = create(&topology);
+        let key_only = create(&topology).unwrap();
         let obfuscated = &key_only.pools[0];
         assert_eq!(obfuscated.name, "obfuscated");
         assert!(obfuscated.private_key.is_some() && obfuscated.obfuscation.is_none());
 
         topology.roadwarriors[0].private_key = Some(PrivateKey::generate());
         topology.roadwarriors[0].obfuscation = Obfuscation::default();
-        let obfuscation_only = create(&topology);
+        let obfuscation_only = create(&topology).unwrap();
         let obfuscated = &obfuscation_only.pools[0];
         assert_eq!(obfuscated.name, "obfuscated");
         assert!(obfuscated.private_key.is_none() && obfuscated.obfuscation.is_some());
@@ -257,7 +314,7 @@ roadwarriors:
     #[test]
     fn nothing_is_minted_for_a_topology_that_lacks_nothing() {
         let mut topology = topology();
-        assert!(!create(&topology).is_empty());
+        assert!(!create(&topology).unwrap().is_empty());
 
         for node in &mut topology.nodes {
             node.mesh_private_key = Some(PrivateKey::generate());
@@ -266,7 +323,7 @@ roadwarriors:
         for pool in &mut topology.roadwarriors {
             pool.private_key = Some(PrivateKey::generate());
         }
-        let minted = create(&topology);
+        let minted = create(&topology).unwrap();
         assert!(minted.is_empty());
         assert!(minted.pools.is_empty());
     }
