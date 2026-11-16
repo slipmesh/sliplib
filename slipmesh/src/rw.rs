@@ -7,8 +7,7 @@ use anyhow::{Context, Result};
 use clap::Subcommand;
 use sliplib_config::mesh_config;
 use sliplib_config::slipmesh_file::SlipmeshFile;
-use sliplib_mesh::mint;
-use sliplib_mesh::secrets::ResolvedSecrets;
+use sliplib_mesh::secrets::{self, ResolvedSecrets};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::path::{Path, PathBuf};
 
@@ -251,11 +250,10 @@ fn written_secrets(
     name: &str,
     config_path: &Path,
 ) -> Result<ResolvedSecrets> {
-    let minted = mint::create(topology)?;
     anyhow::ensure!(
-        !minted.pools.iter().any(|pool| pool.name == name),
+        secrets::pool_is_written(topology, name),
         "{} lacks the secrets of pool {name:?} - `slipmesh mint` creates and writes them",
         config_path.display()
     );
-    Ok(sliplib_mesh::secrets::read(topology))
+    Ok(secrets::read(topology))
 }

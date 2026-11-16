@@ -195,6 +195,13 @@ mod tests {
         text.parse()
     }
 
+    fn refused_as_too_large<T: End>(end: &str, bits: usize) -> Result<Range<T>, RangeError> {
+        Err(RangeError::TooLarge {
+            end: end.to_string(),
+            bits,
+        })
+    }
+
     fn from_yaml<T: End>(yaml: &str) -> Result<Range<T>, String> {
         sliplib_yaml::from_str(yaml).map_err(|e| e.to_string())
     }
@@ -224,17 +231,20 @@ mod tests {
     #[test]
     fn an_end_too_large_for_its_width_is_refused_and_named() {
         assert_eq!(parsed::<u16>("65535").unwrap().hi(), 65535);
-        let err = parsed::<u16>("65536").unwrap_err().to_string();
-        assert!(err.contains("65536") && err.contains("16"), "{err}");
-        assert_eq!(
-            parsed::<u16>("1-65536"),
-            Err(RangeError::TooLarge {
-                end: "65536".to_string(),
-                bits: 16
-            })
-        );
+        assert_eq!(parsed::<u16>("65536"), refused_as_too_large("65536", 16));
+        let shown = parsed::<u16>("65536").unwrap_err().to_string();
+        assert!(shown.contains("65536") && shown.contains("16"), "{shown}");
+        assert_eq!(parsed::<u16>("1-65536"), refused_as_too_large("65536", 16));
         assert_eq!(parsed::<u32>("65536").unwrap().lo(), 65536);
-        assert!(parsed::<u32>("4294967296").is_err());
+        assert_eq!(
+            parsed::<u32>("4294967296"),
+            refused_as_too_large("4294967296", 32)
+        );
+        // Too large for any width a number is read in.
+        assert_eq!(
+            parsed::<u32>("99999999999999999999"),
+            refused_as_too_large("99999999999999999999", 32)
+        );
     }
 
     #[test]

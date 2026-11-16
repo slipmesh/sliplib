@@ -44,7 +44,8 @@ impl Minted {
     }
 }
 
-/// The entry whose own magic headers leave no value to create another with.
+/// The entry whose magic headers, its own and the network's it takes where it sets none, leave
+/// fewer values than the headers it lacks.
 #[derive(Debug, PartialEq, Eq)]
 pub struct NoHeaderLeft(String);
 
@@ -52,7 +53,7 @@ impl fmt::Display for NoHeaderLeft {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}: no magic header is left to create for it - the ones it holds cover every value one is drawn from; narrow them or write all four",
+            "{}: the magic headers it holds leave fewer values than the headers it lacks; they are its own h1..h4 and the ones the network's obfuscation gives it - narrow them where they are written, or write all four",
             self.0
         )
     }

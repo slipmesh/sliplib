@@ -80,6 +80,24 @@ fn mint_prints_the_entries_it_wrote_and_no_value() {
 }
 
 #[test]
+fn mint_writes_nothing_and_names_the_entry_that_has_no_room_for_a_header() {
+    let config = Config::holding(&SLIPMESH.replace(
+        "{pair: [a, b], port: 51820}",
+        "{pair: [a, b], port: 51820, obfuscation: {h1: 5-2147483647}}",
+    ));
+    let before = config.text();
+    let ran = config.run(&["mint"]);
+    assert_eq!(ran.code, Some(1), "{}", ran.stderr);
+    assert!(
+        ran.stderr.contains("mesh.links[a|b].obfuscation"),
+        "{}",
+        ran.stderr
+    );
+    assert_eq!(ran.stdout, "");
+    assert_eq!(config.text(), before);
+}
+
+#[test]
 fn mint_writes_nothing_when_a_node_would_be_refused_with_what_it_minted() {
     // No `jmax` the generator draws reaches this `jmin`, so the link's obfuscation is one the
     // kernel module refuses whatever is minted beside it.
