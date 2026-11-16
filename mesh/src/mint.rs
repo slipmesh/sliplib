@@ -146,7 +146,7 @@ mod tests {
     fn mint_obfuscation_reports_as_generated_only_what_no_layer_set() {
         let mut resolved = Obfuscation {
             jc: Some(9),
-            h1: Some(42),
+            h1: Some(42.into()),
             ..Obfuscation::default()
         };
         let generated = mint_obfuscation(&mut resolved).unwrap();

@@ -1,4 +1,5 @@
-use crate::common::Config;
+use crate::common::{Config, topology};
+use sliplib_config::Range;
 use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{MultiDoc, Value};
@@ -97,6 +98,26 @@ fn fmt_keeps_a_number_a_string_and_a_block_scalar_what_they_were() {
         installer["script"],
         Value::from("first line\n  second line, indented\n")
     );
+}
+
+#[test]
+fn fmt_keeps_a_range_a_range_and_a_number_a_number() {
+    let by_hand = by_hand(PrivateKey::generate().expose()).replace(
+        "{pair: [a, b], port: 51820}",
+        "{pair: [a, b], port: 51820, obfuscation: {h1: 5-9, h2: 0xA, rekey_after_time: 100-140}}",
+    );
+    let config = Config::holding(&by_hand);
+    assert_eq!(config.run(&["fmt"]).code, Some(0));
+
+    let obfuscation = &values(&config.text())[0]["mesh"]["links"][0]["obfuscation"];
+    assert_eq!(obfuscation["h1"], Value::from("5-9"));
+    assert_eq!(obfuscation["h2"], Value::from(10));
+    assert_eq!(obfuscation["rekey_after_time"], Value::from("100-140"));
+
+    let read = topology(&config).mesh.links[0].obfuscation.clone();
+    assert_eq!(read.h1, Some(Range::new(5, 9).unwrap()));
+    assert_eq!(read.h2, Some(10.into()));
+    assert_eq!(read.rekey_after_time, Some(Range::new(100, 140).unwrap()));
 }
 
 #[test]

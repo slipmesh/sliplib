@@ -366,6 +366,7 @@ pub fn inspect(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sliplib_config::Range;
 
     fn fixture() -> &'static str {
         r#"cluster:
@@ -546,6 +547,26 @@ roadwarriors:
         assert!(!cfg.contains("# Name"));
         assert!(cfg.contains("DNS = 203.0.113.202"));
         assert!(cfg.contains("PersistentKeepalive = 25"));
+    }
+
+    // The notation a client's config reads: one number, or `lo-hi`.
+    #[test]
+    fn render_client_config_writes_a_header_range_as_the_client_reads_it() {
+        let obfuscation = Obfuscation {
+            h1: Some(Range::new(5, 9).unwrap()),
+            h2: Some(10.into()),
+            ..Obfuscation::default()
+        };
+        let cfg = render_client_config(
+            &ClientPrivateKey::Unknown,
+            &["203.0.113.42/32".to_string()],
+            None,
+            "server-public-key",
+            "192.0.2.10:51821",
+            &obfuscation,
+        );
+        assert!(cfg.contains("H1 = 5-9\n"), "{cfg}");
+        assert!(cfg.contains("H2 = 10\n"), "{cfg}");
     }
 
     #[test]

@@ -216,7 +216,8 @@ their checks only; reading and writing the files is `sliplib-yaml`'s.
 - `router`: `RouterConfig` with its identity, iBGP peers, BFD settings, announcements and bypass
   sources, and `validate`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would
-  otherwise fail on; `MetricsConfig`, where a daemon serves its Prometheus endpoint.
+  otherwise fail on; `Range`, a value of it the module draws from a range, written as one number
+  or as `lo-hi`; `MetricsConfig`, where a daemon serves its Prometheus endpoint.
 
 ### `sliplib-mesh`
 

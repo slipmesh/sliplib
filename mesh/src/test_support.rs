@@ -14,10 +14,10 @@ pub fn minted_obfuscation() -> Obfuscation {
         jmax: Some(50),
         s1: Some(15),
         s2: Some(16),
-        h1: Some(5),
-        h2: Some(6),
-        h3: Some(7),
-        h4: Some(8),
+        h1: Some(5.into()),
+        h2: Some(6.into()),
+        h3: Some(7.into()),
+        h4: Some(8.into()),
         ..Obfuscation::default()
     }
 }

@@ -67,8 +67,8 @@ macro_rules! minted_fields {
         pub(crate) fn fill(obfuscation: &mut Obfuscation, fresh: &Fresh) -> Option<Obfuscation> {
             let mut filled = Obfuscation::default();
             $(if obfuscation.$field.is_none() {
-                obfuscation.$field = Some(fresh.$field);
-                filled.$field = Some(fresh.$field);
+                obfuscation.$field = Some(fresh.$field.into());
+                filled.$field = Some(fresh.$field.into());
             })*
             (filled != Obfuscation::default()).then_some(filled)
         }
@@ -246,7 +246,7 @@ roadwarriors:
         let obfuscation = Obfuscation {
             jmin: Some(10),
             s2: Some(16),
-            h3: Some(7),
+            h3: Some(7.into()),
             s4: Some(12),
             ..Obfuscation::default()
         };

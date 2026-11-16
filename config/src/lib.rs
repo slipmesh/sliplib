@@ -7,9 +7,11 @@ pub mod mesh_config;
 mod metrics;
 pub mod nftables;
 mod obfuscation;
+mod range;
 pub mod router;
 pub mod slipmesh_file;
 pub mod talos;
 
 pub use metrics::MetricsConfig;
 pub use obfuscation::{DEFAULT_MAGIC_HEADERS, HEADER_PROTECTION_NONCE_SIZE, Obfuscation};
+pub use range::{End, Range, RangeError};

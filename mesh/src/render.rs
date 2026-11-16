@@ -1109,7 +1109,7 @@ mesh:
         let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
         let mut resolved = resolved_for(&mesh);
         let clash = Obfuscation {
-            h2: Some(5),
+            h2: Some(5.into()),
             ..crate::test_support::minted_obfuscation()
         };
         resolved
@@ -1195,7 +1195,7 @@ mesh:
         let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
         let mut resolved = resolved_for(&mesh);
         let clash = Obfuscation {
-            h2: Some(5),
+            h2: Some(5.into()),
             ..crate::test_support::minted_obfuscation()
         };
         resolved
@@ -1253,10 +1253,10 @@ mesh:
             jmax: Some(50),
             s1: Some(15),
             s2: Some(16),
-            h1: Some(101),
-            h2: Some(102),
-            h3: Some(103),
-            h4: Some(104),
+            h1: Some(101.into()),
+            h2: Some(102.into()),
+            h3: Some(103.into()),
+            h4: Some(104.into()),
             ..Obfuscation::default()
         };
         assert_eq!(on_a.obfuscation, expected);
