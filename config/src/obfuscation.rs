@@ -17,10 +17,10 @@
 //!   one counting as its WireGuard message type 1..4.
 //! - i1-i5: decoy/cover packets with a configurable header spec, sent alongside real traffic.
 //! - header_protection_key: encrypts the WireGuard packet header's own type/reserved fields with a
-//!   separate key - a distinct obfuscation layer from the junk-packet tricks above. Requires
-//!   `AdvancedSecurity` enabled on the peer(s) that should use it (see
-//!   [`crate::awg::PeerEntry`]; setting only this field does nothing on its own), and every s1..s4 at
-//!   least 12, room for its nonce.
+//!   separate key - a distinct obfuscation layer from the junk-packet tricks above. The key is
+//!   the interface's: once set, every packet to and from every peer of it is protected, so each
+//!   peer needs the same key and the same s1..s4, every one of them at least 12, room for the
+//!   nonce. The module reads no per-peer switch for it.
 //! - content_padding_addition, rekey_after_time, rekey_timeout, reject_after_time,
 //!   keepalive_timeout, max_handshake_attempts: protocol timing/padding constants vanilla
 //!   WireGuard hardcodes - configurable here specifically so they stop being a fixed,
@@ -97,9 +97,9 @@ pub struct Obfuscation {
     pub max_handshake_attempts: Option<Range<u16>>,
 
     /// AmneziaWG 3.1. Appends a random-length trailer to outgoing packets, sized against what
-    /// the peer has been seen to send, so the wire lengths stop being a fingerprint. Receive-side
-    /// length checks become "at least" rather than "exactly", so both ends may set it
-    /// independently.
+    /// the peer has been seen to send, so the wire lengths stop being a fingerprint. Only an end
+    /// that sets it accepts a handshake or cookie message longer than its exact size, so an end
+    /// without it drops what an end with it sends: both ends of a tunnel set it, or neither.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub random_trailers: Option<bool>,
     /// AmneziaWG 3.1. Suppresses cookie replies, which are a message type of their own and

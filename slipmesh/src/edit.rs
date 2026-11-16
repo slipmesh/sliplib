@@ -370,7 +370,6 @@ clients:
             public_key: format!("{name}="),
             private_key: None,
             allowed_ips: vec!["203.0.113.29/32".to_owned()],
-            advanced_security: false,
         }
     }
 
