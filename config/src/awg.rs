@@ -213,6 +213,8 @@ interfaces:
     addresses: ["203.0.113.1/27", "3fff:99::1/64"]
     private_key: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
     obfuscation:
+      s1: 50
+      s2: 100
       s3: 60
       s4: 20
       i1: "5-10"
@@ -223,6 +225,8 @@ interfaces:
     peers:
       - public_key: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
         allowed_ips: ["203.0.113.5/32"]
+        # A key of earlier releases: read, and ignored.
+        advanced_security: true
 "#;
 
     #[test]

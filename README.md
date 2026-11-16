@@ -129,7 +129,16 @@ inspect` prints the config when neither `--export` nor `--qr` is given, and writ
 
 A pool whose key or obfuscation is not written takes no client and shows none: `rw add` and
 `rw inspect` refuse it, whatever else they were asked for, until `mint` has written them. Only that
-pool's secrets matter to them. `rw add` creates nothing but the client's key pair.
+pool's secrets matter to them. `rw add` creates nothing but the client's key pair. Both refuse a
+pool whose obfuscation the kernel module would refuse, with what a `check` of its node says.
+
+The config carries what the pool and its clients have to share - `S1` to `S4`, `H1` to `H4`, and
+`HeaderProtectionKey` and `RandomTrailers` when the pool sets them - and `Jc`, `Jmin`, `Jmax` for
+the client's own handshakes. A client has to be new enough for what the pool sets: `amneziawg-tools`
+reads `S3` and `S4` from its 2025 releases of 1.0 on, a header written as a range and the header
+protection key from 3.0 on, and the trailer switch from 3.1 on; an application with a parser of its
+own may differ. An older client cannot be given such a pool. The header protection key is the same
+in every client's config of a pool, so it is as secret as all of them together.
 
 The config's `Endpoint` is the first of the pool's `node_hostnames`, with the pool's
 `listen_port`. `--endpoint` picks another of them, or names anything else - a DNS name in front of

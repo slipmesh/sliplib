@@ -587,6 +587,18 @@ roadwarriors:
         assert!(both.to_string().contains("not both"), "{both}");
     }
 
+    // Files written for earlier releases carry it on their clients; the module reads no such
+    // switch, and the file is not refused for it.
+    #[test]
+    fn a_client_that_still_carries_advanced_security_is_read() {
+        let public = PrivateKey::generate().public_key().unwrap();
+        let client: RoadwarriorClient = sliplib_yaml::from_str(&format!(
+            "{{name: laptop, public_key: \"{public}\", advanced_security: true}}"
+        ))
+        .unwrap();
+        assert_eq!(client.public_key, public);
+    }
+
     #[test]
     fn an_unknown_top_level_key_is_refused() {
         let yaml = format!(
