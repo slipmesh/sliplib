@@ -139,9 +139,20 @@ mod tests {
             (taking(&["5-10", "12-2147483647"]), 11),
             // In any order, overlapping, and reaching past the values a header is drawn from.
             (taking(&["12-4294967295", "14-20", "1-10"]), 11),
+            // Ending on the first value, starting on the last, and two that share an end.
+            (taking(&["1-5", "7-2147483647"]), 6),
+            (taking(&["5-2147483645", "2147483647"]), 2_147_483_646),
+            (taking(&["5-10", "10-20", "22-2147483647"]), 21),
         ] {
             assert_eq!(draw_outside(&mut rng, &taken), Some(left), "{taken:?}");
         }
+    }
+
+    #[test]
+    fn ranges_that_share_an_end_and_cover_every_value_leave_none() {
+        let mut rng = rand::rng();
+        let taken = taking(&["5-10", "10-2147483647"]);
+        assert_eq!(draw_outside(&mut rng, &taken), None);
     }
 
     #[test]
@@ -161,7 +172,7 @@ mod tests {
 
     // Ranges that cover every value are no obstacle when no header is to be created.
     #[test]
-    fn an_entry_that_holds_all_four_headers_needs_no_room_for_another() {
+    fn an_entry_that_holds_all_four_headers_keeps_them_and_needs_no_room_for_another() {
         let held = Obfuscation {
             h1: Some("5-1000".parse().unwrap()),
             h2: Some("1001-2000".parse().unwrap()),
@@ -169,7 +180,14 @@ mod tests {
             h4: Some("3001-2147483647".parse().unwrap()),
             ..Obfuscation::default()
         };
-        assert!(super::generate(&held).is_some());
+        let mut filled = held.clone();
+        let created = secrets::fill(&mut filled, &super::generate(&held).unwrap()).unwrap();
+        assert_eq!(
+            [filled.h1, filled.h2, filled.h3, filled.h4],
+            [held.h1, held.h2, held.h3, held.h4]
+        );
+        assert_eq!([created.h1, created.h2, created.h3, created.h4], [None; 4]);
+        assert!(created.jc.is_some());
     }
 
     #[test]

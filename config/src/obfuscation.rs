@@ -26,13 +26,15 @@
 //!   WireGuard hardcodes - configurable here specifically so they stop being a fixed,
 //!   fingerprintable signature. Each is a number or a range `lo-hi` with ends up to 65535, out of
 //!   which the module draws; each end of a tunnel has its own. Zero or unset leaves a timing
-//!   value to the constants the module has for it, and content_padding_addition to WireGuard's
-//!   own padding. A range of a timing value starts at 1 or above, rekey_after_time ends below
-//!   180, and reject_after_time stays above keepalive_timeout plus rekey_timeout.
+//!   value to the constants the module has for it, and a data packet to the padding it gets
+//!   without content_padding_addition: WireGuard's own, or the random trailer when
+//!   random_trailers is on. A range of a timing value starts at 1 or above, rekey_after_time
+//!   ends below 180, and reject_after_time stays above keepalive_timeout plus rekey_timeout.
 //!
 //! Not checked: the module stops using a key 180 seconds after its handshake whatever
 //! reject_after_time says, so a reject_after_time far from 180 moves the timers that depend on it
-//! away from the moment the key really ends.
+//! away from the moment the key really ends - one so large that the renewal on the receiving side
+//! falls due only after the key is gone, for one.
 
 use crate::Range;
 use serde::{Deserialize, Serialize};
@@ -81,8 +83,9 @@ pub struct Obfuscation {
     pub header_protection_key: Option<Secret>,
 
     /// Bytes added to a data packet in place of the padding it would otherwise get: WireGuard's
-    /// own, or the random trailer when `random_trailers` is on. With this set, `random_trailers`
-    /// still lengthens handshake and cookie messages and no longer touches data packets.
+    /// own, or the random trailer when `random_trailers` is on. With this non-zero,
+    /// `random_trailers` still lengthens handshake and cookie messages and no longer touches data
+    /// packets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_padding_addition: Option<Range<u16>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,8 +201,8 @@ impl Obfuscation {
         }
 
         // The module stops using a key at its own constant, whatever reject_after_time says; a
-        // renewal drawn at that age or later comes after the key is gone, and traffic waits for
-        // a handshake at every expiry.
+        // renewal drawn at that age or later comes after the key is gone, and an end that only
+        // sends then waits for a handshake at every expiry.
         if let Some(range) = self.rekey_after_time {
             anyhow::ensure!(
                 range.hi() < REJECT_AFTER_TIME,

@@ -77,6 +77,24 @@ macro_rules! minted_fields {
 
 minted_fields!(jc: u16, jmin: u16, jmax: u16, s1: u16, s2: u16, h1: u32, h2: u32, h3: u32, h4: u32);
 
+/// Whether pool `name` has its key written and, unless it is `plain`, every minted field of its
+/// obfuscation: what a client's config is built with. Nothing else of the topology is looked at.
+pub fn pool_is_written(topology: &MeshConfig, name: &str) -> bool {
+    let written = read(topology);
+    topology
+        .roadwarriors
+        .iter()
+        .find(|pool| pool.name == name)
+        .is_some_and(|pool| {
+            written.roadwarrior_private_keys.contains_key(name)
+                && (pool.plain
+                    || written
+                        .roadwarrior_obfuscation
+                        .get(name)
+                        .is_some_and(|obfuscation| unminted(obfuscation).is_empty()))
+        })
+}
+
 pub fn read(topology: &MeshConfig) -> ResolvedSecrets {
     let global = &topology.obfuscation;
     ResolvedSecrets {
@@ -160,6 +178,54 @@ pub(crate) fn layer(specific: &Obfuscation, global: &Obfuscation) -> Obfuscation
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pools of `topology()`, with `north` given every secret a client's config is built
+    /// with.
+    fn with_north_written() -> MeshConfig {
+        let mut topology = topology();
+        let north = &mut topology.roadwarriors[0];
+        north.private_key = Some(PrivateKey::generate());
+        north.obfuscation = sliplib_yaml::from_str(
+            "{jc: 4, jmin: 10, jmax: 50, s1: 15, s2: 16, h1: 5, h2: 6, h3: 7, h4: 8}",
+        )
+        .unwrap();
+        topology
+    }
+
+    #[test]
+    fn a_pool_with_its_key_and_every_minted_field_is_written() {
+        assert!(pool_is_written(&with_north_written(), "north"));
+    }
+
+    #[test]
+    fn a_pool_without_its_key_or_one_minted_field_is_not_written() {
+        let mut keyless = with_north_written();
+        keyless.roadwarriors[0].private_key = None;
+        assert!(!pool_is_written(&keyless, "north"));
+
+        let mut lacking = with_north_written();
+        lacking.roadwarriors[0].obfuscation.h4 = None;
+        assert!(!pool_is_written(&lacking, "north"));
+    }
+
+    #[test]
+    fn a_plain_pool_needs_its_key_and_no_obfuscation() {
+        let mut plain = with_north_written();
+        plain.roadwarriors[0].plain = true;
+        plain.roadwarriors[0].obfuscation = Obfuscation::default();
+        assert!(pool_is_written(&plain, "north"));
+        plain.roadwarriors[0].private_key = None;
+        assert!(!pool_is_written(&plain, "north"));
+    }
+
+    #[test]
+    fn a_pool_is_judged_by_itself_and_one_the_file_lacks_is_not_written() {
+        let topology = with_north_written();
+        for other in topology.roadwarriors.iter().skip(1) {
+            assert!(!pool_is_written(&topology, &other.name), "{}", other.name);
+        }
+        assert!(!pool_is_written(&topology, "nowhere"));
+    }
 
     #[test]
     fn link_key_does_not_depend_on_the_order_of_the_pair() {

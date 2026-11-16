@@ -118,7 +118,7 @@ fn fmt_keeps_a_range_a_range_and_a_number_a_number() {
     assert_eq!(read.h1, Some(Range::new(5, 9).unwrap()));
     assert_eq!(read.h2, Some(10.into()));
     assert_eq!(read.rekey_after_time, Some(Range::new(100, 140).unwrap()));
-    // What a rendered config writes for them is what the file holds.
+    // Read and written back through the types, they are what the file holds.
     assert_eq!(&sliplib_yaml::to_value(&read).unwrap(), obfuscation);
 }
 
