@@ -7,15 +7,22 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::str::FromStr;
 
-/// What an end of a range can be: the module packs two `u16` into a `u32` and two `u32` into a
-/// `u64`.
-pub trait End: Copy + Ord + fmt::Display + TryFrom<u64> + Into<u64> {}
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for u16 {}
+    impl Sealed for u32 {}
+}
+
+/// What an end of a range can be, and nothing else: the module packs two `u16` into a `u32` and
+/// two `u32` into a `u64`.
+pub trait End: sealed::Sealed + Copy + Ord + fmt::Display + TryFrom<u64> + Into<u64> {}
 
 impl End for u16 {}
 impl End for u32 {}
 
-/// `lo..=hi`, never with `lo` above `hi`: the module checks no order, takes a value from a
-/// reversed range that is in neither, and matches no received packet against one.
+/// `lo..=hi`, never with `lo` above `hi`: the module checks no order. Out of a reversed range
+/// it draws an arbitrary value, which may fall anywhere, another header's range included, and
+/// it matches no received packet against one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Range<T> {
     lo: T,
@@ -23,6 +30,7 @@ pub struct Range<T> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RangeError {
     /// The text that is neither a number nor two numbers around one dash.
     Malformed(String),
@@ -207,9 +215,9 @@ mod tests {
 
     #[test]
     fn a_range_whose_ends_are_out_of_order_is_refused_and_named() {
-        let err = parsed::<u16>("140-100").unwrap_err().to_string();
-        assert!(err.contains("140") && err.contains("100"), "{err}");
-        assert!(Range::<u16>::new(140, 100).is_err());
+        let reversed = Err(RangeError::Reversed { lo: 140, hi: 100 });
+        assert_eq!(parsed::<u16>("140-100"), reversed);
+        assert_eq!(Range::<u16>::new(140, 100), reversed);
         assert!(Range::<u16>::new(140, 140).is_ok());
     }
 
@@ -218,7 +226,13 @@ mod tests {
         assert_eq!(parsed::<u16>("65535").unwrap().hi(), 65535);
         let err = parsed::<u16>("65536").unwrap_err().to_string();
         assert!(err.contains("65536") && err.contains("16"), "{err}");
-        assert!(parsed::<u16>("1-65536").is_err());
+        assert_eq!(
+            parsed::<u16>("1-65536"),
+            Err(RangeError::TooLarge {
+                end: "65536".to_string(),
+                bits: 16
+            })
+        );
         assert_eq!(parsed::<u32>("65536").unwrap().lo(), 65536);
         assert!(parsed::<u32>("4294967296").is_err());
     }
@@ -259,8 +273,7 @@ mod tests {
         assert!(from_yaml::<u16>("140-100").is_err());
     }
 
-    // What the file held as a number stays a number and what it held as a range comes back as
-    // one: a rewrite of the file changes neither.
+    // A number where the ends are equal: a reader that knows only numbers still takes it.
     #[test]
     fn it_is_written_as_a_number_when_its_ends_are_equal_and_as_a_string_otherwise() {
         let single = sliplib_yaml::to_value(Range::<u16>::from(120)).unwrap();

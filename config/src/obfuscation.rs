@@ -25,10 +25,14 @@
 //!   keepalive_timeout, max_handshake_attempts: protocol timing/padding constants vanilla
 //!   WireGuard hardcodes - configurable here specifically so they stop being a fixed,
 //!   fingerprintable signature. Each is a number or a range `lo-hi` with ends up to 65535, out of
-//!   which the module draws; each end of a tunnel has its own. Zero or unset is the module's own
-//!   constant for the five timing values, and no added padding for content_padding_addition. A
-//!   range of a timing value starts at 1 or above, and reject_after_time stays above
-//!   keepalive_timeout plus rekey_timeout.
+//!   which the module draws; each end of a tunnel has its own. Zero or unset leaves a timing
+//!   value to the constants the module has for it, and content_padding_addition to WireGuard's
+//!   own padding. A range of a timing value starts at 1 or above, rekey_after_time ends below
+//!   180, and reject_after_time stays above keepalive_timeout plus rekey_timeout.
+//!
+//! Not checked: the module stops using a key 180 seconds after its handshake whatever
+//! reject_after_time says, so a reject_after_time far from 180 moves the timers that depend on it
+//! away from the moment the key really ends.
 
 use crate::Range;
 use serde::{Deserialize, Serialize};
@@ -76,6 +80,9 @@ pub struct Obfuscation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header_protection_key: Option<Secret>,
 
+    /// Bytes added to a data packet in place of the padding it would otherwise get: WireGuard's
+    /// own, or the random trailer when `random_trailers` is on. With this set, `random_trailers`
+    /// still lengthens handshake and cookie messages and no longer touches data packets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_padding_addition: Option<Range<u16>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -111,7 +118,8 @@ pub const HEADER_PROTECTION_NONCE_SIZE: u16 = 12;
 /// (`device.c`'s `wg_init`). Not 0, which would be a distinct, still obfuscated magic value.
 pub const DEFAULT_MAGIC_HEADERS: [u32; 4] = [1, 2, 3, 4];
 
-/// The module's own constants, in seconds, which it uses for a timing value that is zero.
+/// The module's own constants, in seconds. It uses each for the timing value of its name when
+/// that is zero, and the first also as the age at which a key is no longer used.
 const REJECT_AFTER_TIME: u16 = 180;
 const KEEPALIVE_TIMEOUT: u16 = 10;
 const REKEY_TIMEOUT: u16 = 5;
@@ -173,7 +181,7 @@ impl Obfuscation {
         }
 
         // The module draws from a range as written and treats only an all-zero one as unset: a
-        // draw of 0 is a timer that fires at once, or no handshake retry at all.
+        // draw of 0 is a timer that fires at once, or a handshake given up after one retry.
         for (name, value) in [
             ("rekey_after_time", self.rekey_after_time),
             ("rekey_timeout", self.rekey_timeout),
@@ -187,6 +195,16 @@ impl Obfuscation {
                     "obfuscation.{name} is {range}; a range of it must start at 1 or above, and 0 alone selects the module's own value"
                 );
             }
+        }
+
+        // The module stops using a key at its own constant, whatever reject_after_time says; a
+        // renewal drawn at that age or later comes after the key is gone, and traffic waits for
+        // a handshake at every expiry.
+        if let Some(range) = self.rekey_after_time {
+            anyhow::ensure!(
+                range.hi() < REJECT_AFTER_TIME,
+                "obfuscation.rekey_after_time ({range}) must end below {REJECT_AFTER_TIME}: the module stops using a key {REJECT_AFTER_TIME} seconds after its handshake, whatever reject_after_time says"
+            );
         }
 
         // The module takes a key for due once it is older than reject_after_time less the low
@@ -290,7 +308,8 @@ mod tests {
             ..Obfuscation::default()
         };
         let err = o.validate().unwrap_err().to_string();
-        assert!(err.contains("h2") && err.contains("h4"), "{err}");
+        assert!(err.contains("obfuscation.h2 (7)"), "{err}");
+        assert!(err.contains("obfuscation.h4 (7)"), "{err}");
     }
 
     // An unset magic header is sent as its WireGuard message type, 1..4.
@@ -301,7 +320,8 @@ mod tests {
             ..Obfuscation::default()
         };
         let err = o.validate().unwrap_err().to_string();
-        assert!(err.contains("h1") && err.contains("h2"), "{err}");
+        assert!(err.contains("obfuscation.h1 (2)"), "{err}");
+        assert!(err.contains("obfuscation.h2 (2)"), "{err}");
     }
 
     fn from_yaml(yaml: &str) -> Obfuscation {
@@ -380,8 +400,8 @@ mod tests {
     #[test]
     fn rejects_magic_header_ranges_that_share_a_value_and_names_both() {
         let err = refusal("{h1: 5-9, h2: 10, h3: 9-12, h4: 13}");
-        assert!(err.contains("h1") && err.contains("5-9"), "{err}");
-        assert!(err.contains("h3") && err.contains("9-12"), "{err}");
+        assert!(err.contains("obfuscation.h1 (5-9)"), "{err}");
+        assert!(err.contains("obfuscation.h3 (9-12)"), "{err}");
         assert!(
             from_yaml("{h1: 5-9, h2: 10, h3: 11-12, h4: 13}")
                 .validate()
@@ -392,7 +412,8 @@ mod tests {
     #[test]
     fn rejects_a_magic_header_range_that_covers_an_unset_ones_default() {
         let err = refusal("{h4: 3-9}");
-        assert!(err.contains("h3") && err.contains("h4"), "{err}");
+        assert!(err.contains("obfuscation.h3 (3)"), "{err}");
+        assert!(err.contains("obfuscation.h4 (3-9)"), "{err}");
     }
 
     // The module subtracts the low ends of the other two from reject_after_time to decide when a
@@ -434,6 +455,28 @@ mod tests {
             "{reject_after_time: 16, keepalive_timeout: 12, rekey_timeout: 0}",
             "rekey_timeout (5)",
         );
+    }
+
+    // The module stops using a key 180 seconds after its handshake, whatever reject_after_time
+    // says: a renewal drawn at 180 or later comes after the key is gone.
+    #[test]
+    fn rejects_a_rekey_after_time_that_can_reach_180_and_names_it() {
+        for written in ["180", "100-180", "65535"] {
+            let err = refusal(&format!("{{rekey_after_time: {written}}}"));
+            assert!(
+                err.contains(&format!("obfuscation.rekey_after_time ({written})")),
+                "{err}"
+            );
+            assert!(err.contains("below 180"), "{err}");
+        }
+        assert!(from_yaml("{rekey_after_time: 179}").validate().is_ok());
+        assert!(from_yaml("{rekey_after_time: 100-179}").validate().is_ok());
+    }
+
+    #[test]
+    fn a_larger_reject_after_time_does_not_allow_a_larger_rekey_after_time() {
+        let err = refusal("{rekey_after_time: 200, reject_after_time: 300}");
+        assert!(err.contains("obfuscation.rekey_after_time (200)"), "{err}");
     }
 
     #[test]
