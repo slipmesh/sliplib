@@ -5,11 +5,25 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.17.0] - 2026-11-17
+
+### Breaking changes 💥
+
+- Take magic headers and tuning values as ranges (#47)
+- Treat header protection as the interface's, not a peer's (#48)
+
+### Miscellaneous 🧹
+
+- Put breaking changes in a changelog section of their own (#46)
+
 ## [0.16.0] - 2026-11-15
+
+### Breaking changes 💥
+
+- Create and write the secrets and defaults of slipmesh.yaml (#42)
 
 ### Added ✨
 
-- Create and write the secrets and defaults of slipmesh.yaml (#42)
 - Add the rw commands and fmt (#43)
 
 ## [0.15.0] - 2026-11-15
@@ -66,19 +80,19 @@ and follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.0] - 2026-11-10
 
-### Changed 🔧
+### Breaking changes 💥
 
 - Read and write through yaml_serde only (#24)
 
 ## [0.8.0] - 2026-11-10
 
+### Breaking changes 💥
+
+- Take the serde model from yaml-rt (#21)
+
 ### Added ✨
 
 - Read a single-document file as a type (#22)
-
-### Changed 🔧
-
-- Take the serde model from yaml-rt (#21)
 
 ### Fixed 🐛
 
