@@ -10,17 +10,19 @@
 //! - jc/jmin/jmax: how many junk packets to send before the handshake, and their size range;
 //!   jmin must not exceed jmax.
 //! - s1-s4: junk size for each handshake-adjacent packet type - s1/s2 for init/response, s3/s4
-//!   (AmneziaWG 3.0) extending the same idea to cookie-reply and transport (data) packets.
+//!   extending the same idea to cookie-reply and transport (data) packets. s3/s4 and i1-i5 came
+//!   with the 2025 releases of AmneziaWG 1.0, the header protection key and the six tuning
+//!   values with 3.0, the two switches with 3.1.
 //! - h1-h4: magic header replacement values, one per packet type (init/response/cookie/transport),
 //!   each a number or a range `lo-hi` out of which the module draws the header of every packet it
 //!   sends. Both ends of a tunnel carry the same four; the four must not share a value, an unset
 //!   one counting as its WireGuard message type 1..4.
 //! - i1-i5: decoy/cover packets with a configurable header spec, sent alongside real traffic.
 //! - header_protection_key: encrypts the WireGuard packet header's own type/reserved fields with a
-//!   separate key - a distinct obfuscation layer from the junk-packet tricks above. Requires
-//!   `AdvancedSecurity` enabled on the peer(s) that should use it (see
-//!   [`crate::awg::PeerEntry`]; setting only this field does nothing on its own), and every s1..s4 at
-//!   least 12, room for its nonce.
+//!   separate key - a distinct obfuscation layer from the junk-packet tricks above. The key is
+//!   the interface's: once set, every handshake, cookie and data packet to and from every peer
+//!   of it is protected, so each peer needs the same key and the same s1..s4, every one of them
+//!   at least 12, room for the nonce. The module reads no per-peer switch for it.
 //! - content_padding_addition, rekey_after_time, rekey_timeout, reject_after_time,
 //!   keepalive_timeout, max_handshake_attempts: protocol timing/padding constants vanilla
 //!   WireGuard hardcodes - configurable here specifically so they stop being a fixed,
@@ -78,7 +80,9 @@ pub struct Obfuscation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub i5: Option<String>,
 
-    /// Base64 of 32 bytes like a WireGuard key, but one both peers share.
+    /// Base64 of 32 bytes like a WireGuard key, but the interface's: the same for every peer of
+    /// it. A pool's key is written into the config of each of its clients, so it is as secret as
+    /// all of them together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header_protection_key: Option<Secret>,
 
@@ -100,9 +104,9 @@ pub struct Obfuscation {
     pub max_handshake_attempts: Option<Range<u16>>,
 
     /// AmneziaWG 3.1. Appends a random-length trailer to outgoing packets, sized against what
-    /// the peer has been seen to send, so the wire lengths stop being a fingerprint. Receive-side
-    /// length checks become "at least" rather than "exactly", so both ends may set it
-    /// independently.
+    /// the peer has been seen to send, so the wire lengths stop being a fingerprint. Only an end
+    /// that sets it accepts a handshake or cookie message longer than its exact size, so an end
+    /// without it drops what an end with it sends: both ends of a tunnel set it, or neither.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub random_trailers: Option<bool>,
     /// AmneziaWG 3.1. Suppresses cookie replies, which are a message type of their own and

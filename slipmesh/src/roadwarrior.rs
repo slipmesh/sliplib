@@ -79,7 +79,8 @@ fn check_not_duplicate(pool: &RoadwarriorPool, name: &str, public_key: &str) -> 
 }
 
 /// The pool's server identity, from the secrets the file has written: what a tool that configures
-/// the pool's node puts on the wire.
+/// the pool's node puts on the wire. An obfuscation the module would refuse on that node is
+/// refused here: nothing else checks it on the way to a client's config.
 fn pool_identity(
     pool: &RoadwarriorPool,
     secrets: &ResolvedSecrets,
@@ -94,6 +95,9 @@ fn pool_identity(
         .get(&pool.name)
         .cloned()
         .unwrap_or_default();
+    obfuscation
+        .validate()
+        .with_context(|| format!("roadwarriors pool {:?}", pool.name))?;
     Ok((private_key, obfuscation))
 }
 
@@ -145,8 +149,11 @@ pub(crate) fn resolve_dns(mesh: &MeshConfig, pool: &RoadwarriorPool) -> Option<S
 
 /// Renders a client-side config: stock WireGuard `.conf` shape for both cases (AmneziaWG apps
 /// accept the same `[Interface]`/`[Peer]` INI with extra keys, not a different format) - the
-/// AmneziaWG `Jc..H4` lines are only emitted when `obfuscation` is non-default (a `plain` pool
-/// always reads as `Obfuscation::default()`).
+/// AmneziaWG lines are only emitted when `obfuscation` is non-default (a `plain` pool always reads
+/// as `Obfuscation::default()`). `S1`..`S4`, `H1`..`H4`, the header protection key and the trailer
+/// switch are what both ends have to share. `Jc`, `Jmin` and `Jmax` are read by the sending end
+/// alone and go to the client because it is the one that initiates. The tuning values, the decoy
+/// specs and the cookie switch stay with the pool.
 ///
 /// No `# Name`/similar leading comment - neither the official WireGuard app nor AmneziaWG's
 /// recognizes one on QR import (confirmed: no documented convention, generic "Server 1"-style
@@ -185,10 +192,18 @@ pub(crate) fn render_client_config(
         field!("Jmax", jmax);
         field!("S1", s1);
         field!("S2", s2);
+        field!("S3", s3);
+        field!("S4", s4);
         field!("H1", h1);
         field!("H2", h2);
         field!("H3", h3);
         field!("H4", h4);
+        if let Some(key) = &obfuscation.header_protection_key {
+            out.push_str(&format!("HeaderProtectionKey = {}\n", key.expose()));
+        }
+        if obfuscation.random_trailers == Some(true) {
+            out.push_str("RandomTrailers = on\n");
+        }
     }
 
     out.push('\n');
@@ -283,7 +298,6 @@ pub fn add(
             _ => None,
         },
         allowed_ips,
-        advanced_security: false,
     };
 
     if !(export || qr) {
@@ -419,6 +433,24 @@ roadwarriors:
         secrets
     }
 
+    // A client config is printed from the pool alone, with no node's config rendered on the way
+    // to refuse what the module would.
+    #[test]
+    fn a_pool_whose_obfuscation_the_module_would_refuse_gives_no_client_config() {
+        let m = mesh();
+        let pool = find_pool(&m, "obfuscation").unwrap();
+        let mut secrets = secrets(&m);
+        let obfuscation = secrets
+            .roadwarrior_obfuscation
+            .get_mut("obfuscation")
+            .unwrap();
+        obfuscation.header_protection_key = Some(PrivateKey::generate().expose().into());
+
+        let err = format!("{:#}", pool_identity(pool, &secrets).err().unwrap());
+        assert!(err.contains("\"obfuscation\""), "{err}");
+        assert!(err.contains("s3, s4"), "{err}");
+    }
+
     #[test]
     fn pool_endpoint_is_the_chosen_node_or_else_the_first() {
         let m = mesh();
@@ -552,21 +584,62 @@ roadwarriors:
     // The notation a client's config reads: one number, or `lo-hi`.
     #[test]
     fn render_client_config_writes_a_header_range_as_the_client_reads_it() {
-        let obfuscation = Obfuscation {
+        let cfg = client_config_of(&Obfuscation {
             h1: Some(Range::new(5, 9).unwrap()),
             h2: Some(10.into()),
             ..Obfuscation::default()
-        };
-        let cfg = render_client_config(
+        });
+        assert!(cfg.contains("H1 = 5-9\n"), "{cfg}");
+        assert!(cfg.contains("H2 = 10\n"), "{cfg}");
+    }
+
+    fn client_config_of(obfuscation: &Obfuscation) -> String {
+        render_client_config(
             &ClientPrivateKey::Unknown,
             &["203.0.113.42/32".to_string()],
             None,
             "server-public-key",
             "192.0.2.10:51821",
-            &obfuscation,
-        );
-        assert!(cfg.contains("H1 = 5-9\n"), "{cfg}");
-        assert!(cfg.contains("H2 = 10\n"), "{cfg}");
+            obfuscation,
+        )
+    }
+
+    // What a client lacks of these it cannot talk to the pool with: without the key or the
+    // trailer switch no handshake completes, without S3 no cookie reply is read, without S4 no
+    // data packet.
+    #[test]
+    fn render_client_config_carries_what_both_ends_of_a_pool_must_share() {
+        let key = PrivateKey::generate();
+        let cfg = client_config_of(&Obfuscation {
+            s1: Some(15),
+            s2: Some(16),
+            s3: Some(60),
+            s4: Some(20),
+            header_protection_key: Some(key.expose().into()),
+            random_trailers: Some(true),
+            ..Obfuscation::default()
+        });
+        let interface = cfg.split("[Peer]").next().unwrap();
+        for line in [
+            "S3 = 60\n".to_string(),
+            "S4 = 20\n".to_string(),
+            format!("HeaderProtectionKey = {}\n", key.expose()),
+            "RandomTrailers = on\n".to_string(),
+        ] {
+            assert!(interface.contains(&line), "{line:?} not in {cfg}");
+        }
+    }
+
+    #[test]
+    fn render_client_config_leaves_out_what_the_pool_does_not_set() {
+        let cfg = client_config_of(&Obfuscation {
+            s1: Some(15),
+            random_trailers: Some(false),
+            ..Obfuscation::default()
+        });
+        for absent in ["S3", "S4", "HeaderProtectionKey", "RandomTrailers"] {
+            assert!(!cfg.contains(absent), "{absent}: {cfg}");
+        }
     }
 
     #[test]

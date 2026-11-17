@@ -249,7 +249,6 @@ pub struct RoadwarriorClient {
     pub public_key: String,
     pub private_key: Option<PrivateKey>,
     pub allowed_ips: Vec<String>,
-    pub advanced_security: bool,
 }
 
 #[derive(Deserialize)]
@@ -261,8 +260,6 @@ struct ClientEntry {
     private_key: Option<PrivateKey>,
     #[serde(default)]
     allowed_ips: Vec<String>,
-    #[serde(default)]
-    advanced_security: bool,
 }
 
 impl TryFrom<ClientEntry> for RoadwarriorClient {
@@ -289,7 +286,6 @@ impl TryFrom<ClientEntry> for RoadwarriorClient {
             public_key,
             private_key: entry.private_key,
             allowed_ips: entry.allowed_ips,
-            advanced_security: entry.advanced_security,
         })
     }
 }
@@ -591,6 +587,18 @@ roadwarriors:
         assert!(both.to_string().contains("not both"), "{both}");
     }
 
+    // Files written for earlier releases carry it on their clients; the module reads no such
+    // switch, and the file is not refused for it.
+    #[test]
+    fn a_client_that_still_carries_advanced_security_is_read() {
+        let public = PrivateKey::generate().public_key().unwrap();
+        let client: RoadwarriorClient = sliplib_yaml::from_str(&format!(
+            "{{name: laptop, public_key: \"{public}\", advanced_security: true}}"
+        ))
+        .unwrap();
+        assert_eq!(client.public_key, public);
+    }
+
     #[test]
     fn an_unknown_top_level_key_is_refused() {
         let yaml = format!(
@@ -779,14 +787,12 @@ listen-port: 1
                     public_key: "k".to_string(),
                     private_key: None,
                     allowed_ips: vec!["203.0.113.5/32".to_string()],
-                    advanced_security: false,
                 },
                 RoadwarriorClient {
                     name: "bob".to_string(),
                     public_key: "k".to_string(),
                     private_key: None,
                     allowed_ips: vec!["203.0.113.6/32".to_string()],
-                    advanced_security: false,
                 },
             ],
         });

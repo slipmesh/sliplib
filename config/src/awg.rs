@@ -74,13 +74,6 @@ pub struct PeerEntry {
     /// both kinds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_ips: Option<Vec<String>>,
-    /// Enables AmneziaWG's "header protection" for this peer - encrypts the WireGuard packet
-    /// header's own type/reserved fields with the interface's `obfuscation.header_protection_key`.
-    /// Both ends must agree: the peer's own config needs the matching key and
-    /// `AdvancedSecurity: true` too. Setting `header_protection_key` alone, without this, does
-    /// nothing (confirmed against amneziawg-tools' `src/config.c`).
-    #[serde(default)]
-    pub advanced_security: bool,
 }
 
 pub const DEFAULT_HANDSHAKE_STALE_SECS: u64 = 180;
@@ -128,17 +121,6 @@ pub fn validate(cfg: &AwgConfig) -> anyhow::Result<()> {
             anyhow::ensure!(
                 seen_peer_keys.insert(peer.public_key.as_str()),
                 "interface {:?}: duplicate peer public_key {:?}",
-                iface.name,
-                peer.public_key
-            );
-            // `advanced_security` alone does nothing without the interface's own
-            // `header_protection_key` (see `PeerEntry::advanced_security`'s own doc comment,
-            // confirmed against amneziawg-tools' src/config.c) - catching this here means a
-            // typo'd/missing key fails the config outright instead of silently negotiating
-            // without header protection, discoverable only by traffic analysis.
-            anyhow::ensure!(
-                !peer.advanced_security || iface.obfuscation.header_protection_key.is_some(),
-                "interface {:?}, peer {:?}: advanced_security is set but obfuscation.header_protection_key is not",
                 iface.name,
                 peer.public_key
             );
@@ -231,6 +213,8 @@ interfaces:
     addresses: ["203.0.113.1/27", "3fff:99::1/64"]
     private_key: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
     obfuscation:
+      s1: 50
+      s2: 100
       s3: 60
       s4: 20
       i1: "5-10"
@@ -241,6 +225,7 @@ interfaces:
     peers:
       - public_key: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
         allowed_ips: ["203.0.113.5/32"]
+        # A key of earlier releases: read, and ignored.
         advanced_security: true
 "#;
 
@@ -267,7 +252,6 @@ interfaces:
             cfg.interfaces[1].peers[0].allowed_ips,
             Some(vec!["203.0.113.5/32".to_string()])
         );
-        assert!(cfg.interfaces[1].peers[0].advanced_security);
         assert_eq!(cfg.interfaces[1].obfuscation.s3, Some(60));
         assert_eq!(cfg.interfaces[1].obfuscation.i1, Some("5-10".to_string()));
         assert_eq!(
@@ -322,7 +306,6 @@ interfaces:
             name: None,
             endpoint: None,
             allowed_ips: Some(vec!["not-a-cidr".to_string()]),
-            advanced_security: false,
         });
         let cfg = AwgConfig {
             interfaces: vec![a],
@@ -339,57 +322,18 @@ interfaces:
             name: None,
             endpoint: None,
             allowed_ips: Some(vec!["203.0.113.1/32".to_string()]),
-            advanced_security: false,
         });
         a.peers.push(PeerEntry {
             public_key: "k".to_string(),
             name: None,
             endpoint: None,
             allowed_ips: Some(vec!["203.0.113.2/32".to_string()]),
-            advanced_security: false,
         });
         let cfg = AwgConfig {
             interfaces: vec![a],
             ..Default::default()
         };
         assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
-    fn rejects_advanced_security_peer_without_header_protection_key() {
-        let mut a = iface("a");
-        a.peers.push(PeerEntry {
-            public_key: "k".to_string(),
-            name: None,
-            endpoint: None,
-            allowed_ips: None,
-            advanced_security: true,
-        });
-        // a.obfuscation.header_protection_key is left at its default: None.
-        let cfg = AwgConfig {
-            interfaces: vec![a],
-            ..Default::default()
-        };
-        assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
-    fn accepts_advanced_security_peer_with_header_protection_key() {
-        let mut a = iface("a");
-        a.obfuscation.header_protection_key =
-            Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into());
-        a.peers.push(PeerEntry {
-            public_key: "k".to_string(),
-            name: None,
-            endpoint: None,
-            allowed_ips: None,
-            advanced_security: true,
-        });
-        let cfg = AwgConfig {
-            interfaces: vec![a],
-            ..Default::default()
-        };
-        assert!(validate(&cfg).is_ok());
     }
 
     fn with_metrics(listen: &str) -> AwgConfig {

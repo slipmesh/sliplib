@@ -258,7 +258,6 @@ fn mesh_interfaces_for(
                     .as_ref()
                     .map(|host| addressing::endpoint(host, link.port)),
                 allowed_ips: None,
-                advanced_security: false,
             }],
         });
     }
@@ -308,7 +307,6 @@ fn roadwarrior_interfaces_for(
                         name: Some(c.name.clone()),
                         endpoint: None,
                         allowed_ips: Some(c.allowed_ips.clone()),
-                        advanced_security: c.advanced_security,
                     })
                     .collect(),
             })
