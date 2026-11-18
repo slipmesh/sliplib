@@ -334,6 +334,29 @@ roadwarriors:
         assert!(minted.pools.is_empty());
     }
 
+    // The `s4` in force on a link or a pool is the network's where it sets none of its own.
+    #[test]
+    fn offsets_go_around_the_s4_the_network_gives_a_link_and_a_pool() {
+        let mut topology = topology();
+        topology.obfuscation.s4 = Some(100);
+        topology.roadwarriors[0].obfuscation.s1 = None;
+        topology.roadwarriors[0].obfuscation.s2 = None;
+        let off_the_header = |offset: Option<u16>| !(101..=115).contains(&offset.unwrap());
+        for _ in 0..200 {
+            let minted = create(&topology).unwrap();
+            let link = &minted.link_obfuscation[0].1;
+            assert!(
+                off_the_header(link.s1) && off_the_header(link.s2),
+                "{link:?}"
+            );
+            let pool = minted.pools[0].obfuscation.as_ref().unwrap();
+            assert!(
+                off_the_header(pool.s1) && off_the_header(pool.s2),
+                "{pool:?}"
+            );
+        }
+    }
+
     /// The example of the specification as it is before anything is minted, with `overlay` laid
     /// over it.
     fn unminted(overlay: &str) -> Network {

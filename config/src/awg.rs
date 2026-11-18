@@ -77,7 +77,7 @@ pub struct PeerEntry {
     /// Seconds without traffic after which this node sends the peer a packet, so that a NAT on
     /// the way keeps its mapping: a number, or a range the kernel module draws an interval from
     /// each time it sets the timer. It counts only for a peer with an `endpoint`, which this node
-    /// dials; `0` sends none. Unset, it is the default of what the interface speaks, which
+    /// dials; `0` sends none. What a peer ends up with, set or unset, is what
     /// [`InterfaceEntry::keepalive_of`] gives.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persistent_keepalive: Option<Range<u16>>,
@@ -85,24 +85,32 @@ pub struct PeerEntry {
 
 pub const DEFAULT_HANDSHAKE_STALE_SECS: u64 = 180;
 
-/// The keepalive of a dialed peer whose entry sets none, on an interface that speaks plain
-/// WireGuard: the interval WireGuard's own tools suggest behind a NAT.
+/// The keepalive of a dialed peer whose entry sets none, on an interface that sets nothing of the
+/// obfuscation: the interval WireGuard's own tools suggest behind a NAT.
 pub const PLAIN_KEEPALIVE: Range<u16> = Range::constant(25, 25);
 
-/// The same on an interface that obfuscates: around that interval, drawn anew at every timer, so
-/// that the keepalives are no clock to tell the tunnel by.
+/// The same on an interface that sets any of the obfuscation: around that interval, drawn anew at
+/// every timer, so that the keepalives are no clock to tell the tunnel by.
 pub const OBFUSCATED_KEEPALIVE: Range<u16> = Range::constant(20, 30);
 
+/// The keepalive of a peer that is sent none.
+pub const NO_KEEPALIVE: Range<u16> = Range::constant(0, 0);
+
 impl InterfaceEntry {
-    /// Whether the interface speaks plain WireGuard: it sets nothing of the obfuscation.
+    /// Whether the interface sets nothing of the obfuscation.
     pub fn is_plain(&self) -> bool {
         self.obfuscation == Obfuscation::default()
     }
 
-    /// The keepalive of `peer`, one of this interface's: its own, or the default of what the
-    /// interface speaks. Every reader of the config takes it from here, and whoever writes a
-    /// config leaves out a keepalive equal to it.
+    /// The keepalive of `peer`, one of this interface's. A peer without an `endpoint` is only
+    /// waited for and is sent none, whatever its entry sets. A dialed one has its own, or
+    /// without one the default of the interface: [`PLAIN_KEEPALIVE`] where it is plain,
+    /// [`OBFUSCATED_KEEPALIVE`] where it is not. Whoever writes a config leaves out a keepalive
+    /// that does not change what this gives.
     pub fn keepalive_of(&self, peer: &PeerEntry) -> Range<u16> {
+        if peer.endpoint.is_none() {
+            return NO_KEEPALIVE;
+        }
         peer.persistent_keepalive.unwrap_or(if self.is_plain() {
             PLAIN_KEEPALIVE
         } else {
@@ -534,44 +542,102 @@ interfaces:
         }
     }
 
-    #[test]
-    fn a_peer_without_a_keepalive_takes_the_default_of_what_its_interface_speaks() {
-        let plain = dialed(None);
-        let peer = &plain.interfaces[0].peers[0];
-        assert_eq!(plain.interfaces[0].keepalive_of(peer), Range::from(25));
+    /// `config`, whose one peer is dialed, with that peer only waited for.
+    fn waited_for(mut config: AwgConfig) -> AwgConfig {
+        config.interfaces[0].peers[0].endpoint = None;
+        config
+    }
 
-        let mut obfuscated = dialed(None);
-        obfuscated.interfaces[0].obfuscation.jc = Some(4);
-        assert_eq!(
-            obfuscated.interfaces[0].keepalive_of(peer),
-            Range::new(20, 30).unwrap()
-        );
+    fn keepalive_of_the_peer(config: &AwgConfig) -> Range<u16> {
+        let interface = &config.interfaces[0];
+        interface.keepalive_of(&interface.peers[0])
+    }
+
+    /// An interface is obfuscated by any field of its obfuscation, and by none in particular.
+    fn obfuscated_by(field: &str, mut config: AwgConfig) -> AwgConfig {
+        let obfuscation = &mut config.interfaces[0].obfuscation;
+        match field {
+            "jc" => obfuscation.jc = Some(4),
+            "keepalive_timeout" => obfuscation.keepalive_timeout = Some(12.into()),
+            "random_trailers" => obfuscation.random_trailers = Some(false),
+            other => panic!("{other}"),
+        }
+        config
+    }
+
+    const OBFUSCATING_FIELDS: [&str; 3] = ["jc", "keepalive_timeout", "random_trailers"];
+
+    #[test]
+    fn a_dialed_peer_without_a_keepalive_takes_the_default_of_its_interface() {
+        assert_eq!(keepalive_of_the_peer(&dialed(None)), Range::from(25));
+        for field in OBFUSCATING_FIELDS {
+            let obfuscated = obfuscated_by(field, dialed(None));
+            assert!(!obfuscated.interfaces[0].is_plain(), "{field}");
+            assert_eq!(
+                keepalive_of_the_peer(&obfuscated),
+                Range::new(20, 30).unwrap(),
+                "{field}"
+            );
+        }
+        assert!(dialed(None).interfaces[0].is_plain());
     }
 
     #[test]
-    fn a_peers_own_keepalive_stands_whatever_its_interface_speaks() {
-        let mut cfg = dialed(Some(Range::from(7)));
-        for jc in [None, Some(4)] {
-            cfg.interfaces[0].obfuscation.jc = jc;
-            let interface = &cfg.interfaces[0];
-            assert_eq!(interface.keepalive_of(&interface.peers[0]), Range::from(7));
+    fn a_dialed_peers_own_keepalive_stands_whatever_its_interface_sets() {
+        for own in [7, 0] {
+            let plain = dialed(Some(Range::from(own)));
+            assert_eq!(keepalive_of_the_peer(&plain), Range::from(own));
+            let obfuscated = obfuscated_by("jc", dialed(Some(Range::from(own))));
+            assert_eq!(keepalive_of_the_peer(&obfuscated), Range::from(own));
         }
     }
 
     #[test]
+    fn a_peer_that_is_only_waited_for_is_sent_none_whatever_its_entry_sets() {
+        for own in [
+            None,
+            Some(Range::from(7)),
+            Some(Range::new(20, 30).unwrap()),
+        ] {
+            let plain = waited_for(dialed(own));
+            assert_eq!(keepalive_of_the_peer(&plain), NO_KEEPALIVE, "{own:?}");
+            let obfuscated = waited_for(obfuscated_by("jc", dialed(own)));
+            assert_eq!(keepalive_of_the_peer(&obfuscated), NO_KEEPALIVE, "{own:?}");
+        }
+        assert_eq!(NO_KEEPALIVE, Range::from(0));
+    }
+
+    fn keepalive(written: &str) -> Option<Range<u16>> {
+        Some(written.parse().unwrap())
+    }
+
+    #[test]
     fn a_keepalive_range_that_starts_at_zero_is_refused_naming_the_peer() {
-        let err = validate(&dialed(Some(Range::new(0, 30).unwrap())))
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("interface \"a\", peer \"k\": persistent_keepalive is 0-30"),
-            "{err}"
-        );
+        for config in [
+            dialed(keepalive("0-1")),
+            waited_for(dialed(keepalive("0-30"))),
+        ] {
+            let refused = validate(&config).unwrap_err();
+            let Invalid::Keepalive {
+                interface,
+                peer,
+                range,
+            } = &refused
+            else {
+                panic!("{refused}");
+            };
+            assert_eq!((interface.as_str(), peer.as_str()), ("a", "k"));
+            assert_eq!(
+                Some(*range),
+                config.interfaces[0].peers[0].persistent_keepalive
+            );
+        }
     }
 
     #[test]
     fn a_keepalive_of_zero_alone_or_a_range_from_one_is_accepted() {
-        validate(&dialed(Some(Range::from(0)))).unwrap();
-        validate(&dialed(Some(Range::new(1, 30).unwrap()))).unwrap();
+        for written in ["0", "0-0", "1-5", "1-30"] {
+            validate(&dialed(keepalive(written))).unwrap();
+        }
     }
 }

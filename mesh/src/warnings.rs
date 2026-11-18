@@ -19,10 +19,6 @@ impl Warning {
     pub fn concerns(&self, node: &str) -> bool {
         self.ends.iter().any(|end| end == node)
     }
-
-    pub fn loss(&self) -> &TrailerLoss {
-        &self.loss
-    }
 }
 
 impl fmt::Display for Warning {
@@ -130,6 +126,5 @@ mesh:
         let warnings = warnings_of(&mesh);
         assert!(warnings[0].concerns("a") && warnings[0].concerns("b"));
         assert!(!warnings[0].concerns("c"));
-        assert_eq!(warnings[0].loss(), &TrailerLoss::Share { values: 12 });
     }
 }

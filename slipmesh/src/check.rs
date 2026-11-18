@@ -59,12 +59,11 @@ fn node(network: &Network, host: &str, resolved: &ResolvedSecrets) -> Result<()>
 
 /// Every node of `file` in its order, each with what refuses its configs: one refusal says nothing
 /// about the next node, so all of them are checked.
-pub fn nodes(network: &Network) -> Vec<(&str, Result<()>)> {
-    let resolved = sliplib_mesh::secrets::read(network);
+pub fn nodes<'n>(network: &'n Network, resolved: &ResolvedSecrets) -> Vec<(&'n str, Result<()>)> {
     network
         .nodes
         .iter()
-        .map(|host| (host.name.as_str(), node(network, &host.name, &resolved)))
+        .map(|host| (host.name.as_str(), node(network, &host.name, resolved)))
         .collect()
 }
 
@@ -82,8 +81,9 @@ pub fn network(file: &SlipmeshFile) -> Result<Network> {
     Ok(network)
 }
 
-/// Prints `<node>: ok` for each node that passes, every refusal on a line of its own, and then
-/// every warning, which fails nothing.
+/// Prints `<node>: ok` for each node that passes and every refusal on a line of its own. Where
+/// nothing was refused it then prints every warning, which fails nothing: a warning is counted
+/// from settings that pass the checks.
 pub fn run(config_path: &Path) -> ExitCode {
     let mut passed = ExitCode::SUCCESS;
     let mut refuse = |refusal: anyhow::Error| {
@@ -99,15 +99,17 @@ pub fn run(config_path: &Path) -> ExitCode {
             match network(&file) {
                 Err(refusal) => refuse(refusal),
                 Ok(network) => {
-                    for (host, checked) in nodes(&network) {
+                    let resolved = sliplib_mesh::secrets::read(&network);
+                    for (host, checked) in nodes(&network, &resolved) {
                         match checked {
                             Ok(()) => println!("{host}: ok"),
                             Err(refusal) => refuse(refusal),
                         }
                     }
-                    let resolved = sliplib_mesh::secrets::read(&network);
-                    for warning in sliplib_mesh::warnings::warnings(&network, &resolved) {
-                        eprintln!("warning: {warning}");
+                    if passed == ExitCode::SUCCESS {
+                        for warning in sliplib_mesh::warnings::warnings(&network, &resolved) {
+                            eprintln!("warning: {warning}");
+                        }
                     }
                 }
             }
