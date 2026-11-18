@@ -3,7 +3,7 @@
 //! purely behavioral, driven by whether a given peer's `allowed_ips` is set (see `PeerEntry`'s own
 //! doc comment).
 
-use crate::{MetricsConfig, MetricsError, Obfuscation};
+use crate::{MetricsConfig, MetricsError, Obfuscation, Range};
 use serde::{Deserialize, Serialize};
 use sliplib_net::parse as parse_cidr;
 use sliplib_secrets::wireguard::PrivateKey;
@@ -74,6 +74,13 @@ pub struct PeerEntry {
     /// both kinds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_ips: Option<Vec<String>>,
+    /// Seconds without traffic after which this node sends the peer a packet, so that a NAT on
+    /// the way keeps its mapping: a number, or a range the kernel module draws an interval from
+    /// each time it sets the timer. It counts only for a peer with an `endpoint`, which this node
+    /// dials; `0` sends none. Unset, the reader takes its own interval: a config written before
+    /// this field existed has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistent_keepalive: Option<Range<u16>>,
 }
 
 pub const DEFAULT_HANDSHAKE_STALE_SECS: u64 = 180;
@@ -107,6 +114,15 @@ pub enum Invalid {
         interface: String,
         public_key: String,
     },
+    #[error(
+        "interface {interface:?}, peer {peer:?}: persistent_keepalive is {range}; a range of it must start at 1 or above, and 0 alone sends none"
+    )]
+    Keepalive {
+        interface: String,
+        /// The peer's public key.
+        peer: String,
+        range: Range<u16>,
+    },
     #[error("interface {interface:?}, peer {peer:?}: invalid allowed_ips entry {cidr:?}: {error}")]
     AllowedIp {
         interface: String,
@@ -118,8 +134,8 @@ pub enum Invalid {
 }
 
 /// Pure validation, no I/O: interface names are non-empty, fit `IFNAMSIZ`, and are unique;
-/// every `addresses`/`allowed_ips` entry is a parseable CIDR (either family); `metrics.listen`,
-/// when present, is a parseable IPv4 `ip:port`.
+/// every `addresses`/`allowed_ips` entry is a parseable CIDR (either family); a peer's keepalive
+/// range starts at 1 or above; `metrics.listen`, when present, is a parseable IPv4 `ip:port`.
 pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
     if let Some(metrics) = &cfg.metrics {
         metrics.validate("metrics.listen")?;
@@ -163,6 +179,18 @@ pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
                 return Err(Invalid::DuplicatePeer {
                     interface: iface.name.clone(),
                     public_key: peer.public_key.clone(),
+                });
+            }
+            // The module draws the interval out of the range as written, and a draw of 0 sends
+            // a packet at once and again at every re-arm.
+            if let Some(range) = peer.persistent_keepalive
+                && !range.is_zero()
+                && range.lo() < 1
+            {
+                return Err(Invalid::Keepalive {
+                    interface: iface.name.clone(),
+                    peer: peer.public_key.clone(),
+                    range,
                 });
             }
             for cidr in peer.allowed_ips.iter().flatten() {
@@ -353,6 +381,7 @@ interfaces:
             name: None,
             endpoint: None,
             allowed_ips: Some(vec!["not-a-cidr".to_string()]),
+            persistent_keepalive: None,
         });
         let cfg = AwgConfig {
             interfaces: vec![a],
@@ -369,12 +398,14 @@ interfaces:
             name: None,
             endpoint: None,
             allowed_ips: Some(vec!["203.0.113.1/32".to_string()]),
+            persistent_keepalive: None,
         });
         a.peers.push(PeerEntry {
             public_key: "k".to_string(),
             name: None,
             endpoint: None,
             allowed_ips: Some(vec!["203.0.113.2/32".to_string()]),
+            persistent_keepalive: None,
         });
         let cfg = AwgConfig {
             interfaces: vec![a],
@@ -441,5 +472,57 @@ interfaces:
     #[test]
     fn accepts_an_empty_config() {
         assert!(validate(&AwgConfig::default()).is_ok());
+    }
+
+    fn dialed(persistent_keepalive: Option<Range<u16>>) -> AwgConfig {
+        let mut a = iface("a");
+        a.peers.push(PeerEntry {
+            public_key: "k".to_string(),
+            name: None,
+            endpoint: Some("192.0.2.1:51820".to_string()),
+            allowed_ips: None,
+            persistent_keepalive,
+        });
+        AwgConfig {
+            interfaces: vec![a],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_peers_keepalive_is_written_as_a_number_or_a_range_and_left_out_when_unset() {
+        for (keepalive, written) in [
+            (Some(Range::from(25)), Some("persistent_keepalive: 25\n")),
+            (
+                Some(Range::new(20, 30).unwrap()),
+                Some("persistent_keepalive: 20-30\n"),
+            ),
+            (None, None),
+        ] {
+            let cfg = dialed(keepalive);
+            let yaml = sliplib_yaml::to_string(&cfg).unwrap();
+            match written {
+                Some(line) => assert!(yaml.contains(line), "{yaml}"),
+                None => assert!(!yaml.contains("persistent_keepalive"), "{yaml}"),
+            }
+            assert_eq!(sliplib_yaml::from_str::<AwgConfig>(&yaml).unwrap(), cfg);
+        }
+    }
+
+    #[test]
+    fn a_keepalive_range_that_starts_at_zero_is_refused_naming_the_peer() {
+        let err = validate(&dialed(Some(Range::new(0, 30).unwrap())))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("interface \"a\", peer \"k\": persistent_keepalive is 0-30"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_keepalive_of_zero_alone_or_a_range_from_one_is_accepted() {
+        validate(&dialed(Some(Range::from(0)))).unwrap();
+        validate(&dialed(Some(Range::new(1, 30).unwrap()))).unwrap();
     }
 }
