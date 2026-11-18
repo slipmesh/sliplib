@@ -4,7 +4,7 @@
 //! As the loader returns it, a node's `routing` and the block of a link's type hold what is in
 //! force there: the node's and the link's own values laid over the network's.
 
-use super::{ClassName, Map, Name, Platform};
+use super::{ClassName, Map, Name, Platform, UniqueKeys, unique_keys};
 use crate::router::{BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER};
 use crate::{Obfuscation, Range};
 use serde::{Deserialize, Deserializer};
@@ -23,12 +23,26 @@ where
     Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
+/// A mapping whose keys are names, `null` read as the mapping left out, a key that stands twice
+/// refused.
+fn names_absent_when_null<'de, D, K, V>(deserializer: D) -> Result<Map<K, V>, D::Error>
+where
+    D: Deserializer<'de>,
+    K: Deserialize<'de> + std::hash::Hash + Eq + std::fmt::Debug,
+    V: Deserialize<'de>,
+{
+    Ok(Option::<UniqueKeys<K, V>>::deserialize(deserializer)?
+        .map(|keys| keys.0)
+        .unwrap_or_default())
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Network {
     pub addressing: Addressing,
     pub routing: Routing,
     pub mesh: Mesh,
+    #[serde(deserialize_with = "unique_keys")]
     pub nodes: Map<Name, Node>,
 }
 
@@ -96,7 +110,7 @@ pub struct Routing {
     pub learn: Vec<Prefix4>,
     #[serde(default, deserialize_with = "absent_when_null")]
     pub announce: Vec<Prefix4>,
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default, deserialize_with = "names_absent_when_null")]
     pub classes: Map<ClassName, Class>,
 }
 
@@ -151,6 +165,7 @@ pub struct Node {
     /// An identity in the form of an IPv4 address, from which the node's addresses are derived.
     pub node_id: Ipv4Addr,
     /// What the node reaches the world through, by name.
+    #[serde(deserialize_with = "unique_keys")]
     pub underlay: Map<Name, Underlay>,
     #[serde(default)]
     pub wireguard: Option<NodeWireguard>,
@@ -325,7 +340,7 @@ pub struct Mesh {
     pub wireguard: Option<WireguardDefaults>,
     #[serde(default)]
     pub amneziawg: Option<AmneziawgDefaults>,
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default, deserialize_with = "names_absent_when_null")]
     pub links: Map<Name, Link>,
 }
 
@@ -421,6 +436,7 @@ struct End {}
 #[serde(deny_unknown_fields)]
 struct LinkKeys {
     r#type: LinkType,
+    #[serde(deserialize_with = "unique_keys")]
     ends: Map<Name, End>,
     #[serde(default)]
     wireguard: Option<WireguardLink>,
@@ -865,5 +881,29 @@ mod tests {
         assert_eq!(fields, OBFUSCATION_FIELDS);
         let read: StrictObfuscation = sliplib_yaml::from_value(written).unwrap();
         assert_eq!(read.0, every_field);
+    }
+
+    /// A node that reads, to be laid into the example under a name.
+    const NODE: &str = "{platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}";
+
+    // YAML reads `1.0` and `1` as one name: two entries would be one, the later replacing the
+    // earlier.
+    #[test]
+    fn two_keys_of_one_mapping_of_the_network_that_read_as_one_name_are_refused() {
+        let node = NODE.replace("0.0.0.9", "0.0.0.10");
+        let link = "{type: wireguard, ends: {node-a: {}, router1: {}}, wireguard: {port: 1}}";
+        for overlay in [
+            format!("{{nodes: {{1.0: {NODE}, 1: {node}}}}}"),
+            "{routing: {classes: {1.0: {protocol: 160}, 1: {protocol: 161}}}}".to_owned(),
+            "{nodes: {node-a: {underlay: {1.0: {}, 1: {}}}}}".to_owned(),
+            format!("{{mesh: {{links: {{1.0: {link}, 1: {link}}}}}}}"),
+            "{mesh: {links: {a-b: {ends: {1.0: {}, 1: {}}}}}}".to_owned(),
+        ] {
+            let refused = with(&overlay).unwrap_err();
+            assert!(
+                refused.contains("the name \"1\" stands twice"),
+                "{overlay}: {refused}"
+            );
+        }
     }
 }

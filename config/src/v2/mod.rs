@@ -87,3 +87,16 @@ where
 
     deserializer.deserialize_map(Entries(std::marker::PhantomData))
 }
+
+/// A [`Map`] read by [`unique_keys`], for a field that also takes `null` as the map left out.
+pub(crate) struct UniqueKeys<K, V>(pub Map<K, V>);
+
+impl<'de, K, V> serde::Deserialize<'de> for UniqueKeys<K, V>
+where
+    K: serde::Deserialize<'de> + std::hash::Hash + Eq + std::fmt::Debug,
+    V: serde::Deserialize<'de>,
+{
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        unique_keys(deserializer).map(Self)
+    }
+}
