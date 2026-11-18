@@ -18,9 +18,13 @@ interfaces:
     h3: 3303
     h4: 4404
     i1: <b 0xabcd><r 16>
+    i3: <t><r 8>
+    i4: <rc 12>
+    i5: <rd 6>
     header_protection_key: ccccccccccccccccccccccccccccccccccccccccccc=
+    keepalive_timeout: 11
     random_trailers: true
-  mtu: 1324
+  mtu: 1320
   peers:
   - public_key: <public key of node-a>
     name: node-a
@@ -44,6 +48,7 @@ interfaces:
     h3: 43
     h4: 44
     i1: <b 0xabcd><r 16>
+    keepalive_timeout: 11
     random_trailers: true
   handshake_stale_secs: 300
   peers:

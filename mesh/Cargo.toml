@@ -23,4 +23,5 @@ sliplib-secrets.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 expect-test.workspace = true
+sha2.workspace = true
 sliplib-yaml.workspace = true

@@ -21,7 +21,7 @@ interfaces:
     rekey_after_time: 100-140
     keepalive_timeout: 12
     random_trailers: false
-  mtu: 1324
+  mtu: 1320
   peers:
   - public_key: <public key of node-a>
     name: node-a
@@ -33,20 +33,21 @@ interfaces:
   - 198.51.100.131/32
   private_key: IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII=
   obfuscation:
-    jc: 6
+    jc: 9
     jmin: 60
     jmax: 600
     s1: 60
     s2: 61
     s3: 40
-    s4: 16
+    s4: 20
     h1: 21
     h2: 22
     h3: 23
     h4: 24
     i1: <b 0xabcd><r 16>
+    keepalive_timeout: 11
     random_trailers: true
-  mtu: 1324
+  mtu: 1320
   peers:
   - public_key: <public key of node-e>
     name: node-e
@@ -70,8 +71,9 @@ interfaces:
     h3: 33
     h4: 34
     i1: <b 0xabcd><r 16>
+    keepalive_timeout: 11
     random_trailers: true
-  mtu: 1324
+  mtu: 1320
   peers:
   - public_key: <public key of node-f>
     name: node-f
