@@ -68,7 +68,7 @@ pub enum LinkError {
 /// The MTU of every mesh interface: `cluster.mesh_mtu` when it fits every link, else the least
 /// link limit. None for a mesh without links, which has no mesh interface to give it to.
 pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32>, MtuError> {
-    let key = mesh.keys.mtu;
+    let key = mesh.format().mtu();
     let mut least: Option<(u32, &Link)> = None;
     for link in &mesh.links {
         let limit = link_limit(mesh, link, resolved).map_err(|source| MtuError::Link {

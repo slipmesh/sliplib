@@ -79,14 +79,14 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
     let mut written = secrets::read(network);
     let mut minted = Minted::default();
 
+    let format = network.format();
     for (index, node) in network.nodes.iter().enumerate() {
-        if written.mesh_private_keys.contains_key(&node.name) {
+        let keyed = format.keys_every_node() || network.is_on_a_link(&node.name);
+        if !keyed || written.mesh_private_keys.contains_key(&node.name) {
             continue;
         }
         minted.node_keys.push((index, PrivateKey::generate()));
-        minted
-            .names
-            .push(format!("nodes[{}].mesh_private_key", node.name));
+        minted.names.push(format.node_key(&node.name));
     }
 
     for (index, link) in network.links.iter().enumerate() {
@@ -98,7 +98,7 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
             .mesh_link_obfuscation
             .entry(pair.clone())
             .or_default();
-        let entry = format!("mesh.links[{pair}].obfuscation");
+        let entry = format.link_obfuscation(link);
         if let Some(generated) = mint_obfuscation(obfuscation, &entry)? {
             minted.link_obfuscation.push((index, generated));
             minted.names.push(entry);
@@ -332,5 +332,60 @@ roadwarriors:
         let minted = create(&topology).unwrap();
         assert!(minted.is_empty());
         assert!(minted.pools.is_empty());
+    }
+
+    /// The example of the specification as it is before anything is minted, with `overlay` laid
+    /// over it.
+    fn unminted(overlay: &str) -> Network {
+        let layers = [include_str!("../../docs/example/mesh.yaml"), overlay];
+        let tree = layers
+            .iter()
+            .fold(sliplib_yaml::Value::Null, |tree, layer| {
+                sliplib_yaml::merge(tree, &sliplib_yaml::from_str(layer).unwrap())
+            });
+        let files =
+            sliplib_config::v2::File::parse(&sliplib_yaml::to_string(&tree).unwrap()).unwrap();
+        crate::v2::lower(&files).unwrap()
+    }
+
+    #[test]
+    fn what_is_minted_for_version_2_is_named_as_that_version_writes_it() {
+        let minted = super::create(&unminted("{}")).unwrap();
+        assert_eq!(
+            minted.routes(),
+            [
+                "nodes.node-a.wireguard.private_key",
+                "nodes.node-b.wireguard.private_key",
+                "nodes.node-c.wireguard.private_key",
+                "nodes.router1.wireguard.private_key",
+                "mesh.links.a-b.amneziawg.obfuscation",
+                "mesh.links.a-c.amneziawg.obfuscation",
+            ]
+        );
+        // By their positions in the network: the link of type `wireguard` is the third.
+        let links: Vec<usize> = minted
+            .link_obfuscation
+            .iter()
+            .map(|(link, _)| *link)
+            .collect();
+        assert_eq!(links, [0, 1]);
+    }
+
+    #[test]
+    fn in_version_2_a_node_on_no_link_gets_no_key() {
+        let alone = "{nodes: {node-x: {platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}}}";
+        let minted = super::create(&unminted(alone)).unwrap();
+        let nodes: Vec<usize> = minted.node_keys.iter().map(|(node, _)| *node).collect();
+        assert_eq!(nodes, [0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn a_link_of_version_2_with_no_header_left_is_named_as_that_version_writes_it() {
+        let full = "{mesh: {links: {a-b: {amneziawg: {obfuscation: {h1: 0-4294967295}}}}}}";
+        let refusal = super::create(&unminted(full)).err().unwrap().to_string();
+        assert!(
+            refusal.starts_with("mesh.links.a-b.amneziawg.obfuscation: "),
+            "{refusal}"
+        );
     }
 }

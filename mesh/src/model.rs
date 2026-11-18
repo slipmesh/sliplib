@@ -7,6 +7,7 @@
 //! refuses is refused where that version is read and lowered.
 
 use crate::render::RenderError;
+use crate::secrets::link_key;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_config::v1::mesh_config::{AddressFamily, BypassEntry, RoadwarriorPool, UnknownNode};
@@ -31,37 +32,78 @@ pub struct Network {
     /// The classes of routes by name, each with its protocol number.
     pub classes: Vec<(String, u8)>,
     pub metrics: MetricsPorts,
-    pub keys: Keys,
     /// What only a file of version 1 holds.
     pub v1: Option<V1Only>,
 }
 
-/// How a message names the keys of the files, which differ between the versions of the format.
+/// The version of the format a network was read from, where what is computed or said of it
+/// depends on that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Keys {
-    /// A node's private key, under the node.
-    pub private_key: &'static str,
-    /// The MTU set for the mesh.
-    pub mtu: &'static str,
+pub enum Format {
+    V1,
+    V2,
 }
 
-impl Keys {
-    pub const V1: Self = Self {
-        private_key: "mesh_private_key",
-        mtu: "cluster.mesh_mtu",
-    };
-    pub const V2: Self = Self {
-        private_key: "wireguard.private_key",
-        mtu: "mesh.mtu",
-    };
+impl Format {
+    /// How the files name a node's private key, under the node.
+    pub fn private_key(self) -> &'static str {
+        match self {
+            Self::V1 => "mesh_private_key",
+            Self::V2 => "wireguard.private_key",
+        }
+    }
+
+    /// How the files name the MTU set for the mesh.
+    pub fn mtu(self) -> &'static str {
+        match self {
+            Self::V1 => "cluster.mesh_mtu",
+            Self::V2 => "mesh.mtu",
+        }
+    }
+
+    /// Whether every node has a key. A file of version 2 holds one only for a node on a link.
+    pub fn keys_every_node(self) -> bool {
+        self == Self::V1
+    }
+
+    /// Where the files hold the key of `node`, as a message names it.
+    pub fn node_key(self, node: &str) -> String {
+        match self {
+            Self::V1 => format!("nodes[{node}].mesh_private_key"),
+            Self::V2 => format!("nodes.{node}.wireguard.private_key"),
+        }
+    }
+
+    /// Where the files hold the obfuscation of `link`, as a message names it. Version 1 gives a
+    /// link no name, and it is named by its two nodes, sorted.
+    pub fn link_obfuscation(self, link: &Link) -> String {
+        match self {
+            Self::V1 => format!("mesh.links[{}].obfuscation", link_key(&link.ends)),
+            Self::V2 => format!("mesh.links.{}.amneziawg.obfuscation", link.name),
+        }
+    }
 }
 
 impl Network {
+    pub fn format(&self) -> Format {
+        match self.v1 {
+            Some(_) => Format::V1,
+            None => Format::V2,
+        }
+    }
+
     pub fn node(&self, name: &str) -> Result<&Node, UnknownNode> {
         self.nodes
             .iter()
             .find(|node| node.name == name)
             .ok_or_else(|| UnknownNode(name.to_owned()))
+    }
+
+    /// Whether `node` is an end of a link.
+    pub fn is_on_a_link(&self, node: &str) -> bool {
+        self.links
+            .iter()
+            .any(|link| link.ends.iter().any(|end| end == node))
     }
 }
 
@@ -162,10 +204,10 @@ mod tests {
     #[test]
     fn a_file_of_either_version_is_lowered_by_its_own() {
         let of_version_1 = lowered(VERSION_1).unwrap();
-        assert_eq!(of_version_1.keys, Keys::V1);
+        assert_eq!(of_version_1.format(), Format::V1);
         assert!(of_version_1.v1.is_some());
         let of_version_2 = lowered(VERSION_2).unwrap();
-        assert_eq!(of_version_2.keys, Keys::V2);
+        assert_eq!(of_version_2.format(), Format::V2);
         assert!(of_version_2.v1.is_none());
     }
 

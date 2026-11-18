@@ -351,6 +351,7 @@ fn reaching<'a, T>(documents: &'a [T], aim: impl Fn(&T) -> &Aim, node: &str) -> 
 
 pub struct File {
     network: Network,
+    network_document: usize,
     platforms: Vec<(Platform, Document)>,
     templates: Vec<TemplateDocument>,
     patches: Vec<PatchDocument>,
@@ -424,6 +425,7 @@ impl File {
         }
 
         let written = at_most_one(networks, NETWORK)?.ok_or(Error::NoNetwork)?;
+        let network_document = written.index;
         // Read as written first: from the text, an error names the line.
         body::<Network>(&written, NETWORK)?;
         let network: Network = sliplib_yaml::from_value(in_force(written.value))
@@ -448,6 +450,7 @@ impl File {
         }
         Ok(Self {
             network,
+            network_document,
             platforms,
             templates,
             patches,
@@ -458,6 +461,12 @@ impl File {
     /// the block of its type.
     pub fn network(&self) -> &Network {
         &self.network
+    }
+
+    /// The position of the `network` document in the file, where a value of the network is
+    /// written.
+    pub fn network_document(&self) -> usize {
+        self.network_document
     }
 
     /// The settings of `platform`: the body of its `platform` document, and what a platform has
@@ -749,6 +758,14 @@ mod tests {
         )])
         .unwrap();
         assert_eq!(wireguard(&file, "a-r1").persistent_keepalive, None);
+    }
+
+    #[test]
+    fn the_network_document_is_known_by_its_position_in_the_file() {
+        let settings = "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n";
+        // An empty document counts: the position is that of the file, which an edit goes by.
+        let file = file(&[settings, "", &network("{}")]).unwrap();
+        assert_eq!(file.network_document(), 2);
     }
 
     #[test]

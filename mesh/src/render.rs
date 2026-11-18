@@ -204,18 +204,26 @@ fn mesh_interfaces_for(
     resolved: &ResolvedSecrets,
 ) -> Result<Vec<InterfaceEntry>> {
     let node = mesh.node(node_name)?;
-    let key = mesh.keys.private_key;
-    let own_private_key = resolved
-        .mesh_private_keys
-        .get(node_name)
-        .ok_or_else(|| MissingSecret(format!("node {node_name:?}: {key} is not set")))?;
-    // Decoded for every node, whether or not a link uses its key: where one does, the daemon
-    // would otherwise be the first to decode it, and refuse a config it is already running on.
-    own_private_key
-        .public_key()
-        .map_err(key_of(node_name, key))?;
+    let key = mesh.format().private_key();
+    let keyed = mesh.format().keys_every_node() || mesh.is_on_a_link(node_name);
+    let own_private_key = if keyed {
+        let own = resolved
+            .mesh_private_keys
+            .get(node_name)
+            .ok_or_else(|| MissingSecret(format!("node {node_name:?}: {key} is not set")))?;
+        // Decoded whether or not a link uses the key: where one does, the daemon would
+        // otherwise be the first to decode it, and refuse a config it is already running on.
+        own.public_key().map_err(key_of(node_name, key))?;
+        Some(own)
+    } else {
+        None
+    };
 
+    // Before the node's links: what refuses the MTU of the mesh stops a node on no link too.
     let mtu = crate::mtu::mesh_mtu(mesh, resolved)?;
+    let Some(own_private_key) = own_private_key else {
+        return Ok(Vec::new());
+    };
     let mut out = Vec::new();
     for link in &mesh.links {
         let peer_name = if link.ends[0] == node_name {

@@ -2,7 +2,7 @@
 //! the addresses its `node_id` gives it, every link with what the loader found in force on it.
 
 use crate::addressing;
-use crate::model::{Endpoint, Keys, Link, MetricsPorts, Network, Node};
+use crate::model::{Endpoint, Link, MetricsPorts, Network, Node};
 use crate::mtu::DEFAULT_UPLINK_MTU;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::v1::mesh_config::AddressFamily;
@@ -225,7 +225,6 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             .map(|(name, class)| (name.to_string(), class.protocol))
             .collect(),
         metrics: MetricsPorts::default(),
-        keys: Keys::V2,
         v1: None,
     })
 }
@@ -237,6 +236,7 @@ fn prefixes(list: &[network::Prefix4]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Format;
     use crate::render::node_configs;
     use crate::secrets;
     use sliplib_config::v2::Platform;
@@ -444,7 +444,7 @@ mod tests {
         );
         assert_eq!(network.mtu, Some(1320));
         assert_eq!(network.classes, [("egress".to_owned(), 152)]);
-        assert_eq!(network.keys, Keys::V2);
+        assert_eq!(network.format(), Format::V2);
         assert_eq!(network.metrics, MetricsPorts::default());
         assert!(network.v1.is_none());
         let names: Vec<&str> = network
@@ -628,6 +628,25 @@ mod tests {
         );
         let above = lowered("{mesh: {mtu: 9000}}");
         let refusal = refused(&above, "node-a");
+        assert!(refusal.contains("mesh.mtu 9000 is above"), "{refusal}");
+    }
+
+    /// A node that is on no link, and has no key.
+    const ALONE: &str =
+        "{nodes: {node-x: {platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}}}";
+
+    #[test]
+    fn a_node_on_no_link_needs_no_key() {
+        let network = lowered(ALONE);
+        let configs = node_configs(&network, "node-x", &secrets::read(&network)).unwrap();
+        assert!(configs.awg.interfaces.is_empty());
+        assert_eq!(configs.router.bgp_peers.len(), 4);
+    }
+
+    #[test]
+    fn a_node_on_no_link_is_still_stopped_by_what_stops_every_node() {
+        let network = lowered(&format!("{{mesh: {{mtu: 9000}}, {}", &ALONE[1..]));
+        let refusal = refused(&network, "node-x");
         assert!(refusal.contains("mesh.mtu 9000 is above"), "{refusal}");
     }
 
