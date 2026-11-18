@@ -2,6 +2,7 @@
 
 mod block;
 mod check;
+mod file;
 pub mod groups;
 mod name;
 pub mod network;
@@ -11,6 +12,7 @@ mod testing;
 
 pub use block::{ALL, Block, Exclude, Include, NONE, Order, Platform, Rank};
 pub use check::Invalid;
+pub use file::{Aim, Error, File, PatchDocument, REVISION, TemplateDocument, VERSION};
 pub use name::{ClassName, Name, NameError};
 
 /// What is named, by its name, in the order written: the order reaches the nodes' configs.

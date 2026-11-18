@@ -44,6 +44,12 @@ pub struct Place {
     line: usize,
 }
 
+impl Place {
+    pub(crate) fn new(kind: &'static str, line: usize) -> Self {
+        Self { kind, line }
+    }
+}
+
 impl fmt::Display for Place {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
