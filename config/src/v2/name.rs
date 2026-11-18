@@ -31,6 +31,11 @@ impl Name {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The name of the group nobody defines.
+    pub(crate) fn all() -> Self {
+        Self(super::ALL.to_owned())
+    }
 }
 
 impl TryFrom<String> for Name {
