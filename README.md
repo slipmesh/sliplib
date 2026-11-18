@@ -241,7 +241,12 @@ message, each part once.
   `missing_defaults` lists the network settings the topology leaves to a default that a node is
   told, each with that default.
 - `nftables::TEMPLATE_PATH`, where the `nftables` service reads its ruleset template.
-- `awg`: `AwgConfig` with its interfaces and peers, and `validate`.
+- `awg`: `AwgConfig` with its interfaces and peers, and `validate`. A peer's `persistent_keepalive`
+  is a number of seconds or a range of them. `InterfaceEntry::keepalive_of` gives what a peer ends
+  up with: none for a peer without an `endpoint`, which is only waited for; for a dialed one its
+  own, or 25 on an interface that sets nothing of the obfuscation and 20 to 30 on one that sets
+  any. Whoever writes a config leaves out a keepalive that does not change what that gives;
+  `validate` takes one written all the same.
 - `router`: `RouterConfig` with its identity, iBGP peers, BFD settings, announcements and bypass
   sources, and `validate`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would
