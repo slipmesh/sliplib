@@ -352,6 +352,19 @@ cargo mutants
 [`cargo-mutants`](https://mutants.rs) changes the code one place at a time and expects a test to
 fail each time; [`.cargo/mutants.toml`](.cargo/mutants.toml) lists what it skips and why.
 
+[`mesh/tests/golden.rs`](mesh/tests/golden.rs) pins what a file of format version 1 gives its
+nodes: the configs of every node of the two fixtures under
+[`mesh/tests/golden/`](mesh/tests/golden) are compared byte for byte with the files beside each,
+with derived public keys named by their owner. `v1` sets every key of the format, and
+`v1-alternate` takes the other side of each key a file sets once. The Talos generator pins its
+patch files on copies of the same fixtures, and both tests hold the hash of each, so the copies
+change together. A change meant to move the configs records the new ones, and the difference is
+reviewed with the rest of the pull request; the test refuses to record in CI:
+
+```bash
+UPDATE_EXPECT=1 cargo test -p sliplib-mesh --test golden
+```
+
 ## Releasing
 
 Releases come from `main` only. Run the Release PR workflow, with the version or empty to compute it

@@ -1,0 +1,15 @@
+interfaces:
+- name: mesh-node-a
+  listen_port: 51835
+  addresses:
+  - fe80::1:7/64
+  - 198.51.100.135/32
+  private_key: YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY=
+  obfuscation: {}
+  mtu: 1320
+  peers:
+  - public_key: <public key of node-a>
+    name: node-a
+    endpoint: 192.0.2.1:51835
+metrics:
+  listen: 198.51.100.7:9586

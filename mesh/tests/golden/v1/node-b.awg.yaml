@@ -1,0 +1,60 @@
+interfaces:
+- name: mesh-node-a
+  listen_port: 51830
+  addresses:
+  - fe80::1:2/64
+  - 198.51.100.130/32
+  private_key: EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE=
+  obfuscation:
+    jc: 4
+    jmin: 40
+    jmax: 400
+    s1: 64
+    s2: 48
+    s3: 40
+    s4: 16
+    h1: 1101
+    h2: 2202
+    h3: 3303
+    h4: 4404
+    i1: <b 0xabcd><r 16>
+    i3: <t><r 8>
+    i4: <rc 12>
+    i5: <rd 6>
+    header_protection_key: ccccccccccccccccccccccccccccccccccccccccccc=
+    keepalive_timeout: 11
+    random_trailers: true
+  mtu: 1320
+  peers:
+  - public_key: <public key of node-a>
+    name: node-a
+    endpoint: 192.0.2.1:51830
+- name: rw-obf
+  listen_port: 51841
+  addresses:
+  - 198.18.1.1/24
+  - 3fff:0:0:3::1/64
+  private_key: sssssssssssssssssssssssssssssssssssssssssss=
+  obfuscation:
+    jc: 8
+    jmin: 80
+    jmax: 800
+    s1: 50
+    s2: 51
+    s3: 40
+    s4: 16
+    h1: 41
+    h2: 42
+    h3: 43
+    h4: 44
+    i1: <b 0xabcd><r 16>
+    keepalive_timeout: 11
+    random_trailers: true
+  handshake_stale_secs: 300
+  peers:
+  - public_key: wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww=
+    name: tablet
+    allowed_ips:
+    - 198.18.1.2/32
+metrics:
+  listen: 198.51.100.2:9586
