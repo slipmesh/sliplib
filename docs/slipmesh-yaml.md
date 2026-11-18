@@ -874,7 +874,7 @@ network of any length is taken: unlike the IPv6 loopback, `link_local` may be lo
 **A host part of zeros.** An address whose host part is all zeros is refused only where the prefix
 it stands with on its interface makes it special. On an IPv4 prefix shorter than /31 the host part
 of all zeros names the network and that of all ones its broadcast address
-([RFC 1812, section 4.2.3.1](https://www.rfc-editor.org/rfc/rfc1812#section-4.2.3.1)), and neither
+([RFC 1812, section 4.2.3](https://www.rfc-editor.org/rfc/rfc1812#section-4.2.3)), and neither
 is taken. On an IPv6 prefix shorter than /127 the host part of all zeros is the Subnet-Router
 anycast address ([RFC 4291, section 2.6.1](https://www.rfc-editor.org/rfc/rfc4291#section-2.6.1)),
 and is not taken. A /31 ([RFC 3021](https://www.rfc-editor.org/rfc/rfc3021)), a /127
