@@ -47,16 +47,16 @@ fn node(file: &SlipmeshFile, host: &str, resolved: &ResolvedSecrets) -> Result<(
 
 /// Every node of `file` in its order, each with what refuses its configs: one refusal says nothing
 /// about the next node, so all of them are checked.
-pub fn nodes(file: &SlipmeshFile) -> Vec<(&str, Result<()>)> {
-    let resolved = sliplib_mesh::secrets::read(file.topology());
+pub fn nodes<'f>(file: &'f SlipmeshFile, resolved: &ResolvedSecrets) -> Vec<(&'f str, Result<()>)> {
     file.hosts()
         .into_iter()
-        .map(|host| (host, node(file, host, &resolved)))
+        .map(|host| (host, node(file, host, resolved)))
         .collect()
 }
 
-/// Prints `<node>: ok` for each node that passes, every refusal on a line of its own, and then
-/// every warning, which fails nothing.
+/// Prints `<node>: ok` for each node that passes and every refusal on a line of its own. Where
+/// nothing was refused it then prints every warning, which fails nothing: a warning is counted
+/// from settings that pass the checks.
 pub fn run(config_path: &Path) -> ExitCode {
     let mut passed = ExitCode::SUCCESS;
     let mut refuse = |refusal: anyhow::Error| {
@@ -69,15 +69,17 @@ pub fn run(config_path: &Path) -> ExitCode {
             if let Err(refusal) = whole_file(config_path, &file) {
                 refuse(refusal);
             }
-            for (host, checked) in nodes(&file) {
+            let resolved = sliplib_mesh::secrets::read(file.topology());
+            for (host, checked) in nodes(&file, &resolved) {
                 match checked {
                     Ok(()) => println!("{host}: ok"),
                     Err(refusal) => refuse(refusal),
                 }
             }
-            let resolved = sliplib_mesh::secrets::read(file.topology());
-            for warning in sliplib_mesh::warnings::warnings(file.topology(), &resolved) {
-                eprintln!("warning: {warning}");
+            if passed == ExitCode::SUCCESS {
+                for warning in sliplib_mesh::warnings::warnings(file.topology(), &resolved) {
+                    eprintln!("warning: {warning}");
+                }
             }
         }
     }
