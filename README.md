@@ -10,7 +10,7 @@ the command-line tool for `slipmesh.yaml` itself.
 | [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and written back |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
-| [`sliplib-config`](config) | `slipmesh.yaml` and the patch format: the schema and its loader, Talos documents and the daemons' configs, with their checks |
+| [`sliplib-config`](config) | `slipmesh.yaml`, its schema and its loader, and the configs of the daemons, each with its checks |
 | [`sliplib-mesh`](mesh) | A node's `awg` and `router` configs, computed from `slipmesh.yaml` |
 
 The crates and the tool are one workspace with one version and one tag. A change to one crate moves
@@ -209,14 +209,17 @@ mean.
 
 ### `sliplib-config`
 
-`slipmesh.yaml`, which every tool reads, and the patch format: what the config generator writes for
-a node, and what its readers take - Talos, the daemons on the node, and the RouterOS tool. Types and
-their checks only; reading and writing the files is `sliplib-yaml`'s.
+`slipmesh.yaml`, which every tool reads, and the daemons' configs: what a config generator writes
+for a node from it, and what its readers take - the daemons on the node, and the RouterOS tool.
+Types and their checks only; reading and writing the files is `sliplib-yaml`'s.
 
 Every check and the loader return an error type of their own, one variant for each refusal:
-`slipmesh_file::Error`, `mesh_config::Invalid`, `awg::Invalid`, `router::Invalid`,
-`ObfuscationError`, `MetricsError`, `talos::Error`. A variant's text is one line of the refusal,
-and what it was caused by is its `source`, so printing the whole chain gives the whole message.
+`slipmesh_file::Error`, `mesh_config::Invalid` and `UnknownNode`, `awg::Invalid`, `router::Invalid`
+and `LoopbackAddressError`, `ObfuscationError`, `MetricsError`. A variant's text is one line of the
+refusal. Where that line names its cause itself - an address that does not parse, with why - the
+variant holds the cause as a field and has no `source`; where the cause is a line of its own, it is
+the variant's `source`. A variant never does both, so printing the whole chain gives the whole
+message, each part once.
 
 - `slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a `MultiDoc`
   (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
@@ -230,14 +233,6 @@ and what it was caused by is its `source`, so printing the whole chain gives the
   `missing_defaults` lists the network settings the topology leaves to a default that a node is
   told, each with that default.
 - `nftables::TEMPLATE_PATH`, where the `nftables` service reads its ruleset template.
-- `talos`: `Identity` is what Talos keys a document by (`apiVersion`, `kind`, `name`).
-  `ExtensionServiceConfig` and `ConfigFile` build and find the document that mounts a service's
-  files; `sets_file` says whether a document sets one of them, and `contents_as_text` turns a file's
-  contents written as YAML into the string Talos takes. `merge` merges two documents of one identity
-  as a JSON Merge Patch, a `$patch: delete` on either side replaced by the overlay.
-  `kube_node_config` is an empty `KubeNodeConfig` and `is_kube_node_config` recognises one;
-  `annotate` adds the annotations of one namespace to it, refusing a document that deletes it or
-  sets an annotation in that namespace itself.
 - `awg`: `AwgConfig` with its interfaces and peers, and `validate`.
 - `router`: `RouterConfig` with its identity, iBGP peers, BFD settings, announcements and bypass
   sources, and `validate`.
@@ -257,8 +252,8 @@ and what it was caused by is its `source`, so printing the whole chain gives the
 What a node's daemons are configured with, computed from the topology `sliplib-config` reads, for
 every tool that configures a node of any platform.
 
-A refusal is a `render::Error`, which names the node and which of its configs it is about, or an
-`mtu::MtuError`; the cause is the `source` of each.
+A refusal is a `render::Error`, which names the node and which of its configs it is about, with
+its cause as its `source`, or an `mtu::MtuError`.
 
 - `secrets::read` takes the secrets the file sets: each node's mesh private key, each pool's private
   key, and each link's and pool's obfuscation layered over the topology's. It never creates one: a
