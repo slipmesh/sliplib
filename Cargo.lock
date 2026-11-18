@@ -609,6 +609,7 @@ dependencies = [
  "sliplib-net",
  "sliplib-secrets",
  "sliplib-yaml",
+ "thiserror",
 ]
 
 [[package]]
@@ -622,6 +623,7 @@ dependencies = [
  "sliplib-net",
  "sliplib-secrets",
  "sliplib-yaml",
+ "thiserror",
 ]
 
 [[package]]

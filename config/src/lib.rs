@@ -12,6 +12,8 @@ pub mod router;
 pub mod slipmesh_file;
 pub mod talos;
 
-pub use metrics::MetricsConfig;
-pub use obfuscation::{DEFAULT_MAGIC_HEADERS, HEADER_PROTECTION_NONCE_SIZE, Obfuscation};
+pub use metrics::{MetricsConfig, MetricsError};
+pub use obfuscation::{
+    DEFAULT_MAGIC_HEADERS, HEADER_PROTECTION_NONCE_SIZE, Obfuscation, ObfuscationError,
+};
 pub use range::{End, Range, RangeError};

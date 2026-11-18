@@ -32,6 +32,7 @@ tokio-graceful-shutdown = "0.20.0"
 # The shutdown token tokio-graceful-shutdown hands out, at the version it builds on.
 tokio-util = { version = "0.7.20", default-features = false }
 tempfile = "3.27.0"
+thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
 sliplib-config = { path = "config" }
 sliplib-mesh = { path = "mesh" }

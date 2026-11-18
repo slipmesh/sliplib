@@ -3,23 +3,122 @@
 //! the topology's secrets as [`crate::secrets::read`] gives them.
 
 use crate::addressing;
-use crate::mtu::link_name;
+use crate::mtu::{MtuError, link_name};
 use crate::secrets::{MissingSecret, ResolvedSecrets, link_key, unminted};
-use anyhow::{Context, Result};
 use sliplib_config::awg::{AwgConfig, InterfaceEntry, PeerEntry};
-use sliplib_config::mesh_config::MeshConfig;
+use sliplib_config::mesh_config::{MeshConfig, UnknownNode};
 use sliplib_config::router::{
     AnnounceEntry, BgpPeerEntry, BypassConfig, DEFAULT_BYPASS_REFRESH_INTERVAL_SECS, NodeIdentity,
     RouterConfig,
 };
-use sliplib_config::{MetricsConfig, Obfuscation};
+use sliplib_config::{MetricsConfig, Obfuscation, ObfuscationError};
+use sliplib_secrets::wireguard::KeyError;
 use std::net::{Ipv4Addr, Ipv6Addr};
+
+/// Why a node has no configs. Every variant names the node and which of its two configs it is
+/// about; the cause is its source.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    #[error("rendering awg config for node {node:?}")]
+    RenderingAwg {
+        node: String,
+        #[source]
+        source: RenderError,
+    },
+    #[error("rendered awg config for node {node:?} is invalid")]
+    InvalidAwg {
+        node: String,
+        #[source]
+        source: sliplib_config::awg::Invalid,
+    },
+    #[error("node {node:?}, interface {interface:?}: the kernel module refuses this obfuscation")]
+    Obfuscation {
+        node: String,
+        interface: String,
+        #[source]
+        source: ObfuscationError,
+    },
+    #[error("rendering router config for node {node:?}")]
+    RenderingRouter {
+        node: String,
+        #[source]
+        source: RenderError,
+    },
+    #[error("rendered router config for node {node:?} is invalid")]
+    InvalidRouter {
+        node: String,
+        #[source]
+        source: sliplib_config::router::Invalid,
+    },
+}
+
+impl Error {
+    /// The key or obfuscation the node's configs lack, when that is what refused them: creating
+    /// it cures the refusal.
+    pub fn missing_secret(&self) -> Option<&MissingSecret> {
+        match self {
+            Self::RenderingAwg {
+                source: RenderError::MissingSecret(missing),
+                ..
+            }
+            | Self::RenderingRouter {
+                source: RenderError::MissingSecret(missing),
+                ..
+            } => Some(missing),
+            _ => None,
+        }
+    }
+}
+
+/// What a node's config cannot be computed from.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum RenderError {
+    #[error(transparent)]
+    MissingSecret(#[from] MissingSecret),
+    #[error(transparent)]
+    UnknownNode(#[from] UnknownNode),
+    #[error(transparent)]
+    Mtu(#[from] MtuError),
+    /// The network at the key `field` of the file does not read as one.
+    #[error("{field}")]
+    Network {
+        field: &'static str,
+        #[source]
+        source: sliplib_net::ParseError,
+    },
+    #[error("node {node:?}: node_id must be a valid IPv4-shaped identity")]
+    NodeId {
+        node: String,
+        #[source]
+        source: std::net::AddrParseError,
+    },
+    #[error("node {node:?}: mesh_private_key")]
+    Key {
+        node: String,
+        #[source]
+        source: KeyError,
+    },
+    #[error(
+        "node {node:?}: cluster.tunnel_networks is configured, so direct_interfaces must include {glob:?} - the tunnel IPv4 address is otherwise announced by nothing (OSPFv3 is IPv6-only) and is reachable on no other node"
+    )]
+    MeshPatternMissing { node: String, glob: String },
+    #[error("cluster.{0} is 0 - remove the field to serve no metrics")]
+    MetricsPortZero(&'static str),
+}
+
+type Result<T> = std::result::Result<T, RenderError>;
+
+fn network(field: &'static str) -> impl Fn(sliplib_net::ParseError) -> RenderError {
+    move |source| RenderError::Network { field, source }
+}
 
 fn parse_loopback_networks(mesh: &MeshConfig) -> Result<(Ipv4Addr, u8, Ipv6Addr, u8)> {
     let v4 = sliplib_net::parse_ipv4(&mesh.cluster.loopback_networks.ipv4)
-        .context("cluster.loopback_networks.ipv4")?;
+        .map_err(network("cluster.loopback_networks.ipv4"))?;
     let v6 = sliplib_net::parse_ipv6(&mesh.cluster.loopback_networks.ipv6)
-        .context("cluster.loopback_networks.ipv6")?;
+        .map_err(network("cluster.loopback_networks.ipv6"))?;
     Ok((v4.addr(), v4.prefix_len(), v6.addr(), v6.prefix_len()))
 }
 
@@ -27,8 +126,8 @@ fn parse_tunnel_networks(mesh: &MeshConfig) -> Result<Option<(Ipv4Addr, u8, Ipv6
     let Some(tn) = &mesh.cluster.tunnel_networks else {
         return Ok(None);
     };
-    let v4 = sliplib_net::parse_ipv4(&tn.ipv4).context("cluster.tunnel_networks.ipv4")?;
-    let v6 = sliplib_net::parse_ipv6(&tn.ipv6).context("cluster.tunnel_networks.ipv6")?;
+    let v4 = sliplib_net::parse_ipv4(&tn.ipv4).map_err(network("cluster.tunnel_networks.ipv4"))?;
+    let v6 = sliplib_net::parse_ipv6(&tn.ipv6).map_err(network("cluster.tunnel_networks.ipv6"))?;
     Ok(Some((
         v4.addr(),
         v4.prefix_len(),
@@ -39,8 +138,9 @@ fn parse_tunnel_networks(mesh: &MeshConfig) -> Result<Option<(Ipv4Addr, u8, Ipv6
 
 fn node_id_of(mesh: &MeshConfig, node_name: &str) -> Result<Ipv4Addr> {
     let node = mesh.node(node_name)?;
-    node.node_id.parse().with_context(|| {
-        format!("node {node_name:?}: node_id must be a valid IPv4-shaped identity")
+    node.node_id.parse().map_err(|source| RenderError::NodeId {
+        node: node_name.to_owned(),
+        source,
     })
 }
 
@@ -160,11 +260,10 @@ pub(crate) fn render_router_config(mesh: &MeshConfig, node_name: &str) -> Result
     // replies masqueraded through that address never route back.
     let glob = mesh_glob(mesh);
     if node_tunnel_addresses(mesh, node_name)?.is_some() && !direct_interfaces.contains(&glob) {
-        anyhow::bail!(
-            "node {node_name:?}: cluster.tunnel_networks is configured, so direct_interfaces must \
-             include {glob:?} - the tunnel IPv4 address is otherwise announced by nothing \
-             (OSPFv3 is IPv6-only) and is reachable on no other node"
-        );
+        return Err(RenderError::MeshPatternMissing {
+            node: node_name.to_owned(),
+            glob,
+        });
     }
     Ok(RouterConfig {
         node: NodeIdentity {
@@ -185,6 +284,13 @@ pub(crate) fn render_router_config(mesh: &MeshConfig, node_name: &str) -> Result
             "router_metrics_port",
         )?,
     })
+}
+
+fn key_of(node: &str) -> impl Fn(KeyError) -> RenderError {
+    move |source| RenderError::Key {
+        node: node.to_owned(),
+        source,
+    }
 }
 
 /// The node's mesh interfaces: one full-tunnel interface per link it is on, named after the peer
@@ -211,9 +317,7 @@ fn mesh_interfaces_for(
         .ok_or_else(|| MissingSecret(format!("node {node_name:?}: mesh_private_key is not set")))?;
     // Decoded for every node, whether or not a link uses its key: where one does, the daemon
     // would otherwise be the first to decode it, and refuse a config it is already running on.
-    own_private_key
-        .public_key()
-        .with_context(|| format!("node {node_name:?}: mesh_private_key"))?;
+    own_private_key.public_key().map_err(key_of(node_name))?;
 
     let mtu = crate::mtu::mesh_mtu(mesh, resolved)?;
     let mut out = Vec::new();
@@ -249,9 +353,7 @@ fn mesh_interfaces_for(
             handshake_stale_secs: None,
             mtu,
             peers: vec![PeerEntry {
-                public_key: peer_private_key
-                    .public_key()
-                    .with_context(|| format!("node {peer_name:?}: mesh_private_key"))?,
+                public_key: peer_private_key.public_key().map_err(key_of(peer_name))?,
                 name: Some(peer_name.clone()),
                 endpoint: peer_node
                     .endpoint
@@ -344,25 +446,38 @@ pub fn node_configs(
     model: &MeshConfig,
     host: &str,
     resolved: &ResolvedSecrets,
-) -> Result<NodeConfigs> {
-    let awg_cfg = render_awg_config(model, host, resolved)
-        .with_context(|| format!("rendering awg config for node {host:?}"))?;
-    sliplib_config::awg::validate(&awg_cfg)
-        .with_context(|| format!("rendered awg config for node {host:?} is invalid"))?;
+) -> std::result::Result<NodeConfigs, Error> {
+    let node = || host.to_owned();
+    let awg_cfg =
+        render_awg_config(model, host, resolved).map_err(|source| Error::RenderingAwg {
+            node: node(),
+            source,
+        })?;
+    sliplib_config::awg::validate(&awg_cfg).map_err(|source| Error::InvalidAwg {
+        node: node(),
+        source,
+    })?;
     // Checked here rather than by awg: the daemon can only refuse a config it is already running
     // on, and a refusal there would leave every interface of the node down.
     for iface in &awg_cfg.interfaces {
-        iface.obfuscation.validate().with_context(|| {
-            format!(
-                "node {host:?}, interface {:?}: the kernel module refuses this obfuscation",
-                iface.name
-            )
-        })?;
+        iface
+            .obfuscation
+            .validate()
+            .map_err(|source| Error::Obfuscation {
+                node: node(),
+                interface: iface.name.clone(),
+                source,
+            })?;
     }
-    let router_cfg = render_router_config(model, host)
-        .with_context(|| format!("rendering router config for node {host:?}"))?;
-    sliplib_config::router::validate(&router_cfg)
-        .with_context(|| format!("rendered router config for node {host:?} is invalid"))?;
+    let router_cfg =
+        render_router_config(model, host).map_err(|source| Error::RenderingRouter {
+            node: node(),
+            source,
+        })?;
+    sliplib_config::router::validate(&router_cfg).map_err(|source| Error::InvalidRouter {
+        node: node(),
+        source,
+    })?;
     Ok(NodeConfigs {
         awg: awg_cfg,
         router: router_cfg,
@@ -375,7 +490,7 @@ fn minted_obfuscation(
     read: Option<&Obfuscation>,
     plain: bool,
     what: &str,
-) -> Result<Obfuscation, MissingSecret> {
+) -> std::result::Result<Obfuscation, MissingSecret> {
     let obfuscation = read
         .cloned()
         .ok_or_else(|| MissingSecret(format!("{what}: obfuscation is not set")))?;
@@ -399,17 +514,16 @@ fn metrics_for(
     mesh: &MeshConfig,
     node_name: &str,
     port: Option<u16>,
-    field: &str,
+    field: &'static str,
 ) -> Result<Option<MetricsConfig>> {
     let Some(port) = port else {
         return Ok(None);
     };
     // Refused here, not by the daemon: unset already serves nothing, so 0 is a mistake, better
     // caught where it was written than on every node at once.
-    anyhow::ensure!(
-        port != 0,
-        "cluster.{field} is 0 - remove the field to serve no metrics"
-    );
+    if port == 0 {
+        return Err(RenderError::MetricsPortZero(field));
+    }
     let (v4, _v6) = node_loopbacks(mesh, node_name)?;
     Ok(Some(MetricsConfig {
         listen: format!("{v4}:{port}"),
@@ -938,7 +1052,10 @@ mesh:
     }
 
     fn refusal(mesh: &MeshConfig, resolved: &ResolvedSecrets, node: &str) -> String {
-        format!("{:#}", render_awg_config(mesh, node, resolved).unwrap_err())
+        format!(
+            "{:#}",
+            anyhow::Error::new(render_awg_config(mesh, node, resolved).unwrap_err())
+        )
     }
 
     fn says(err: &str, parts: &[&str]) {
@@ -1079,7 +1196,10 @@ mesh:
     fn node_configs_refusal(yaml: &str, resolved: Option<ResolvedSecrets>) -> String {
         let mesh: MeshConfig = sliplib_yaml::from_str(yaml).unwrap();
         let resolved = resolved.unwrap_or_else(|| resolved_for(&mesh));
-        format!("{:#}", node_configs(&mesh, "a", &resolved).unwrap_err())
+        format!(
+            "{:#}",
+            anyhow::Error::new(node_configs(&mesh, "a", &resolved).unwrap_err())
+        )
     }
 
     #[test]
@@ -1149,7 +1269,8 @@ mesh:
     fn is_a_missing_secret(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> bool {
         node_configs(mesh, "a", resolved)
             .unwrap_err()
-            .is::<MissingSecret>()
+            .missing_secret()
+            .is_some()
     }
 
     #[test]

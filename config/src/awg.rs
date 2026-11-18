@@ -3,7 +3,7 @@
 //! purely behavioral, driven by whether a given peer's `allowed_ips` is set (see `PeerEntry`'s own
 //! doc comment).
 
-use crate::{MetricsConfig, Obfuscation};
+use crate::{MetricsConfig, MetricsError, Obfuscation};
 use serde::{Deserialize, Serialize};
 use sliplib_net::parse as parse_cidr;
 use sliplib_secrets::wireguard::PrivateKey;
@@ -78,31 +78,70 @@ pub struct PeerEntry {
 
 pub const DEFAULT_HANDSHAKE_STALE_SECS: u64 = 180;
 
+/// What a daemon would refuse an `awg` config for, or fail on once it is converging the node.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Invalid {
+    #[error(transparent)]
+    Metrics(#[from] MetricsError),
+    #[error("interface name must not be empty")]
+    EmptyInterfaceName,
+    #[error("interface name {0:?} is longer than 15 bytes (IFNAMSIZ)")]
+    InterfaceNameTooLong(String),
+    #[error("duplicate interface name {0:?}")]
+    DuplicateInterface(String),
+    #[error("interface {interface:?}: invalid address {cidr:?}: {error}")]
+    Address {
+        interface: String,
+        cidr: String,
+        error: sliplib_net::ParseError,
+    },
+    #[error("interface {interface:?}: mtu {mtu} is below {floor}, the least its addresses allow")]
+    MtuTooSmall {
+        interface: String,
+        mtu: u32,
+        floor: u32,
+    },
+    #[error("interface {interface:?}: duplicate peer public_key {public_key:?}")]
+    DuplicatePeer {
+        interface: String,
+        public_key: String,
+    },
+    #[error("interface {interface:?}, peer {peer:?}: invalid allowed_ips entry {cidr:?}: {error}")]
+    AllowedIp {
+        interface: String,
+        /// The peer's public key.
+        peer: String,
+        cidr: String,
+        error: sliplib_net::ParseError,
+    },
+}
+
 /// Pure validation, no I/O: interface names are non-empty, fit `IFNAMSIZ`, and are unique;
 /// every `addresses`/`allowed_ips` entry is a parseable CIDR (either family); `metrics.listen`,
 /// when present, is a parseable IPv4 `ip:port`.
-pub fn validate(cfg: &AwgConfig) -> anyhow::Result<()> {
+pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
     if let Some(metrics) = &cfg.metrics {
         metrics.validate("metrics.listen")?;
     }
 
     let mut seen_names = HashSet::new();
     for iface in &cfg.interfaces {
-        anyhow::ensure!(!iface.name.is_empty(), "interface name must not be empty");
-        anyhow::ensure!(
-            iface.name.len() <= 15,
-            "interface name {:?} is longer than 15 bytes (IFNAMSIZ)",
-            iface.name
-        );
-        anyhow::ensure!(
-            seen_names.insert(iface.name.as_str()),
-            "duplicate interface name {:?}",
-            iface.name
-        );
+        if iface.name.is_empty() {
+            return Err(Invalid::EmptyInterfaceName);
+        }
+        if iface.name.len() > 15 {
+            return Err(Invalid::InterfaceNameTooLong(iface.name.clone()));
+        }
+        if !seen_names.insert(iface.name.as_str()) {
+            return Err(Invalid::DuplicateInterface(iface.name.clone()));
+        }
         let mut carries_ipv6 = false;
         for cidr in &iface.addresses {
-            let net = parse_cidr(cidr).map_err(|e| {
-                anyhow::anyhow!("interface {:?}: invalid address {cidr:?}: {e}", iface.name)
+            let net = parse_cidr(cidr).map_err(|error| Invalid::Address {
+                interface: iface.name.clone(),
+                cidr: cidr.clone(),
+                error,
             })?;
             carries_ipv6 |= net.addr().is_ipv6();
         }
@@ -110,30 +149,29 @@ pub fn validate(cfg: &AwgConfig) -> anyhow::Result<()> {
             // The smallest MTU each family allows a link (RFC 8200, RFC 791); the kernel refuses
             // less, and only once the daemon is already converging the node.
             let floor = if carries_ipv6 { 1280 } else { 68 };
-            anyhow::ensure!(
-                mtu >= floor,
-                "interface {:?}: mtu {mtu} is below {floor}, the least its addresses allow",
-                iface.name
-            );
+            if mtu < floor {
+                return Err(Invalid::MtuTooSmall {
+                    interface: iface.name.clone(),
+                    mtu,
+                    floor,
+                });
+            }
         }
         let mut seen_peer_keys = HashSet::new();
         for peer in &iface.peers {
-            anyhow::ensure!(
-                seen_peer_keys.insert(peer.public_key.as_str()),
-                "interface {:?}: duplicate peer public_key {:?}",
-                iface.name,
-                peer.public_key
-            );
-            if let Some(allowed_ips) = &peer.allowed_ips {
-                for cidr in allowed_ips {
-                    parse_cidr(cidr).map_err(|e| {
-                        anyhow::anyhow!(
-                            "interface {:?}, peer {:?}: invalid allowed_ips entry {cidr:?}: {e}",
-                            iface.name,
-                            peer.public_key
-                        )
-                    })?;
-                }
+            if !seen_peer_keys.insert(peer.public_key.as_str()) {
+                return Err(Invalid::DuplicatePeer {
+                    interface: iface.name.clone(),
+                    public_key: peer.public_key.clone(),
+                });
+            }
+            for cidr in peer.allowed_ips.iter().flatten() {
+                parse_cidr(cidr).map_err(|error| Invalid::AllowedIp {
+                    interface: iface.name.clone(),
+                    peer: peer.public_key.clone(),
+                    cidr: cidr.clone(),
+                    error,
+                })?;
             }
         }
     }

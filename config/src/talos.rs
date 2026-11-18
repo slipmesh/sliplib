@@ -1,6 +1,5 @@
 //! Talos machine-config documents, as far as the slipmesh components read and write them.
 
-use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use sliplib_yaml::{Mapping, Value};
 
@@ -10,6 +9,32 @@ const KUBE_NODE_CONFIG: &str = "KubeNodeConfig";
 
 /// The directive that turns a document into a deletion: a message to Talos, not values to merge.
 const PATCH_KEY: &str = "$patch";
+
+/// What is wrong with a Talos document these functions were given.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    #[error("malformed {EXTENSION_SERVICE_CONFIG} {name:?}")]
+    Malformed {
+        name: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("serializing a file's contents")]
+    Contents(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error(
+        "a document deletes the {KUBE_NODE_CONFIG}, which carries the annotations in {namespace} - drop its `{PATCH_KEY}: delete`"
+    )]
+    DeletesAnnotated { namespace: String },
+    #[error("a {KUBE_NODE_CONFIG} document is not a mapping")]
+    NotAMapping,
+    #[error("the annotations of a {KUBE_NODE_CONFIG} are not a mapping")]
+    AnnotationsNotAMapping,
+    #[error(
+        "a document sets the annotation {set}, and those in {namespace} are generated - take it out of the document"
+    )]
+    SetsGenerated { set: String, namespace: String },
+}
 
 /// What Talos keys a document by: two documents of one identity are one document.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +91,7 @@ impl ExtensionServiceConfig {
     }
 
     /// The `ExtensionServiceConfig` named `name` among `documents`, if there is one.
-    pub fn find(documents: &[Value], name: &str) -> Result<Option<Self>> {
+    pub fn find(documents: &[Value], name: &str) -> Result<Option<Self>, Error> {
         let Some(document) = documents
             .iter()
             .find(|document| Identity::of(document).is_extension_service(name))
@@ -74,8 +99,11 @@ impl ExtensionServiceConfig {
             return Ok(None);
         };
         sliplib_yaml::from_value(document.clone())
-            .with_context(|| format!("malformed {EXTENSION_SERVICE_CONFIG} {name:?}"))
             .map(Some)
+            .map_err(|source| Error::Malformed {
+                name: name.to_owned(),
+                source: source.into(),
+            })
     }
 
     pub fn file(&self, mount_path: &str) -> Option<&ConfigFile> {
@@ -105,7 +133,7 @@ pub fn sets_file(document: &Value, service: &str, mount_path: &str) -> bool {
 
 /// Replaces each `configFiles[].content` of `document` written as a mapping or a list with that
 /// YAML's text: Talos takes only a string there.
-pub fn contents_as_text(document: &mut Value) -> Result<()> {
+pub fn contents_as_text(document: &mut Value) -> Result<(), Error> {
     let Some(files) = document
         .get_mut("configFiles")
         .and_then(Value::as_sequence_mut)
@@ -114,8 +142,8 @@ pub fn contents_as_text(document: &mut Value) -> Result<()> {
     };
     for content in files.iter_mut().filter_map(|file| file.get_mut("content")) {
         if content.is_mapping() || content.is_sequence() {
-            let text =
-                sliplib_yaml::to_string(&*content).context("serializing a file's contents")?;
+            let text = sliplib_yaml::to_string(&*content)
+                .map_err(|source| Error::Contents(source.into()))?;
             *content = Value::String(text);
         }
     }
@@ -157,15 +185,15 @@ pub fn is_kube_node_config(document: &Value) -> bool {
 /// Adds `annotations`, all in `namespace`, to the `KubeNodeConfig` `document`. Refuses a document
 /// that sets an annotation in `namespace` itself, which `annotations` would overwrite silently, and
 /// one that deletes the `KubeNodeConfig`, which would drop them.
-pub fn annotate(document: &mut Value, namespace: &str, annotations: Mapping) -> Result<()> {
-    ensure!(
-        !is_deletion(document),
-        "a document deletes the {KUBE_NODE_CONFIG}, which carries the annotations in {namespace} - \
-         drop its `{PATCH_KEY}: delete`"
-    );
+pub fn annotate(document: &mut Value, namespace: &str, annotations: Mapping) -> Result<(), Error> {
+    if is_deletion(document) {
+        return Err(Error::DeletesAnnotated {
+            namespace: namespace.to_owned(),
+        });
+    }
     let given = document
         .as_mapping_mut()
-        .with_context(|| format!("a {KUBE_NODE_CONFIG} document is not a mapping"))?
+        .ok_or(Error::NotAMapping)?
         .entry("annotations".into())
         .or_insert(Value::Null);
     if given.is_null() {
@@ -173,16 +201,16 @@ pub fn annotate(document: &mut Value, namespace: &str, annotations: Mapping) -> 
     }
     let given = given
         .as_mapping_mut()
-        .with_context(|| format!("the annotations of a {KUBE_NODE_CONFIG} are not a mapping"))?;
+        .ok_or(Error::AnnotationsNotAMapping)?;
     if let Some(set) = given
         .keys()
         .filter_map(Value::as_str)
         .find(|key| key.starts_with(namespace))
     {
-        bail!(
-            "a document sets the annotation {set}, and those in {namespace} are generated - take it \
-             out of the document"
-        );
+        return Err(Error::SetsGenerated {
+            set: set.to_owned(),
+            namespace: namespace.to_owned(),
+        });
     }
     given.extend(annotations);
     Ok(())

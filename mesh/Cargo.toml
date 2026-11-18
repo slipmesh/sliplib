@@ -14,12 +14,13 @@ description = "A node's awg and router configs, computed from slipmesh.yaml"
 mint = ["dep:rand"]
 
 [dependencies]
-anyhow.workspace = true
 rand = { workspace = true, optional = true }
 sliplib-config.workspace = true
 sliplib-net.workspace = true
+thiserror.workspace = true
 sliplib-secrets.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 expect-test.workspace = true
 sliplib-yaml.workspace = true

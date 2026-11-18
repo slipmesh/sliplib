@@ -12,5 +12,6 @@ description = "slipmesh.yaml and the patch format the slipmesh generator writes 
 anyhow.workspace = true
 serde.workspace = true
 sliplib-net.workspace = true
+thiserror.workspace = true
 sliplib-secrets.workspace = true
 sliplib-yaml.workspace = true
