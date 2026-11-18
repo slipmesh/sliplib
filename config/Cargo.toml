@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "slipmesh.yaml and the configs of the slipmesh daemons that the tools write from it"
+description = "slipmesh.yaml, and the configs the slipmesh tools write from it for the daemons to read"
 
 [dependencies]
 anyhow.workspace = true
