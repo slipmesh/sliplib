@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.19.0] - 2026-11-18
+
+### Breaking changes 💥
+
+- Give a peer its keepalive in the awg config (#59)
+
+### Added ✨
+
+- Warn about a link that loses data packets to random trailers (#58)
+
+### Build system 🛠️
+
+- Update non-major (main) (#45)
+
 ## [0.18.0] - 2026-11-18
 
 ### Breaking changes 💥
