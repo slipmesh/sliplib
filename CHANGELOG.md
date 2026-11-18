@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] - 2026-11-18
+
+### Breaking changes 💥
+
+- Leave what a patch document holds to its platform's tool (#53)
+- Return typed errors from sliplib-config and sliplib-mesh (#54)
+- Leave the Talos documents to the Talos generator (#55)
+
+### CI/CD ⚙️
+
+- Open the release PR as the organisation's ci app (#50)
+
+### Documentation 📚
+
+- Describe the slipmesh.yaml format version 2 (#51)
+
+### Tests ✅
+
+- Pin what a version 1 file gives its nodes (#52)
+
 ## [0.17.0] - 2026-11-17
 
 ### Breaking changes 💥
