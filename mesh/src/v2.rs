@@ -632,6 +632,34 @@ mod tests {
     }
 
     #[test]
+    fn every_field_of_a_links_obfuscation_reaches_both_its_ends() {
+        let every_field = "{jc: 4, jmin: 40, jmax: 400, s1: 64, s2: 48, s3: 40, s4: 16, h1: 1101, \
+            h2: 2202, h3: 3303, h4: 4404-4499, i1: '<b 0xabcd>', i2: '<c>', i3: '<t>', i4: '<r 8>', \
+            i5: '<rd 6>', header_protection_key: ccccccccccccccccccccccccccccccccccccccccccc=, \
+            content_padding_addition: 0-32, rekey_after_time: 100-140, rekey_timeout: 6, \
+            reject_after_time: 170, keepalive_timeout: 12, max_handshake_attempts: 20, \
+            random_trailers: true, disable_cookies: true}";
+        let written: Obfuscation = sliplib_yaml::from_str(every_field).unwrap();
+        let fields = sliplib_yaml::to_value(&written).unwrap();
+        assert_eq!(fields.as_mapping().unwrap().len(), 25, "a field is not set");
+
+        let network = lowered(&format!(
+            "{{mesh: {{links: {{a-b: {{amneziawg: {{obfuscation: {every_field}}}}}}}}}}}"
+        ));
+        let resolved = secrets::read(&network);
+        for (node, peer) in [("node-a", "node-b"), ("node-b", "node-a")] {
+            let configs = node_configs(&network, node, &resolved).unwrap();
+            let interface = configs
+                .awg
+                .interfaces
+                .iter()
+                .find(|interface| interface.name == format!("mesh-{peer}"))
+                .unwrap();
+            assert_eq!(interface.obfuscation, written, "{node}");
+        }
+    }
+
+    #[test]
     fn a_link_that_lacks_a_field_mint_writes_is_refused_when_its_nodes_are_computed() {
         let unminted = lowered("{mesh: {links: {a-b: {amneziawg: {obfuscation: {jc: null}}}}}}");
         let refusal = refused(&unminted, "node-b");

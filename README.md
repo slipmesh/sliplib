@@ -222,6 +222,9 @@ Every check and the loader return an error type of their own, one variant for ea
 `ObfuscationError`, `MetricsError`, `talos::Error`. A variant's text is one line of the refusal,
 and what it was caused by is its `source`, so printing the whole chain gives the whole message.
 
+- `slipmesh_file::SlipmeshFile` reads `slipmesh.yaml` of either version (`parse`, `read`): a file
+  whose `network` document says no `version` with the reader of version 1, any other with that of
+  version 2. A refusal is the reader's own.
 - `v1::slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a
   `MultiDoc` (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
   `roadwarriors` document, and `patch` documents aimed at hosts by `include`/`exclude`. It gives the
@@ -271,31 +274,44 @@ and what it was caused by is its `source`, so printing the whole chain gives the
 
 ### `sliplib-mesh`
 
-What a node's daemons are configured with, computed from the topology `sliplib-config` reads, for
+What a node's daemons are configured with, computed from the file `sliplib-config` reads, for
 every tool that configures a node of any platform.
 
 A refusal is a `render::Error`, which names the node and which of its configs it is about, or an
-`mtu::MtuError`; the cause is the `source` of each.
+`mtu::MtuError`; the cause is the `source` of each. A file that reads and gives no network to
+compute from is refused as a `model::Error`.
 
-- `secrets::read` takes the secrets the file sets: each node's mesh private key, each pool's private
-  key, and each link's and pool's obfuscation layered over the topology's. It never creates one: a
-  key the file lacks is absent from `ResolvedSecrets`, while every link and pool gets an obfuscation
-  entry, empty when nothing is set or it is `plain`.
+- `model::Network` is what the configs are computed from, whichever version of the format the file
+  is of: every node with the addresses derived for it, every link with the obfuscation and the
+  keepalive in force on it, the route classes, the ports of the metrics listeners, and what only a
+  file of version 1 describes, its pools and bypass lists. `model::lower` gives it for a
+  `SlipmeshFile`; `v1::lower` and `v2::lower` are the two it picks between. The lowering of
+  version 2 refuses two nodes that get one address and a link-local no interface takes. The
+  metrics ports of a file of version 2 are the `talos` platform's settings, which the lowering
+  does not read: the Talos generator sets them on the network.
+- `secrets::read` takes the secrets the network holds: each node's private key, each pool's
+  private key, and each link's and pool's obfuscation. It never creates one: a key the file lacks
+  is absent from `ResolvedSecrets`, while every link and pool gets an obfuscation entry, empty
+  when nothing is set or it is `plain`. `secrets::read_pools` takes those of the pools from a
+  topology of version 1 itself, for a client's config.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
-  node checks it. It needs the node's own mesh key always; for each of its links, the peer's key
-  and the link's obfuscation; for each pool on it, the pool's key and obfuscation. It refuses what
-  of these is missing, or an obfuscation not `plain` without one of `jc`, `jmin`, `jmax`, `s1`,
-  `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes, links
-  and pools the node is not on. Such a refusal gives its `secrets::MissingSecret` through
-  `render::Error::missing_secret`, so a tool can add how its user creates the secret.
+  node checks it. It needs the node's own key always; for each of its links, the peer's key and
+  the link's obfuscation; for each pool on it, the pool's key and obfuscation. It refuses what of
+  these is missing, or an obfuscation not `plain` without one of `jc`, `jmin`, `jmax`, `s1`, `s2`
+  and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes, links and
+  pools the node is not on. Such a refusal gives its `secrets::MissingSecret` through
+  `render::Error::missing_secret`, so a tool can add how its user creates the secret. A peer the
+  node dials is given the keepalive of its link where that differs from what
+  `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes of
+  `talos`, and to every node of a file of version 1, which names no platform.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks,
   created, each by the entry it belongs to, or `NoHeaderLeft` when an entry's magic headers leave
   no room for the ones it lacks. `slipmesh` builds with it; a tool that only reads the file leaves
   it off, and that function is not in its build.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
-  crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits. It reads every
-  link's obfuscation through its `s4`, links the node is not on included; a missing entry counts as
-  no junk.
+  crosses every link's underlay unfragmented, or the one the file sets for the mesh when it fits.
+  It reads every link's obfuscation through its `s4`, links the node is not on included; a missing
+  entry counts as no junk.
 - `addressing` gives a node's IPv4 loopback from its `node_id`, the link-local of a loopback, and
   an endpoint to dial.
 - `warnings::warnings` lists what the tools accept and tell about: for every link, in order, each
