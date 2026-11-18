@@ -159,8 +159,8 @@ pub struct Node {
     #[serde(default)]
     pub wireguard: Option<NodeWireguard>,
     /// The node's own values of the network's `routing`.
-    #[serde(default)]
-    pub routing: Option<NodeRouting>,
+    #[serde(default, deserialize_with = "absent_when_null")]
+    pub routing: NodeRouting,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -261,17 +261,18 @@ pub struct NodeWireguard {
     pub private_key: Option<PrivateKey>,
 }
 
-/// A node's own lists. Left out, a list is the network's; as the loader returns it, every list
-/// is the one in force.
+/// The lists of the network's `routing` that a node may hold its own value of. As the loader
+/// returns them, each is the one in force for the node: its own where it wrote one, an empty one
+/// where it wrote `null`, the network's otherwise.
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct NodeRouting {
-    #[serde(default)]
-    pub direct_interfaces: Option<Vec<String>>,
-    #[serde(default)]
-    pub learn: Option<Vec<Prefix4>>,
-    #[serde(default)]
-    pub announce: Option<Vec<Prefix4>>,
+    #[serde(default, deserialize_with = "absent_when_null")]
+    pub direct_interfaces: Vec<String>,
+    #[serde(default, deserialize_with = "absent_when_null")]
+    pub learn: Vec<Prefix4>,
+    #[serde(default, deserialize_with = "absent_when_null")]
+    pub announce: Vec<Prefix4>,
 }
 
 /// What every interface a tool creates for a link starts with.
@@ -372,11 +373,32 @@ pub struct AmneziawgLink {
     pub obfuscation: Option<StrictObfuscation>,
 }
 
+pub(super) const WIREGUARD: &str = "wireguard";
+pub(super) const AMNEZIAWG: &str = "amneziawg";
+
 /// What carries a link, with the keys of that type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinkKind {
     Wireguard(WireguardLink),
     Amneziawg(Box<AmneziawgLink>),
+}
+
+impl LinkKind {
+    /// The type as the files name it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Wireguard(_) => WIREGUARD,
+            Self::Amneziawg(_) => AMNEZIAWG,
+        }
+    }
+
+    /// The UDP port both ends listen on.
+    pub fn port(&self) -> NonZeroU16 {
+        match self {
+            Self::Wireguard(block) => block.port,
+            Self::Amneziawg(block) => block.port,
+        }
+    }
 }
 
 /// A link: the two nodes it joins, and what carries it.
@@ -429,8 +451,6 @@ impl TryFrom<LinkKeys> for Link {
     type Error = LinkError;
 
     fn try_from(keys: LinkKeys) -> Result<Self, LinkError> {
-        const WIREGUARD: &str = "wireguard";
-        const AMNEZIAWG: &str = "amneziawg";
         let (name, kind) = match (keys.r#type, keys.wireguard, keys.amneziawg) {
             (LinkType::Wireguard, Some(block), None) => (WIREGUARD, LinkKind::Wireguard(block)),
             (LinkType::Amneziawg, None, Some(block)) => {
@@ -516,25 +536,8 @@ impl TryFrom<Value> for StrictObfuscation {
 
 #[cfg(test)]
 mod tests {
+    use super::super::testing::{example, network, with};
     use super::*;
-
-    /// The network of the specification's example, its `slipmesh:` block taken off.
-    fn example() -> Value {
-        let mut value: Value =
-            sliplib_yaml::from_str(include_str!("../../../docs/example/mesh.yaml")).unwrap();
-        value.as_mapping_mut().unwrap().shift_remove("slipmesh");
-        value
-    }
-
-    fn network(value: Value) -> Result<Network, String> {
-        sliplib_yaml::from_value(value).map_err(|error| error.to_string())
-    }
-
-    /// The example with `overlay` laid over it.
-    fn with(overlay: &str) -> Result<Network, String> {
-        let overlay: Value = sliplib_yaml::from_str(overlay).unwrap();
-        network(sliplib_yaml::merge(example(), &overlay))
-    }
 
     #[test]
     fn the_example_of_the_specification_reads() {
