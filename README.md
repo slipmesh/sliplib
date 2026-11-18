@@ -208,9 +208,12 @@ a node, and what its readers take - Talos, the daemons on the node, and the Rout
 their checks only; reading and writing the files is `sliplib-yaml`'s.
 
 Every check and the loader return an error type of their own, one variant for each refusal:
-`slipmesh_file::Error`, `mesh_config::Invalid`, `awg::Invalid`, `router::Invalid`,
-`ObfuscationError`, `MetricsError`, `talos::Error`. A variant's text is one line of the refusal,
-and what it was caused by is its `source`, so printing the whole chain gives the whole message.
+`slipmesh_file::Error`, `mesh_config::Invalid` and `UnknownNode`, `awg::Invalid`, `router::Invalid`
+and `LoopbackAddressError`, `ObfuscationError`, `MetricsError`, `talos::Error`. A variant's text is
+one line of the refusal. Where that line names its cause itself - an address that does not parse,
+with why - the variant holds the cause as a field and has no `source`; where the cause is a line
+of its own, it is the variant's `source`. A variant never does both, so printing the whole chain
+gives the whole message, each part once.
 
 - `slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a `MultiDoc`
   (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
@@ -248,8 +251,8 @@ and what it was caused by is its `source`, so printing the whole chain gives the
 What a node's daemons are configured with, computed from the topology `sliplib-config` reads, for
 every tool that configures a node of any platform.
 
-A refusal is a `render::Error`, which names the node and which of its configs it is about, or an
-`mtu::MtuError`; the cause is the `source` of each.
+A refusal is a `render::Error`, which names the node and which of its configs it is about, with
+its cause as its `source`, or an `mtu::MtuError`.
 
 - `secrets::read` takes the secrets the file sets: each node's mesh private key, each pool's private
   key, and each link's and pool's obfuscation layered over the topology's. It never creates one: a
