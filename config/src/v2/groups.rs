@@ -13,7 +13,8 @@ use std::fmt;
 /// keys of a document's block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Group {
-    Short(Include),
+    /// The names of its `include`. Empty, the group is left with no node.
+    Short(Vec<Name>),
     Full(Selection),
 }
 
@@ -31,7 +32,7 @@ impl<'de> Deserialize<'de> for Group {
             }
 
             fn visit_seq<A: SeqAccess<'de>>(self, names: A) -> Result<Group, A::Error> {
-                Include::deserialize(SeqAccessDeserializer::new(names)).map(Group::Short)
+                Vec::<Name>::deserialize(SeqAccessDeserializer::new(names)).map(Group::Short)
             }
 
             fn visit_map<A: MapAccess<'de>>(self, keys: A) -> Result<Group, A::Error> {
@@ -45,13 +46,15 @@ impl<'de> Deserialize<'de> for Group {
 
 /// What `include` reaches less what `exclude` reaches.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct Selection {
     #[serde(default)]
     pub include: Include,
     #[serde(default)]
     pub exclude: Exclude,
 }
+
+from_a_mapping!(Selection);
 
 /// The body of a `groups` document: each group by its name.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
@@ -80,12 +83,15 @@ type Members = Result<Vec<Name>, GroupsError>;
 /// Every group turned into its nodes.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Resolved {
+    /// Every node of the network, which the groups were resolved against.
+    nodes: Vec<Name>,
     groups: Map<Name, Vec<Name>>,
 }
 
 impl Groups {
     /// Every group as the nodes it stands for, each in the order of `nodes`, which are all the
-    /// nodes of the network.
+    /// nodes of the network. A node named `all` or `none` is the network's checks to refuse;
+    /// given one, a selection here reads the name as the word.
     pub fn resolve(&self, nodes: &[Name]) -> Result<Resolved, GroupsError> {
         for name in self.0.keys() {
             if [ALL, NONE].contains(&name.as_str()) {
@@ -95,7 +101,10 @@ impl Groups {
                 return Err(GroupsError::NamedLikeANode(name.clone()));
             }
         }
-        let mut resolved = Resolved::default();
+        let mut resolved = Resolved {
+            nodes: nodes.to_vec(),
+            ..Resolved::default()
+        };
         for name in self.0.keys() {
             self.expand(name, nodes, &mut resolved, &mut Vec::new())?;
         }
@@ -123,25 +132,21 @@ impl Groups {
                 .collect();
             return Err(GroupsError::Cycle(name.clone(), way.join(", ")));
         }
+        let whose = format!("the group {:?}", name.as_str());
         let selection = match &self.0[name] {
-            Group::Short(include) => Selection {
-                include: include.clone(),
+            Group::Short(names) if names.is_empty() => return Err(GroupsError::Empty(whose)),
+            Group::Short(names) => Selection {
+                include: Include::listing(names.clone()),
                 exclude: Exclude::default(),
             },
             Group::Full(selection) => selection.clone(),
         };
         on_the_way.push(name.clone());
-        let members = select(
-            &selection,
-            nodes,
-            nodes,
-            &format!("the group {:?}", name.as_str()),
-            &mut |group| {
-                self.0
-                    .contains_key(group)
-                    .then(|| self.expand(group, nodes, resolved, on_the_way))
-            },
-        )?;
+        let members = select(&selection, nodes, nodes, &whose, &mut |group| {
+            self.0
+                .contains_key(group)
+                .then(|| self.expand(group, nodes, resolved, on_the_way))
+        })?;
         on_the_way.pop();
         resolved.groups.insert(name.clone(), members.clone());
         Ok(members)
@@ -195,17 +200,19 @@ impl Resolved {
         self.groups.get(name).map(Vec::as_slice)
     }
 
-    /// The nodes `selection` reaches, in the order of `nodes`. `all` is what the word stands for
-    /// where the selection is written: every node, or every node of a document's platform.
-    /// `whose` names the selection in a refusal.
+    /// The nodes `selection` reaches, in the order of the network's nodes the groups were
+    /// resolved against. `all` is what the word stands for where the selection is written: every
+    /// node, or every node of a document's platform. `whose` names the selection in a refusal.
+    ///
+    /// A node of another platform than the document's is the caller's to refuse: a group may
+    /// reach one, and so may `all` inside a group, which is every node.
     pub fn reach(
         &self,
         selection: &Selection,
-        nodes: &[Name],
         all: &[Name],
         whose: &str,
     ) -> Result<Vec<Name>, GroupsError> {
-        select(selection, nodes, all, whose, &mut |group| {
+        select(selection, &self.nodes, all, whose, &mut |group| {
             self.groups.get(group).cloned().map(Ok)
         })
     }
@@ -317,32 +324,87 @@ mod tests {
             ),
         ] {
             match resolved(yaml) {
-                Err(GroupsError::Cycle(_, told)) => assert_eq!(told, way, "{yaml}"),
+                Err(GroupsError::Cycle(group, told)) => {
+                    assert_eq!(told, way, "{yaml}");
+                    assert_eq!(group.as_str(), &way[..1], "{yaml}");
+                }
                 other => panic!("{yaml}: {other:?}"),
             }
         }
     }
 
+    // `x` leads into the cycle and is not on it.
     #[test]
-    fn a_group_left_with_no_node_is_refused() {
+    fn a_cycle_reached_through_another_group_is_told_from_where_it_closes() {
         assert_eq!(
-            resolved("{core: {include: [node-a], exclude: [node-a]}}"),
-            Err(GroupsError::Empty("the group \"core\"".to_owned()))
+            resolved("{x: [a], a: [b], b: [a]}"),
+            Err(GroupsError::Cycle(
+                names(&["a"]).remove(0),
+                "a, b, a".to_owned()
+            ))
         );
-        for unreadable in ["{core: []}", "{core: all}", "{core: node-a}"] {
-            assert!(
-                sliplib_yaml::from_str::<Groups>(unreadable).is_err(),
-                "{unreadable}"
+    }
+
+    #[test]
+    fn a_group_left_with_no_node_is_refused_naming_it() {
+        for yaml in [
+            "{core: {include: [node-a], exclude: [node-a]}}",
+            "{core: []}",
+        ] {
+            assert_eq!(
+                resolved(yaml),
+                Err(GroupsError::Empty("the group \"core\"".to_owned())),
+                "{yaml}"
             );
         }
     }
 
     #[test]
-    fn a_key_a_group_does_not_take_is_refused() {
-        assert!(
-            sliplib_yaml::from_str::<Groups>("{core: {include: [node-a], only: [node-b]}}")
-                .is_err()
+    fn a_group_is_a_list_or_a_mapping_and_nothing_else() {
+        for unreadable in ["{core: all}", "{core: node-a}", "{core: 7}"] {
+            let refused = sliplib_yaml::from_str::<Groups>(unreadable)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                refused.contains("a list of names, or a mapping with `include` and `exclude`"),
+                "{unreadable}: {refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_group_with_no_keys_is_every_node() {
+        assert_eq!(
+            group("{everyone: {}}", "everyone"),
+            ["node-a", "node-b", "node-c", "router1"]
         );
+    }
+
+    #[test]
+    fn a_name_yaml_reads_as_a_number_is_the_name_written_in_a_group_too() {
+        let nodes = names(&["7", "node-b"]);
+        let groups = sliplib_yaml::from_str::<Groups>("{odd: [7]}")
+            .unwrap()
+            .resolve(&nodes)
+            .unwrap();
+        assert_eq!(groups.group("odd").unwrap(), &nodes[..1]);
+    }
+
+    #[test]
+    fn a_key_a_group_does_not_take_is_refused() {
+        let refused =
+            sliplib_yaml::from_str::<Groups>("{core: {include: [node-a], only: [node-b]}}")
+                .unwrap_err()
+                .to_string();
+        assert!(refused.contains("unknown field `only`"), "{refused}");
+    }
+
+    #[test]
+    fn a_selection_is_a_mapping_and_one_written_as_a_list_is_refused() {
+        let refused = sliplib_yaml::from_str::<Selection>("[[node-a], [node-b]]")
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("a mapping"), "{refused}");
     }
 
     fn selection(yaml: &str) -> Selection {
@@ -354,7 +416,7 @@ mod tests {
         let groups = resolved(EXAMPLE).unwrap();
         let reach = |yaml: &str, all: &[&str]| -> Vec<String> {
             groups
-                .reach(&selection(yaml), &nodes(), &names(all), "the document")
+                .reach(&selection(yaml), &names(all), "the document")
                 .unwrap()
                 .iter()
                 .map(Name::to_string)
@@ -383,7 +445,7 @@ mod tests {
         let groups = resolved(EXAMPLE).unwrap();
         let refused = |yaml: &str| {
             groups
-                .reach(&selection(yaml), &nodes(), &nodes(), "the document")
+                .reach(&selection(yaml), &nodes(), "the document")
                 .unwrap_err()
         };
         assert_eq!(
@@ -394,8 +456,18 @@ mod tests {
             }
         );
         assert_eq!(
-            refused("{include: [workers], exclude: [core]}"),
-            GroupsError::Empty("the document".to_owned())
+            refused("{exclude: [node-x]}"),
+            GroupsError::UnknownName {
+                whose: "the document".to_owned(),
+                name: names(&["node-x"]).remove(0)
+            }
         );
+        for empty in ["{include: [workers], exclude: [core]}", "{exclude: [all]}"] {
+            assert_eq!(
+                refused(empty),
+                GroupsError::Empty("the document".to_owned()),
+                "{empty}"
+            );
+        }
     }
 }
