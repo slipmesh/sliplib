@@ -73,10 +73,20 @@ pub fn generate(held: &Obfuscation) -> Option<Fresh> {
     let [h1, h2, h3, h4] = headers;
     let jmin: u16 = rng.random_range(10..=100);
     let jmax: u16 = jmin + rng.random_range(1..=900);
-    let s1: u16 = rng.random_range(15..=150);
+    // An offset that reads the clear header of a data packet makes a link with `random_trailers`
+    // on and no header protection key drop data packets. Both can be switched once the offsets
+    // are written, so none is drawn there whatever the two are now.
+    let data_junk = held.s4.unwrap_or(0);
+    let mut offset = || loop {
+        let offset: u16 = rng.random_range(15..=150);
+        if Obfuscation::into_clear_header(offset, data_junk).is_none() {
+            break offset;
+        }
+    };
+    let s1 = offset();
     // S2 = S1 + 56 would give the handshake initiation and response the same length.
     let s2 = loop {
-        let s2: u16 = rng.random_range(15..=150);
+        let s2 = offset();
         if s2 != s1 + 56 {
             break s2;
         }
@@ -123,6 +133,32 @@ mod tests {
                 "{o:?}"
             );
             assert_ne!(created[0], created[2], "{o:?}");
+        }
+    }
+
+    // Either can be switched on a link after its offsets were drawn, so the draw goes by neither.
+    #[test]
+    fn a_created_offset_never_reads_the_header_of_a_data_packet() {
+        for s4 in [None, Some(16), Some(100), Some(140)] {
+            let held = Obfuscation {
+                s4,
+                ..Obfuscation::default()
+            };
+            for _ in 0..300 {
+                let drawn = super::generate(&held).unwrap();
+                let with_trailers_and_no_key = Obfuscation {
+                    s1: Some(drawn.s1),
+                    s2: Some(drawn.s2),
+                    s4,
+                    random_trailers: Some(true),
+                    ..Obfuscation::default()
+                };
+                assert_eq!(
+                    with_trailers_and_no_key.trailer_loss(),
+                    [],
+                    "s4 {s4:?}: {drawn:?}"
+                );
+            }
         }
     }
 

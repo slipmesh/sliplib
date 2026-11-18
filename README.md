@@ -82,6 +82,11 @@ ones the network's `obfuscation` gives it. When those leave fewer values than th
 `mint` writes nothing and names the entry, `mesh.links[node-a|node-b].obfuscation`: narrow the
 ranges written for it or for the network, or write all four of its headers.
 
+`s1` and `s2` are created so that neither stands 1 to 15 bytes above the `s4` the link or pool
+holds, its own or the network's: such an offset is what [`check`](#check) warns about on a link
+with `random_trailers` on and no `header_protection_key`, and either can be switched after the
+offsets are written.
+
 Before it writes, `mint` checks every node on the file as it would become, as `check` does, and
 writes nothing when one would be refused: a value that is written is never minted again. Where a
 setting of the file's own narrows what fits beside it, a further run draws again.

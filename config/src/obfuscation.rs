@@ -254,13 +254,20 @@ impl Obfuscation {
         if self.header_protection_key.is_none() {
             let data_junk = self.s4.unwrap_or(0);
             for (field, offset) in [("s1", self.s1), ("s2", self.s2), ("s3", self.s3)] {
-                let above = offset.unwrap_or(0).saturating_sub(data_junk);
-                if (1..=CLEAR_HEADER_REACH).contains(&above) {
+                if let Some(above) = Self::into_clear_header(offset.unwrap_or(0), data_junk) {
                     loss.push(TrailerLoss::ReadsHeader { field, above });
                 }
             }
         }
         loss
+    }
+
+    /// How far above `data_junk`, the `s4` of a data packet, `offset` stands, when that is
+    /// inside the header such a packet carries in the clear: the offset of a handshake or cookie
+    /// message, `s1` to `s3`, then reads a field of the data packet's own.
+    pub fn into_clear_header(offset: u16, data_junk: u16) -> Option<u16> {
+        let above = offset.saturating_sub(data_junk);
+        (1..=CLEAR_HEADER_REACH).contains(&above).then_some(above)
     }
 
     /// The magic headers as the kernel module ends up with them, unset ones at their defaults.
