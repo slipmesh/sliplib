@@ -218,8 +218,7 @@ pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
             // The module draws the interval out of the range as written, and a draw of 0 sends
             // a packet at once and again at every re-arm.
             if let Some(range) = peer.persistent_keepalive
-                && !range.is_zero()
-                && range.lo() < 1
+                && range.starts_at_zero()
             {
                 return Err(Invalid::Keepalive {
                     interface: iface.name.clone(),
