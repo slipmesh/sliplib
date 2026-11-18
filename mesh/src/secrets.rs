@@ -7,8 +7,9 @@
 //! obfuscation, and rendering node A's config needs node B's private key to derive the public key
 //! A dials it with.
 
+use crate::model::Network;
 use sliplib_config::Obfuscation;
-use sliplib_config::mesh_config::MeshConfig;
+use sliplib_config::mesh_config::{MeshConfig, RoadwarriorPool};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::collections::HashMap;
 
@@ -80,7 +81,7 @@ minted_fields!(jc: u16, jmin: u16, jmax: u16, s1: u16, s2: u16, h1: u32, h2: u32
 /// Whether pool `name` has its key written and, unless it is `plain`, every minted field of its
 /// obfuscation: what a client's config is built with. Nothing else of the topology is looked at.
 pub fn pool_is_written(topology: &MeshConfig, name: &str) -> bool {
-    let written = read(topology);
+    let written = read_pools(topology);
     topology
         .roadwarriors
         .iter()
@@ -95,30 +96,16 @@ pub fn pool_is_written(topology: &MeshConfig, name: &str) -> bool {
         })
 }
 
-pub fn read(topology: &MeshConfig) -> ResolvedSecrets {
-    let global = &topology.obfuscation;
+/// The secrets of `pools`, each pool's obfuscation laid over `global`, with none of the mesh.
+fn of_pools(pools: &[RoadwarriorPool], global: &Obfuscation) -> ResolvedSecrets {
     ResolvedSecrets {
-        mesh_private_keys: topology
-            .nodes
-            .iter()
-            .filter_map(|node| Some((node.name.clone(), node.mesh_private_key.clone()?)))
-            .collect(),
-        mesh_link_obfuscation: topology
-            .mesh
-            .links
-            .iter()
-            .map(|link| {
-                let obfuscation = unless_plain(link.plain, &link.obfuscation, global);
-                (link_key(&link.pair), obfuscation)
-            })
-            .collect(),
-        roadwarrior_private_keys: topology
-            .roadwarriors
+        mesh_private_keys: HashMap::new(),
+        mesh_link_obfuscation: HashMap::new(),
+        roadwarrior_private_keys: pools
             .iter()
             .filter_map(|pool| Some((pool.name.clone(), pool.private_key.clone()?)))
             .collect(),
-        roadwarrior_obfuscation: topology
-            .roadwarriors
+        roadwarrior_obfuscation: pools
             .iter()
             .map(|pool| {
                 let obfuscation = unless_plain(pool.plain, &pool.obfuscation, global);
@@ -128,9 +115,39 @@ pub fn read(topology: &MeshConfig) -> ResolvedSecrets {
     }
 }
 
+/// The secrets of the pools of `topology`, and none of the mesh: what a client's config is built
+/// with, read without the network the nodes' configs are computed from.
+pub fn read_pools(topology: &MeshConfig) -> ResolvedSecrets {
+    of_pools(&topology.roadwarriors, &topology.obfuscation)
+}
+
+pub fn read(network: &Network) -> ResolvedSecrets {
+    let pools = match &network.v1 {
+        Some(v1) => of_pools(&v1.pools, &v1.obfuscation),
+        None => of_pools(&[], &Obfuscation::default()),
+    };
+    ResolvedSecrets {
+        mesh_private_keys: network
+            .nodes
+            .iter()
+            .filter_map(|node| Some((node.name.clone(), node.private_key.clone()?)))
+            .collect(),
+        mesh_link_obfuscation: network
+            .links
+            .iter()
+            .map(|link| (link_key(&link.ends), link.obfuscation.clone()))
+            .collect(),
+        ..pools
+    }
+}
+
 /// `plain` links and pools (e.g. a RouterOS peer, or a stock WireGuard app, that can't speak
 /// AmneziaWG's extensions at all) carry no obfuscation, whatever the topology's default says.
-fn unless_plain(plain: bool, specific: &Obfuscation, global: &Obfuscation) -> Obfuscation {
+pub(crate) fn unless_plain(
+    plain: bool,
+    specific: &Obfuscation,
+    global: &Obfuscation,
+) -> Obfuscation {
     if plain {
         Obfuscation::default()
     } else {
@@ -178,6 +195,11 @@ pub(crate) fn layer(specific: &Obfuscation, global: &Obfuscation) -> Obfuscation
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The fixtures are topologies of format version 1, read through its lowering.
+    fn read(mesh: &MeshConfig) -> ResolvedSecrets {
+        super::read(&crate::v1::lower(mesh).unwrap())
+    }
 
     /// The pools of `topology()`, with `north` given every secret a client's config is built
     /// with.

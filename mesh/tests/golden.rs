@@ -92,7 +92,8 @@ fn every_node_gets_the_configs_it_got_before(fixture: &Fixture) {
     // Named here, not taken from the code under test: a node that code lost would leave its
     // golden files unread.
     assert_eq!(file.hosts(), fixture.nodes);
-    let resolved = sliplib_mesh::secrets::read(file.topology());
+    let network = sliplib_mesh::v1::lower(file.topology()).unwrap();
+    let resolved = sliplib_mesh::secrets::read(&network);
     let public_keys = derived_public_keys(file.topology());
     let named = |text: String| {
         public_keys
@@ -101,8 +102,7 @@ fn every_node_gets_the_configs_it_got_before(fixture: &Fixture) {
     };
 
     for host in fixture.nodes {
-        let model = file.effective_for(host).unwrap();
-        let configs = node_configs(&model, host, &resolved).unwrap();
+        let configs = node_configs(&network, host, &resolved).unwrap();
         let directory = fixture.directory;
         expect_file![format!("{directory}/{host}.awg.yaml")]
             .assert_eq(&named(sliplib_yaml::to_string(&configs.awg).unwrap()));

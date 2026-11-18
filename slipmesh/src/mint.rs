@@ -11,7 +11,7 @@ use std::path::Path;
 
 pub fn run(config_path: &Path) -> Result<()> {
     let (mut yaml, file) = read_slipmesh(config_path)?;
-    let minted = sliplib_mesh::mint::create(file.topology())?;
+    let minted = sliplib_mesh::mint::create(&check::network(&file)?)?;
     edit::record(&mut yaml, &file, &minted)?;
     let unset = missing_defaults(file.topology());
     edit::write_defaults(&mut yaml, &file, &unset)?;
@@ -24,7 +24,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     // node's config is refused with must not reach the file.
     let edited = SlipmeshFile::read(&yaml)
         .context("slipmesh.yaml with what was minted does not read back - not written")?;
-    let refusals: Vec<anyhow::Error> = check::nodes(&edited)
+    let refusals: Vec<anyhow::Error> = check::nodes(&edited, &check::network(&edited)?)
         .into_iter()
         .filter_map(|(_, checked)| checked.err())
         .collect();

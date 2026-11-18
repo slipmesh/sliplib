@@ -6,9 +6,11 @@
 pub mod addressing;
 #[cfg(feature = "mint")]
 pub mod mint;
+pub mod model;
 pub mod mtu;
 pub mod render;
 pub mod secrets;
+pub mod v1;
 pub mod warnings;
 
 #[cfg(test)]

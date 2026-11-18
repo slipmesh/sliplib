@@ -1,10 +1,9 @@
 //! What a topology does that the tools accept and whoever wrote it should still hear of. Nothing
 //! here refuses a file or changes what a node gets.
 
-use crate::mtu::link_name;
+use crate::model::Network;
 use crate::secrets::{ResolvedSecrets, link_key};
 use sliplib_config::TrailerLoss;
-use sliplib_config::mesh_config::MeshConfig;
 use std::fmt;
 
 /// A link that loses data packets it should deliver, and how.
@@ -33,21 +32,20 @@ impl fmt::Display for Warning {
 }
 
 /// Every warning about the links of `mesh`, in their order, each link's obfuscation taken as
-/// `resolved` holds it: its own laid over the topology's, none for a `plain` link.
-pub fn warnings(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Vec<Warning> {
-    mesh.mesh
-        .links
+/// `resolved` holds it: its own laid over the network's, none for a `plain` link.
+pub fn warnings(mesh: &Network, resolved: &ResolvedSecrets) -> Vec<Warning> {
+    mesh.links
         .iter()
         .flat_map(|link| {
             resolved
                 .mesh_link_obfuscation
-                .get(&link_key(&link.pair))
+                .get(&link_key(&link.ends))
                 .map(|obfuscation| obfuscation.trailer_loss())
                 .unwrap_or_default()
                 .into_iter()
                 .map(|loss| Warning {
-                    link: link_name(link),
-                    ends: link.pair.clone(),
+                    link: link.name.clone(),
+                    ends: link.ends.clone(),
                     loss,
                 })
         })
@@ -57,7 +55,13 @@ pub fn warnings(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Vec<Warning> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secrets;
+    use sliplib_config::mesh_config::MeshConfig;
+
+    // The fixtures are topologies of format version 1, read through its lowering.
+    fn warnings_of(mesh: &MeshConfig) -> Vec<Warning> {
+        let network = crate::v1::lower(mesh).unwrap();
+        warnings(&network, &crate::secrets::read(&network))
+    }
 
     fn mesh(obfuscation: &str, links: &str) -> MeshConfig {
         sliplib_yaml::from_str(&format!(
@@ -79,10 +83,7 @@ mesh:
 
     fn told(obfuscation: &str, links: &str) -> Vec<String> {
         let mesh = mesh(obfuscation, links);
-        warnings(&mesh, &secrets::read(&mesh))
-            .iter()
-            .map(Warning::to_string)
-            .collect()
+        warnings_of(&mesh).iter().map(Warning::to_string).collect()
     }
 
     #[test]
@@ -126,7 +127,7 @@ mesh:
             "{random_trailers: true}",
             "[{pair: [a, b], port: 51820, obfuscation: {h1: 10-19}}]",
         );
-        let warnings = warnings(&mesh, &secrets::read(&mesh));
+        let warnings = warnings_of(&mesh);
         assert!(warnings[0].concerns("a") && warnings[0].concerns("b"));
         assert!(!warnings[0].concerns("c"));
         assert_eq!(warnings[0].loss(), &TrailerLoss::Share { values: 12 });

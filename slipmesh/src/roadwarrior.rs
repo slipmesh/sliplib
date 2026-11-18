@@ -423,7 +423,7 @@ roadwarriors:
     }
 
     fn secrets(mesh: &MeshConfig) -> ResolvedSecrets {
-        let mut secrets = sliplib_mesh::secrets::read(mesh);
+        let mut secrets = sliplib_mesh::secrets::read_pools(mesh);
         for pool in &mesh.roadwarriors {
             secrets
                 .roadwarrior_private_keys

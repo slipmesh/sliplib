@@ -24,7 +24,7 @@ pub fn minted_obfuscation() -> Obfuscation {
 
 /// What `mesh` reads as, with whatever it lacks filled in.
 pub fn minted(mesh: &MeshConfig) -> ResolvedSecrets {
-    let mut resolved = secrets::read(mesh);
+    let mut resolved = secrets::read(&crate::v1::lower(mesh).unwrap());
     for node in &mesh.nodes {
         resolved
             .mesh_private_keys

@@ -1,19 +1,18 @@
-//! A node's `awg` and `router` configs from the topology: its mesh interfaces and peers, iBGP with
+//! A node's `awg` and `router` configs from the network: its mesh interfaces and peers, iBGP with
 //! every other node, OSPF, announcements, roadwarriors pools and bypass lists. Every function takes
-//! the topology's secrets as [`crate::secrets::read`] gives them.
+//! the network's secrets as [`crate::secrets::read`] gives them.
 
 use crate::addressing;
-use crate::mtu::{MtuError, link_name};
+use crate::model::{Network, Node};
+use crate::mtu::MtuError;
 use crate::secrets::{MissingSecret, ResolvedSecrets, link_key, unminted};
 use sliplib_config::awg::{AwgConfig, InterfaceEntry, PeerEntry};
-use sliplib_config::mesh_config::{MeshConfig, UnknownNode};
+use sliplib_config::mesh_config::UnknownNode;
 use sliplib_config::router::{
-    AnnounceEntry, BgpPeerEntry, BypassConfig, DEFAULT_BYPASS_REFRESH_INTERVAL_SECS, NodeIdentity,
-    RouterConfig,
+    BgpPeerEntry, BypassConfig, DEFAULT_BYPASS_REFRESH_INTERVAL_SECS, NodeIdentity, RouterConfig,
 };
 use sliplib_config::{MetricsConfig, Obfuscation, ObfuscationError};
 use sliplib_secrets::wireguard::KeyError;
-use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Why a node has no configs. Every variant names the node and which of its two configs it is
 /// about; the cause is its source.
@@ -110,85 +109,23 @@ pub enum RenderError {
 
 type Result<T> = std::result::Result<T, RenderError>;
 
-fn network(field: &'static str) -> impl Fn(sliplib_net::ParseError) -> RenderError {
-    move |source| RenderError::Network { field, source }
-}
-
-fn parse_loopback_networks(mesh: &MeshConfig) -> Result<(Ipv4Addr, u8, Ipv6Addr, u8)> {
-    let v4 = sliplib_net::parse_ipv4(&mesh.cluster.loopback_networks.ipv4)
-        .map_err(network("cluster.loopback_networks.ipv4"))?;
-    let v6 = sliplib_net::parse_ipv6(&mesh.cluster.loopback_networks.ipv6)
-        .map_err(network("cluster.loopback_networks.ipv6"))?;
-    Ok((v4.addr(), v4.prefix_len(), v6.addr(), v6.prefix_len()))
-}
-
-fn parse_tunnel_networks(mesh: &MeshConfig) -> Result<Option<(Ipv4Addr, u8, Ipv6Addr, u8)>> {
-    let Some(tn) = &mesh.cluster.tunnel_networks else {
-        return Ok(None);
-    };
-    let v4 = sliplib_net::parse_ipv4(&tn.ipv4).map_err(network("cluster.tunnel_networks.ipv4"))?;
-    let v6 = sliplib_net::parse_ipv6(&tn.ipv6).map_err(network("cluster.tunnel_networks.ipv6"))?;
-    Ok(Some((
-        v4.addr(),
-        v4.prefix_len(),
-        v6.addr(),
-        v6.prefix_len(),
-    )))
-}
-
-fn node_id_of(mesh: &MeshConfig, node_name: &str) -> Result<Ipv4Addr> {
-    let node = mesh.node(node_name)?;
-    node.node_id.parse().map_err(|source| RenderError::NodeId {
-        node: node_name.to_owned(),
-        source,
-    })
-}
-
-/// The node's (v4, v6) loopbacks: its `node_id` in the host part of `cluster.loopback_networks`.
-pub(crate) fn node_loopbacks(mesh: &MeshConfig, node_name: &str) -> Result<(Ipv4Addr, Ipv6Addr)> {
-    let (v4_net, v4_prefix, v6_net, v6_prefix) = parse_loopback_networks(mesh)?;
-    let node_id = node_id_of(mesh, node_name)?;
-    Ok((
-        addressing::ipv4_loopback(v4_net, v4_prefix, node_id),
-        addressing::ipv6_loopback(v6_net, v6_prefix, node_id),
-    ))
-}
-
-/// The node's (v4, v6) tunnel addresses, derived the same way from `cluster.tunnel_networks`;
-/// `None` without them.
-pub(crate) fn node_tunnel_addresses(
-    mesh: &MeshConfig,
-    node_name: &str,
-) -> Result<Option<(Ipv4Addr, Ipv6Addr)>> {
-    let Some((v4_net, v4_prefix, v6_net, v6_prefix)) = parse_tunnel_networks(mesh)? else {
-        return Ok(None);
-    };
-    let node_id = node_id_of(mesh, node_name)?;
-    Ok(Some((
-        addressing::ipv4_loopback(v4_net, v4_prefix, node_id),
-        addressing::ipv6_loopback(v6_net, v6_prefix, node_id),
-    )))
-}
-
 /// Full mesh minus self: every other node, addressed by its IPv6 loopback.
-pub(crate) fn bgp_peers_for(mesh: &MeshConfig, node_name: &str) -> Result<Vec<BgpPeerEntry>> {
+pub(crate) fn bgp_peers_for(mesh: &Network, node_name: &str) -> Vec<BgpPeerEntry> {
     mesh.nodes
         .iter()
         .filter(|n| n.name != node_name)
-        .map(|n| {
-            let (_, v6) = node_loopbacks(mesh, &n.name)?;
-            Ok(BgpPeerEntry {
-                name: n.name.clone(),
-                address: v6.to_string(),
-            })
+        .map(|n| BgpPeerEntry {
+            name: n.name.clone(),
+            address: n.loopback.1.to_string(),
         })
         .collect()
 }
 
 /// The node's bypass rules, every `bypass` entry for it in one `BypassConfig`; `None` when it has
 /// none.
-pub(crate) fn bypass_for(mesh: &MeshConfig, node_name: &str) -> Option<BypassConfig> {
-    let entries: Vec<_> = mesh.bypass.iter().filter(|b| b.node == node_name).collect();
+pub(crate) fn bypass_for(mesh: &Network, node_name: &str) -> Option<BypassConfig> {
+    let v1 = mesh.v1.as_ref()?;
+    let entries: Vec<_> = v1.bypass.iter().filter(|b| b.node == node_name).collect();
     if entries.is_empty() {
         return None;
     }
@@ -199,8 +136,7 @@ pub(crate) fn bypass_for(mesh: &MeshConfig, node_name: &str) -> Option<BypassCon
         exclude.extend(entry.exclude.iter().cloned());
     }
     Some(BypassConfig {
-        refresh_interval_secs: mesh
-            .cluster
+        refresh_interval_secs: v1
             .bypass_refresh_interval_secs
             .unwrap_or(DEFAULT_BYPASS_REFRESH_INTERVAL_SECS),
         include,
@@ -209,57 +145,24 @@ pub(crate) fn bypass_for(mesh: &MeshConfig, node_name: &str) -> Option<BypassCon
 }
 
 /// Every rendered node runs OSPF on the same two interface patterns: the mesh's and `router-lo`.
-fn ospf_interfaces(mesh: &MeshConfig) -> Vec<String> {
+fn ospf_interfaces(mesh: &Network) -> Vec<String> {
     vec![mesh_glob(mesh), "router-lo".to_owned()]
 }
 
 /// Every mesh interface, as BIRD's `interface` clause and `direct_interfaces` match it.
-fn mesh_glob(mesh: &MeshConfig) -> String {
-    format!("{}*", mesh.cluster.mesh_interface_prefix())
+fn mesh_glob(mesh: &Network) -> String {
+    format!("{}*", mesh.interface_prefix)
 }
 
-/// The node's own `direct_interfaces`, which replace the cluster's, else the cluster's. Nothing is
-/// added to the list: what a node announces has to be readable in the file.
-fn direct_interfaces_for(mesh: &MeshConfig, node_name: &str) -> Result<Vec<String>> {
-    Ok(mesh
-        .node(node_name)?
-        .direct_interfaces
-        .clone()
-        .unwrap_or_else(|| mesh.cluster.direct_interfaces.clone()))
-}
-
-/// The cluster's announced routes: the Kubernetes service range, when configured, from every node.
-fn announce_for(mesh: &MeshConfig) -> Vec<AnnounceEntry> {
-    mesh.cluster
-        .service_subnet
-        .as_ref()
-        .map(|net| {
-            vec![AnnounceEntry {
-                net: net.clone(),
-                label: Some("k8s-services".to_string()),
-            }]
-        })
-        .unwrap_or_default()
-}
-
-/// The cluster's kernel `learn` scope: the pod range, when configured, on every node. A non-empty
-/// `learn` also re-announces what it learns over iBGP; the two are one mechanism.
-fn learn_for(mesh: &MeshConfig) -> Vec<String> {
-    mesh.cluster
-        .pod_subnet
-        .as_ref()
-        .map(|net| vec![net.clone()])
-        .unwrap_or_default()
-}
-
-pub(crate) fn render_router_config(mesh: &MeshConfig, node_name: &str) -> Result<RouterConfig> {
-    let (v4, v6) = node_loopbacks(mesh, node_name)?;
-    let direct_interfaces = direct_interfaces_for(mesh, node_name)?;
+pub(crate) fn render_router_config(mesh: &Network, node_name: &str) -> Result<RouterConfig> {
+    let node = mesh.node(node_name)?;
+    let (v4, v6) = node.loopback;
+    let direct_interfaces = node.direct_interfaces.clone();
     // Refused rather than fixed up: OSPFv3 carries no IPv4, so the tunnel IPv4 address of a mesh
     // interface reaches other nodes only through `protocol direct` on the mesh glob. Without it,
     // replies masqueraded through that address never route back.
     let glob = mesh_glob(mesh);
-    if node_tunnel_addresses(mesh, node_name)?.is_some() && !direct_interfaces.contains(&glob) {
+    if node.tunnel_ipv4.is_some() && !direct_interfaces.contains(&glob) {
         return Err(RenderError::MeshPatternMissing {
             node: node_name.to_owned(),
             glob,
@@ -269,20 +172,15 @@ pub(crate) fn render_router_config(mesh: &MeshConfig, node_name: &str) -> Result
         node: NodeIdentity {
             loopback_addresses: vec![format!("{v4}/32"), format!("{v6}/128")],
         },
-        bgp_as: mesh.cluster.bgp_as,
-        bgp_peers: bgp_peers_for(mesh, node_name)?,
-        bfd: mesh.bfd.enable.then(|| mesh.bfd.settings.clone()),
+        bgp_as: mesh.bgp_as,
+        bgp_peers: bgp_peers_for(mesh, node_name),
+        bfd: mesh.bfd.clone(),
         ospf_interfaces: ospf_interfaces(mesh),
         direct_interfaces,
-        learn: learn_for(mesh),
-        announce: announce_for(mesh),
+        learn: node.learn.clone(),
+        announce: node.announce.clone(),
         bypass: bypass_for(mesh, node_name),
-        metrics: metrics_for(
-            mesh,
-            node_name,
-            mesh.cluster.router_metrics_port,
-            "router_metrics_port",
-        )?,
+        metrics: metrics_for(node, mesh.metrics.router, "router_metrics_port")?,
     })
 }
 
@@ -297,20 +195,11 @@ fn key_of(node: &str) -> impl Fn(KeyError) -> RenderError {
 /// (`mesh-<peer>`). The name stays local - peers know each other by key - and must fit `IFNAMSIZ`,
 /// which the awg check enforces.
 fn mesh_interfaces_for(
-    mesh: &MeshConfig,
+    mesh: &Network,
     node_name: &str,
     resolved: &ResolvedSecrets,
 ) -> Result<Vec<InterfaceEntry>> {
-    let (_, own_loopback) = node_loopbacks(mesh, node_name)?;
-    let own_link_local = addressing::link_local_from_loopback(own_loopback);
-    let own_tunnel = node_tunnel_addresses(mesh, node_name)?;
-    // With `tunnel_networks`, its IPv6 half is the interface's only link-local, replacing the one
-    // derived from the loopback: OSPFv3 takes any link-scoped address, and with two it is unclear
-    // which one BIRD sends from.
-    let (interface_link_local, tunnel_v4) = match own_tunnel {
-        Some((v4, v6)) => (v6, Some(v4)),
-        None => (own_link_local, None),
-    };
+    let node = mesh.node(node_name)?;
     let own_private_key = resolved
         .mesh_private_keys
         .get(node_name)
@@ -321,11 +210,11 @@ fn mesh_interfaces_for(
 
     let mtu = crate::mtu::mesh_mtu(mesh, resolved)?;
     let mut out = Vec::new();
-    for link in &mesh.mesh.links {
-        let peer_name = if link.pair[0] == node_name {
-            &link.pair[1]
-        } else if link.pair[1] == node_name {
-            &link.pair[0]
+    for link in &mesh.links {
+        let peer_name = if link.ends[0] == node_name {
+            &link.ends[1]
+        } else if link.ends[1] == node_name {
+            &link.ends[0]
         } else {
             continue;
         };
@@ -334,18 +223,18 @@ fn mesh_interfaces_for(
             MissingSecret(format!("node {peer_name:?}: mesh_private_key is not set"))
         })?;
         let obfuscation = minted_obfuscation(
-            resolved.mesh_link_obfuscation.get(&link_key(&link.pair)),
+            resolved.mesh_link_obfuscation.get(&link_key(&link.ends)),
             link.plain,
-            &format!("mesh link {}", link_name(link)),
+            &format!("mesh link {}", link.name),
         )?;
 
-        let mut addresses = vec![format!("{interface_link_local}/64")];
-        if let Some(tunnel_v4) = tunnel_v4 {
+        let mut addresses = vec![format!("{}/64", node.link_local)];
+        if let Some(tunnel_v4) = node.tunnel_ipv4 {
             addresses.push(format!("{tunnel_v4}/32"));
         }
 
         out.push(InterfaceEntry {
-            name: format!("{}{peer_name}", mesh.cluster.mesh_interface_prefix()),
+            name: format!("{}{peer_name}", mesh.interface_prefix),
             listen_port: link.port,
             addresses,
             private_key: own_private_key.clone(),
@@ -358,7 +247,7 @@ fn mesh_interfaces_for(
                 endpoint: peer_node
                     .endpoint
                     .as_ref()
-                    .map(|host| addressing::endpoint(host, link.port)),
+                    .map(|endpoint| addressing::endpoint(&endpoint.written, link.port)),
                 allowed_ips: None,
                 persistent_keepalive: None,
             }],
@@ -370,12 +259,13 @@ fn mesh_interfaces_for(
 /// This node's roadwarriors-pool interfaces: one `InterfaceEntry` per pool that lists this node in
 /// `node_hostnames`, tracked (`allowed_ips` set) peers built straight from `clients`.
 fn roadwarrior_interfaces_for(
-    mesh: &MeshConfig,
+    mesh: &Network,
     node_name: &str,
     resolved: &ResolvedSecrets,
 ) -> Result<Vec<InterfaceEntry>> {
-    mesh.roadwarriors
+    mesh.v1
         .iter()
+        .flat_map(|v1| &v1.pools)
         .filter(|pool| pool.node_hostnames.iter().any(|h| h == node_name))
         .map(|pool| {
             let private_key = resolved
@@ -419,7 +309,7 @@ fn roadwarrior_interfaces_for(
 }
 
 pub(crate) fn render_awg_config(
-    mesh: &MeshConfig,
+    mesh: &Network,
     node_name: &str,
     resolved: &ResolvedSecrets,
 ) -> Result<AwgConfig> {
@@ -427,12 +317,7 @@ pub(crate) fn render_awg_config(
     interfaces.extend(roadwarrior_interfaces_for(mesh, node_name, resolved)?);
     Ok(AwgConfig {
         interfaces,
-        metrics: metrics_for(
-            mesh,
-            node_name,
-            mesh.cluster.awg_metrics_port,
-            "awg_metrics_port",
-        )?,
+        metrics: metrics_for(mesh.node(node_name)?, mesh.metrics.awg, "awg_metrics_port")?,
     })
 }
 
@@ -445,7 +330,7 @@ pub struct NodeConfigs {
 
 /// `host`'s configs from `model`, each checked the way the node would check it.
 pub fn node_configs(
-    model: &MeshConfig,
+    model: &Network,
     host: &str,
     resolved: &ResolvedSecrets,
 ) -> std::result::Result<NodeConfigs, Error> {
@@ -513,8 +398,7 @@ fn minted_obfuscation(
 /// A metrics listener for this node, when the port says there is one, on the node's own IPv4
 /// loopback - the address the router daemon brings up, so no listener can drift from it.
 fn metrics_for(
-    mesh: &MeshConfig,
-    node_name: &str,
+    node: &Node,
     port: Option<u16>,
     field: &'static str,
 ) -> Result<Option<MetricsConfig>> {
@@ -526,15 +410,79 @@ fn metrics_for(
     if port == 0 {
         return Err(RenderError::MetricsPortZero(field));
     }
-    let (v4, _v6) = node_loopbacks(mesh, node_name)?;
     Ok(Some(MetricsConfig {
-        listen: format!("{v4}:{port}"),
+        listen: format!("{}:{port}", node.loopback.0),
     }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sliplib_config::mesh_config::MeshConfig;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    // The fixtures are topologies of format version 1. Each function under test is reached
+    // through that version's lowering, as a tool reaches it.
+    fn lowered(mesh: &MeshConfig) -> Result<Network> {
+        crate::v1::lower(mesh)
+    }
+
+    fn node_loopbacks(mesh: &MeshConfig, node: &str) -> Result<(Ipv4Addr, Ipv6Addr)> {
+        Ok(lowered(mesh)?.node(node)?.loopback)
+    }
+
+    fn node_tunnel_addresses(
+        mesh: &MeshConfig,
+        node: &str,
+    ) -> Result<Option<(Ipv4Addr, Ipv6Addr)>> {
+        let network = lowered(mesh)?;
+        let node = network.node(node)?;
+        Ok(node.tunnel_ipv4.map(|v4| (v4, node.link_local)))
+    }
+
+    fn bgp_peers_for(mesh: &MeshConfig, node: &str) -> Result<Vec<BgpPeerEntry>> {
+        Ok(super::bgp_peers_for(&lowered(mesh)?, node))
+    }
+
+    fn bypass_for(mesh: &MeshConfig, node: &str) -> Option<BypassConfig> {
+        super::bypass_for(&lowered(mesh).unwrap(), node)
+    }
+
+    fn render_router_config(mesh: &MeshConfig, node: &str) -> Result<RouterConfig> {
+        super::render_router_config(&lowered(mesh)?, node)
+    }
+
+    fn mesh_interfaces_for(
+        mesh: &MeshConfig,
+        node: &str,
+        resolved: &ResolvedSecrets,
+    ) -> Result<Vec<InterfaceEntry>> {
+        super::mesh_interfaces_for(&lowered(mesh)?, node, resolved)
+    }
+
+    fn roadwarrior_interfaces_for(
+        mesh: &MeshConfig,
+        node: &str,
+        resolved: &ResolvedSecrets,
+    ) -> Result<Vec<InterfaceEntry>> {
+        super::roadwarrior_interfaces_for(&lowered(mesh)?, node, resolved)
+    }
+
+    fn render_awg_config(
+        mesh: &MeshConfig,
+        node: &str,
+        resolved: &ResolvedSecrets,
+    ) -> Result<AwgConfig> {
+        super::render_awg_config(&lowered(mesh)?, node, resolved)
+    }
+
+    fn node_configs(
+        mesh: &MeshConfig,
+        node: &str,
+        resolved: &ResolvedSecrets,
+    ) -> std::result::Result<NodeConfigs, Error> {
+        super::node_configs(&lowered(mesh).unwrap(), node, resolved)
+    }
 
     fn three_node_mesh_yaml() -> &'static str {
         r#"
@@ -1361,7 +1309,7 @@ mesh:
             b = written_key("node-b"),
         );
         let mesh: MeshConfig = sliplib_yaml::from_str(&yaml).unwrap();
-        let resolved = crate::secrets::read(&mesh);
+        let resolved = crate::secrets::read(&lowered(&mesh).unwrap());
         let iface = |node: &str| {
             let configs = node_configs(&mesh, node, &resolved).unwrap();
             let [iface] = <[_; 1]>::try_from(configs.awg.interfaces).unwrap();

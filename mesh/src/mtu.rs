@@ -7,8 +7,9 @@
 //! never past the MTU, so a full-size packet carries no padding. A fragmented outer packet takes
 //! TCP in the tunnel down to a few Mbit/s, which is what this guards against.
 
+use crate::model::{Link, Network, Node};
 use crate::secrets::{ResolvedSecrets, link_key};
-use sliplib_config::mesh_config::{AddressFamily, MeshConfig, MeshLink, NodeEntry, UnknownNode};
+use sliplib_config::mesh_config::{AddressFamily, UnknownNode};
 use std::net::IpAddr;
 
 /// An uplink's MTU when `nodes[].uplink_mtu` does not say.
@@ -61,11 +62,11 @@ pub enum LinkError {
 
 /// The MTU of every mesh interface: `cluster.mesh_mtu` when it fits every link, else the least
 /// link limit. None for a mesh without links, which has no mesh interface to give it to.
-pub fn mesh_mtu(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Result<Option<u32>, MtuError> {
-    let mut least: Option<(u32, &MeshLink)> = None;
-    for link in &mesh.mesh.links {
+pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32>, MtuError> {
+    let mut least: Option<(u32, &Link)> = None;
+    for link in &mesh.links {
         let limit = link_limit(mesh, link, resolved).map_err(|source| MtuError::Link {
-            link: link_name(link),
+            link: link.name.clone(),
             source,
         })?;
         if least.is_none_or(|(least, _)| limit < least) {
@@ -73,18 +74,18 @@ pub fn mesh_mtu(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Result<Option<
         }
     }
     let Some((limit, link)) = least else {
-        if mesh.cluster.mesh_mtu.is_some() {
+        if mesh.mtu.is_some() {
             return Err(MtuError::NoLink);
         }
         return Ok(None);
     };
-    let mtu = match mesh.cluster.mesh_mtu {
+    let mtu = match mesh.mtu {
         Some(mtu) => {
             if mtu > limit {
                 return Err(MtuError::AboveLimit {
                     mtu,
                     limit,
-                    link: link_name(link),
+                    link: link.name.clone(),
                 });
             }
             if mtu < MIN_MESH_MTU {
@@ -95,7 +96,7 @@ pub fn mesh_mtu(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Result<Option<
         None => {
             if limit < MIN_MESH_MTU {
                 return Err(MtuError::LimitBelowMinimum {
-                    link: link_name(link),
+                    link: link.name.clone(),
                     limit,
                 });
             }
@@ -106,32 +107,24 @@ pub fn mesh_mtu(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Result<Option<
 }
 
 /// The largest MTU at which a full-size packet crosses `link` unfragmented.
-fn link_limit(
-    mesh: &MeshConfig,
-    link: &MeshLink,
-    resolved: &ResolvedSecrets,
-) -> Result<u32, LinkError> {
-    let [a, b] = &link.pair;
+fn link_limit(mesh: &Network, link: &Link, resolved: &ResolvedSecrets) -> Result<u32, LinkError> {
+    let [a, b] = &link.ends;
     let (a, b) = (mesh.node(a)?, mesh.node(b)?);
     let ip_header = match link_family(a, b)? {
         AddressFamily::Ipv4 => 20,
         AddressFamily::Ipv6 => 40,
     };
-    let uplink = uplink(a).min(uplink(b));
+    let uplink = a.underlay_mtu.min(b.underlay_mtu);
     let junk = resolved
         .mesh_link_obfuscation
-        .get(&link_key(&link.pair))
+        .get(&link_key(&link.ends))
         .and_then(|o| o.s4)
         .map_or(0, u32::from);
     Ok(uplink.saturating_sub(32 + 8 + ip_header + junk))
 }
 
-fn uplink(node: &NodeEntry) -> u32 {
-    node.uplink_mtu.unwrap_or(DEFAULT_UPLINK_MTU)
-}
-
 /// The family of the endpoint a link is dialed at: either side's, and the same when both have one.
-fn link_family(a: &NodeEntry, b: &NodeEntry) -> Result<AddressFamily, LinkError> {
+fn link_family(a: &Node, b: &Node) -> Result<AddressFamily, LinkError> {
     match (endpoint_family(a)?, endpoint_family(b)?) {
         (Some(x), Some(y)) if x != y => {
             Err(LinkError::FamiliesDiffer(a.name.clone(), b.name.clone()))
@@ -141,37 +134,33 @@ fn link_family(a: &NodeEntry, b: &NodeEntry) -> Result<AddressFamily, LinkError>
     }
 }
 
-fn endpoint_family(node: &NodeEntry) -> Result<Option<AddressFamily>, LinkError> {
+fn endpoint_family(node: &Node) -> Result<Option<AddressFamily>, LinkError> {
     let Some(endpoint) = &node.endpoint else {
         return Ok(None);
     };
-    let Ok(literal) = endpoint.parse::<IpAddr>() else {
-        return Ok(Some(node.address_family.unwrap_or(AddressFamily::Ipv6)));
+    let Ok(literal) = endpoint.written.parse::<IpAddr>() else {
+        return Ok(Some(endpoint.stated_family.unwrap_or(AddressFamily::Ipv6)));
     };
     let family = if literal.is_ipv4() {
         AddressFamily::Ipv4
     } else {
         AddressFamily::Ipv6
     };
-    match node.address_family {
+    match endpoint.stated_family {
         Some(said) if said != family => Err(LinkError::FamilyContradicts {
             node: node.name.clone(),
             said,
-            endpoint: endpoint.clone(),
+            endpoint: endpoint.written.clone(),
         }),
         _ => Ok(Some(family)),
     }
-}
-
-/// A link as `mesh.links` writes its pair.
-pub(crate) fn link_name(link: &MeshLink) -> String {
-    format!("{}-{}", link.pair[0], link.pair[1])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::secrets;
+    use sliplib_config::mesh_config::MeshConfig;
 
     /// Two nodes `a` and `b` and one link between them: `a`, `b` and `link` add fields to each,
     /// `cluster` adds lines to the cluster block.
@@ -186,7 +175,8 @@ mod tests {
     }
 
     fn computed(mesh: &MeshConfig) -> Result<Option<u32>, MtuError> {
-        mesh_mtu(mesh, &secrets::read(mesh))
+        let network = crate::v1::lower(mesh).unwrap();
+        mesh_mtu(&network, &secrets::read(&network))
     }
 
     fn mtu(a: &str, b: &str, link: &str, cluster: &str) -> u32 {

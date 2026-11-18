@@ -109,7 +109,7 @@ pub struct BgpPeerEntry {
     pub address: String,
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct AnnounceEntry {
     pub net: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -255,5 +255,5 @@ fn written_secrets(
         "{} lacks the secrets of pool {name:?} - `slipmesh mint` creates and writes them",
         config_path.display()
     );
-    Ok(secrets::read(topology))
+    Ok(secrets::read_pools(topology))
 }

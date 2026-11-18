@@ -4,6 +4,7 @@
 use anyhow::{Context, Result};
 use sliplib_config::mesh_config::missing_defaults;
 use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_mesh::model::Network;
 use sliplib_mesh::render::node_configs;
 use sliplib_mesh::secrets::ResolvedSecrets;
 use sliplib_yaml::MultiDoc;
@@ -31,9 +32,8 @@ fn whole_file(config_path: &Path, file: &SlipmeshFile) -> Result<()> {
     Ok(())
 }
 
-fn node(file: &SlipmeshFile, host: &str, resolved: &ResolvedSecrets) -> Result<()> {
-    let model = file.effective_for(host)?;
-    let Err(refusal) = node_configs(&model, host, resolved) else {
+fn node(network: &Network, host: &str, resolved: &ResolvedSecrets) -> Result<()> {
+    let Err(refusal) = node_configs(network, host, resolved) else {
         return Ok(());
     };
     let cured_by_minting = refusal.missing_secret().is_some();
@@ -47,12 +47,18 @@ fn node(file: &SlipmeshFile, host: &str, resolved: &ResolvedSecrets) -> Result<(
 
 /// Every node of `file` in its order, each with what refuses its configs: one refusal says nothing
 /// about the next node, so all of them are checked.
-pub fn nodes(file: &SlipmeshFile) -> Vec<(&str, Result<()>)> {
-    let resolved = sliplib_mesh::secrets::read(file.topology());
+pub fn nodes<'f>(file: &'f SlipmeshFile, network: &Network) -> Vec<(&'f str, Result<()>)> {
+    let resolved = sliplib_mesh::secrets::read(network);
     file.hosts()
         .into_iter()
-        .map(|host| (host, node(file, host, &resolved)))
+        .map(|host| (host, node(network, host, &resolved)))
         .collect()
+}
+
+/// The network of `file`, which every node's configs are computed from: what refuses it refuses
+/// them all.
+pub fn network(file: &SlipmeshFile) -> Result<Network> {
+    Ok(sliplib_mesh::v1::lower(file.topology())?)
 }
 
 /// Prints `<node>: ok` for each node that passes, every refusal on a line of its own, and then
@@ -69,15 +75,20 @@ pub fn run(config_path: &Path) -> ExitCode {
             if let Err(refusal) = whole_file(config_path, &file) {
                 refuse(refusal);
             }
-            for (host, checked) in nodes(&file) {
-                match checked {
-                    Ok(()) => println!("{host}: ok"),
-                    Err(refusal) => refuse(refusal),
+            match network(&file) {
+                Err(refusal) => refuse(refusal),
+                Ok(network) => {
+                    for (host, checked) in nodes(&file, &network) {
+                        match checked {
+                            Ok(()) => println!("{host}: ok"),
+                            Err(refusal) => refuse(refusal),
+                        }
+                    }
+                    let resolved = sliplib_mesh::secrets::read(&network);
+                    for warning in sliplib_mesh::warnings::warnings(&network, &resolved) {
+                        eprintln!("warning: {warning}");
+                    }
                 }
-            }
-            let resolved = sliplib_mesh::secrets::read(file.topology());
-            for warning in sliplib_mesh::warnings::warnings(file.topology(), &resolved) {
-                eprintln!("warning: {warning}");
             }
         }
     }
