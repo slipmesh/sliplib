@@ -86,6 +86,35 @@ fn a_file_whose_every_node_renders_passes_naming_each_node() {
 }
 
 #[test]
+fn a_link_that_loses_packets_is_warned_about_and_the_file_still_passes() {
+    let losing = network("", &[]).replace("h1: 5,", "h1: 100-199, random_trailers: true,");
+    let (checked, _) = check(&losing);
+    assert_eq!(checked.code, Some(0), "{}", checked.stderr);
+    assert_eq!(checked.stdout, "a: ok\nb: ok\nc: ok\nd: ok\n");
+    let warnings = refusals(
+        &checked.stderr,
+        &[
+            &["102 packets in 4294967296"],
+            &["s1 stands 15 bytes above s4"],
+        ],
+    );
+    for warning in warnings {
+        assert!(warning.starts_with("warning: mesh link b-c: "), "{warning}");
+    }
+}
+
+// What a link loses is counted from settings that pass the checks; of a file that is refused it
+// would be told of settings nobody runs.
+#[test]
+fn a_file_with_a_refused_node_gets_no_warning() {
+    let losing = network("", &["a"]).replace("h1: 5,", "h1: 100-199, random_trailers: true,");
+    let (checked, _) = check(&losing);
+    assert_eq!(checked.code, Some(1));
+    assert!(checked.stdout.contains("b: ok"), "{}", checked.stdout);
+    refusals(&checked.stderr, &[&["node \"a\"", "mesh_private_key"]]);
+}
+
+#[test]
 fn every_refused_node_is_reported_and_the_others_still_pass() {
     let (checked, _) = check(&network("", &["a", "d"]));
     assert_eq!(checked.code, Some(1));

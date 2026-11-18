@@ -13,6 +13,6 @@ pub mod slipmesh_file;
 
 pub use metrics::{MetricsConfig, MetricsError};
 pub use obfuscation::{
-    DEFAULT_MAGIC_HEADERS, HEADER_PROTECTION_NONCE_SIZE, Obfuscation, ObfuscationError,
+    DEFAULT_MAGIC_HEADERS, HEADER_PROTECTION_NONCE_SIZE, Obfuscation, ObfuscationError, TrailerLoss,
 };
 pub use range::{End, Range, RangeError};

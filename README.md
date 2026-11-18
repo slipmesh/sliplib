@@ -58,6 +58,14 @@ It also refuses a file that leaves `cluster.interface_prefix.mesh` or
 `cluster.route_proto_id.egress` to its default, and still checks its nodes: a tool that publishes
 them to the nodes takes them only as written. A refusal that `mint` cures says so.
 
+Where nothing was refused, it then prints a warning, on a line that starts with `warning:`, for
+every link that loses data packets it should deliver. A warning refuses nothing and leaves the
+exit code as it is. There are two, both for a link with `random_trailers` on: one of `h1` to `h3`
+is a range, with the share of data packets dropped at most where the bytes read are random; and
+the link has no `header_protection_key` while one of `s1` to `s3` stands 1 to 15 bytes above `s4`.
+A file with a refusal gets none: what a link loses is counted from settings that pass the checks.
+A pool gets none either, whatever its obfuscation: the warnings are of the links.
+
 What only one platform's tool knows is that tool's own check - the Talos generator's `--check`
 for the templates and patches of a Talos node.
 
@@ -75,6 +83,12 @@ A magic header is created outside every header the link or pool already holds, i
 ones the network's `obfuscation` gives it. When those leave fewer values than the headers it lacks,
 `mint` writes nothing and names the entry, `mesh.links[node-a|node-b].obfuscation`: narrow the
 ranges written for it or for the network, or write all four of its headers.
+
+`s1` and `s2` are created so that neither stands 1 to 15 bytes above the `s4` the link or pool
+holds, its own or the network's: such an offset is what [`check`](#check) warns about on a link
+with `random_trailers` on and no `header_protection_key`, and either can be switched after the
+offsets are written. They are also created so that `s2` is not `s1` + 56, which would give the
+two handshake messages one length, whichever of the two the link or pool already holds.
 
 Before it writes, `mint` checks every node on the file as it would become, as `check` does, and
 writes nothing when one would be refused: a value that is written is never minted again. Where a
@@ -231,7 +245,11 @@ message, each part once.
 - `router`: `RouterConfig` with its identity, iBGP peers, BFD settings, announcements and bypass
   sources, and `validate`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would
-  otherwise fail on; `MetricsConfig`, where a daemon serves its Prometheus endpoint.
+  otherwise fail on. `Obfuscation::trailer_loss` says how a tunnel with `random_trailers` on loses
+  data packets, as `TrailerLoss`: a share of them where one of `h1` to `h3` is a range, or by
+  their own header where an offset reads it. `Obfuscation::bytes_into_clear_header` says whether
+  an offset does, for the warning and for whatever creates an offset. `MetricsConfig` is where a
+  daemon serves its Prometheus endpoint.
 - `Range`, the type of the magic headers and the timing and padding values of `Obfuscation`. The
   kernel module draws each of them from a range, written as one number or as `lo-hi`. A number
   is rendered into a node's config as a number and a range as a string, which a daemon built
@@ -267,6 +285,9 @@ its cause as its `source`, or an `mtu::MtuError`.
   no junk.
 - `addressing` gives a node's IPv4 loopback from its `node_id`, the link-local of a loopback, and
   an endpoint to dial.
+- `warnings::warnings` lists what the tools accept and tell about: for every link, in order, each
+  `TrailerLoss` of its obfuscation. A `Warning` reads as the line a tool prints and says whether it
+  `concerns` a node, so a tool run for some nodes can tell about their links alone.
 
 ### `sliplib-runtime`
 
