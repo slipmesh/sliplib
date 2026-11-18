@@ -95,6 +95,14 @@ impl<T: End> Range<T> {
     }
 }
 
+impl Range<u16> {
+    /// `lo..=hi` written in the code: a reversed one does not compile as a constant.
+    pub(crate) const fn constant(lo: u16, hi: u16) -> Self {
+        assert!(lo <= hi);
+        Self { lo, hi }
+    }
+}
+
 impl<T: End> From<T> for Range<T> {
     fn from(value: T) -> Self {
         Self {

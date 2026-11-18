@@ -239,8 +239,10 @@ and what it was caused by is its `source`, so printing the whole chain gives the
   `annotate` adds the annotations of one namespace to it, refusing a document that deletes it or
   sets an annotation in that namespace itself.
 - `awg`: `AwgConfig` with its interfaces and peers, and `validate`. A peer's `persistent_keepalive`
-  is a number of seconds or a range of them; a reader takes its own interval for a peer that has
-  none, as every config computed from a file of format version 1 has.
+  is a number of seconds or a range of them. For a peer that has none,
+  `InterfaceEntry::keepalive_of` gives the default of what the interface speaks: 25 where it sets
+  no obfuscation, 20 to 30 where it sets any. A config holds a keepalive only where it differs
+  from that.
 - `router`: `RouterConfig` with its identity, iBGP peers, BFD settings, announcements and bypass
   sources, and `validate`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would

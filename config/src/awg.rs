@@ -77,13 +77,39 @@ pub struct PeerEntry {
     /// Seconds without traffic after which this node sends the peer a packet, so that a NAT on
     /// the way keeps its mapping: a number, or a range the kernel module draws an interval from
     /// each time it sets the timer. It counts only for a peer with an `endpoint`, which this node
-    /// dials; `0` sends none. Unset, the reader takes its own interval: a config written before
-    /// this field existed has none.
+    /// dials; `0` sends none. Unset, it is the default of what the interface speaks, which
+    /// [`InterfaceEntry::keepalive_of`] gives.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persistent_keepalive: Option<Range<u16>>,
 }
 
 pub const DEFAULT_HANDSHAKE_STALE_SECS: u64 = 180;
+
+/// The keepalive of a dialed peer whose entry sets none, on an interface that speaks plain
+/// WireGuard: the interval WireGuard's own tools suggest behind a NAT.
+pub const PLAIN_KEEPALIVE: Range<u16> = Range::constant(25, 25);
+
+/// The same on an interface that obfuscates: around that interval, drawn anew at every timer, so
+/// that the keepalives are no clock to tell the tunnel by.
+pub const OBFUSCATED_KEEPALIVE: Range<u16> = Range::constant(20, 30);
+
+impl InterfaceEntry {
+    /// Whether the interface speaks plain WireGuard: it sets nothing of the obfuscation.
+    pub fn is_plain(&self) -> bool {
+        self.obfuscation == Obfuscation::default()
+    }
+
+    /// The keepalive of `peer`, one of this interface's: its own, or the default of what the
+    /// interface speaks. Every reader of the config takes it from here, and whoever writes a
+    /// config leaves out a keepalive equal to it.
+    pub fn keepalive_of(&self, peer: &PeerEntry) -> Range<u16> {
+        peer.persistent_keepalive.unwrap_or(if self.is_plain() {
+            PLAIN_KEEPALIVE
+        } else {
+            OBFUSCATED_KEEPALIVE
+        })
+    }
+}
 
 /// What a daemon would refuse an `awg` config for, or fail on once it is converging the node.
 #[derive(Debug, thiserror::Error)]
@@ -506,6 +532,30 @@ interfaces:
                 None => assert!(!yaml.contains("persistent_keepalive"), "{yaml}"),
             }
             assert_eq!(sliplib_yaml::from_str::<AwgConfig>(&yaml).unwrap(), cfg);
+        }
+    }
+
+    #[test]
+    fn a_peer_without_a_keepalive_takes_the_default_of_what_its_interface_speaks() {
+        let plain = dialed(None);
+        let peer = &plain.interfaces[0].peers[0];
+        assert_eq!(plain.interfaces[0].keepalive_of(peer), Range::from(25));
+
+        let mut obfuscated = dialed(None);
+        obfuscated.interfaces[0].obfuscation.jc = Some(4);
+        assert_eq!(
+            obfuscated.interfaces[0].keepalive_of(peer),
+            Range::new(20, 30).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_peers_own_keepalive_stands_whatever_its_interface_speaks() {
+        let mut cfg = dialed(Some(Range::from(7)));
+        for jc in [None, Some(4)] {
+            cfg.interfaces[0].obfuscation.jc = jc;
+            let interface = &cfg.interfaces[0];
+            assert_eq!(interface.keepalive_of(&interface.peers[0]), Range::from(7));
         }
     }
 
