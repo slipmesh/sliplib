@@ -55,14 +55,10 @@ pub enum Error {
 
 impl Error {
     /// The key or obfuscation the node's configs lack, when that is what refused them: creating
-    /// it cures the refusal.
+    /// it cures the refusal. Only the `awg` config is computed from secrets.
     pub fn missing_secret(&self) -> Option<&MissingSecret> {
         match self {
             Self::RenderingAwg {
-                source: RenderError::MissingSecret(missing),
-                ..
-            }
-            | Self::RenderingRouter {
                 source: RenderError::MissingSecret(missing),
                 ..
             } => Some(missing),
@@ -262,14 +258,13 @@ fn mesh_interfaces_for(
                 persistent_keepalive: None,
             }],
         };
-        // Only a dialed peer is sent keepalives, and the one every reader takes for a peer that
-        // sets none is left out.
-        let peer = &interface.peers[0];
-        let default = interface.keepalive_of(peer);
-        let own = link
-            .persistent_keepalive
-            .filter(|own| peer.endpoint.is_some() && *own != default);
-        interface.peers[0].persistent_keepalive = own;
+        // The link's keepalive is written only where it changes what the peer is sent.
+        let without = interface.keepalive_of(&interface.peers[0]);
+        interface.peers[0].persistent_keepalive = link.persistent_keepalive;
+        let with = interface.keepalive_of(&interface.peers[0]);
+        if with == without {
+            interface.peers[0].persistent_keepalive = None;
+        }
         out.push(interface);
     }
     Ok(out)

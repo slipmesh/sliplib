@@ -161,10 +161,6 @@ pub struct LabeledPrefix {
     pub label: Option<String>,
 }
 
-/// Parses a loopback-identity address: `"<addr>/<prefix>"`, or a bare address (defaults to `/32`
-/// for IPv4, `/128` for IPv6 - the whole point of a loopback identity is that it has no host
-/// bits). Delegates to `sliplib_net::parse` whenever a prefix is present, so it accepts exactly
-/// what every other CIDR in the configs accepts.
 /// What is wrong with an entry of `node.loopback_addresses`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -178,6 +174,10 @@ pub enum LoopbackAddressError {
     },
 }
 
+/// Parses a loopback-identity address: `"<addr>/<prefix>"`, or a bare address (defaults to `/32`
+/// for IPv4, `/128` for IPv6 - the whole point of a loopback identity is that it has no host
+/// bits). Delegates to `sliplib_net::parse` whenever a prefix is present, so it accepts exactly
+/// what every other CIDR in the configs accepts.
 pub fn parse_loopback_address(s: &str) -> Result<(IpAddr, u8), LoopbackAddressError> {
     if s.contains('/') {
         let net = sliplib_net::parse(s)?;
@@ -252,6 +252,12 @@ pub enum Invalid {
     UnknownSourceKind(String),
 }
 
+/// Pure validation, no I/O: `node.loopback_addresses` has exactly one IPv4 and one IPv6 entry,
+/// every `bgp_peers` name is non-empty/unique and its address is a valid IPv6 address, every
+/// `ospf_interfaces`/ entry is non-empty, every `learn`/`announce[].net` entry is a valid IPv4
+/// CIDR, and every `bypass` entry's `kind` is recognized (with `literal` prefixes validated
+/// eagerly, since that's a local check - `asn`/`geoip`/`dns` are only checked when the daemon
+/// resolves them, since that's genuinely network-dependent).
 pub fn validate(cfg: &RouterConfig) -> Result<(), Invalid> {
     // AS 0 is reserved and explicitly invalid per RFC 7607 ("Codification of AS 0 Processing") -
     // BIRD would only surface this once it tries to actually start an iBGP session, well past
@@ -405,16 +411,13 @@ bgp_as: 64512
 
     #[test]
     fn validate_rejects_each_bfd_setting_of_zero_alone() {
-        for (setting, refusal) in [
-            ("min_rx_ms", "min_rx_ms"),
-            ("min_tx_ms", "min_tx_ms"),
-            ("multiplier", "multiplier"),
-        ] {
+        let refusal = |setting: &str| {
             let yaml = format!("{}bfd:\n  {setting}: 0\n", minimal_yaml());
-            let cfg: RouterConfig = sliplib_yaml::from_str(&yaml).unwrap();
-            let err = validate(&cfg).unwrap_err().to_string();
-            assert!(err.contains(refusal), "{setting}: {err}");
-        }
+            validate(&sliplib_yaml::from_str(&yaml).unwrap()).unwrap_err()
+        };
+        assert!(matches!(refusal("min_rx_ms"), Invalid::BfdIntervalZero));
+        assert!(matches!(refusal("min_tx_ms"), Invalid::BfdIntervalZero));
+        assert!(matches!(refusal("multiplier"), Invalid::BfdMultiplierZero));
     }
 
     /// A zero interval renders a bird.conf BIRD refuses, and the daemon would only find out

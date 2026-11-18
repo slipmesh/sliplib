@@ -188,14 +188,20 @@ pub enum ObfuscationError {
 /// length: it reads the four bytes at the offsets `s1`, `s2` and `s3`, and a data packet whose
 /// bytes there fall inside `h1`, `h2` or `h3` is taken for that message and dropped.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TrailerLoss {
     /// One of `h1` to `h3` is a range: of 2^32 data packets, up to `values`, the number of values
     /// in the three together, are dropped. It is a bound where the bytes read are random.
     Share { values: u64 },
     /// There is no `header_protection_key`, and `field`, one of `s1` to `s3`, stands `above`
-    /// bytes over `s4`, 1 to 15: the bytes read there are the data packet's own header in the
-    /// clear, so which packets are dropped is decided by their key index and counter.
-    ReadsHeader { field: &'static str, above: u16 },
+    /// bytes over `data_junk`, the `s4` as it is set, 1 to 15: the bytes read there are the data
+    /// packet's own header in the clear, so which packets are dropped is decided by their key
+    /// index and counter.
+    ReadsHeader {
+        field: &'static str,
+        above: u16,
+        data_junk: Option<u16>,
+    },
 }
 
 impl fmt::Display for TrailerLoss {
@@ -205,7 +211,7 @@ impl fmt::Display for TrailerLoss {
                 let percent = 100.0 * *values as f64 / MAGIC_HEADER_VALUES as f64;
                 write!(
                     f,
-                    "with random_trailers on, a data packet whose bytes fall inside h1, h2 or h3 is dropped as a handshake message: up to {values} packets in {MAGIC_HEADER_VALUES}, "
+                    "with random_trailers on, a data packet whose bytes fall inside h1, h2 or h3 is dropped as a handshake or cookie message: where those bytes are random, up to {values} packets in {MAGIC_HEADER_VALUES}, "
                 )?;
                 // Two decimals of a smaller share would read as none at all.
                 if percent < 0.01 {
@@ -217,10 +223,22 @@ impl fmt::Display for TrailerLoss {
                     " - keep h1 to h3 single values or narrow ranges, or put the range in h4",
                 )
             }
-            Self::ReadsHeader { field, above } => write!(
-                f,
-                "with random_trailers on and no header_protection_key, {field} stands {above} bytes above s4, where a data packet carries its own key index and counter: data packets are dropped by those, not by chance - set a header_protection_key, or keep s1 to s3 from being 1 to 15 above s4"
-            ),
+            Self::ReadsHeader {
+                field,
+                above,
+                data_junk,
+            } => {
+                let bytes = if *above == 1 { "byte" } else { "bytes" };
+                // An unset `s4` is nowhere in the file to be looked for.
+                let unset = match data_junk {
+                    Some(_) => "",
+                    None => " which is not set and counts as 0,",
+                };
+                write!(
+                    f,
+                    "with random_trailers on and no header_protection_key, {field} stands {above} {bytes} above s4,{unset} where a data packet carries its own key index and counter: data packets are dropped by those, not by chance - set a header_protection_key, or keep s1 to s3 from being 1 to 15 above s4"
+                )
+            }
         }
     }
 }
@@ -252,15 +270,27 @@ impl Obfuscation {
         }
 
         if self.header_protection_key.is_none() {
-            let data_junk = self.s4.unwrap_or(0);
+            let data_junk = self.s4;
             for (field, offset) in [("s1", self.s1), ("s2", self.s2), ("s3", self.s3)] {
-                let above = offset.unwrap_or(0).saturating_sub(data_junk);
-                if (1..=CLEAR_HEADER_REACH).contains(&above) {
-                    loss.push(TrailerLoss::ReadsHeader { field, above });
+                let offset = offset.unwrap_or(0);
+                if let Some(above) = Self::bytes_into_clear_header(offset, data_junk.unwrap_or(0)) {
+                    loss.push(TrailerLoss::ReadsHeader {
+                        field,
+                        above,
+                        data_junk,
+                    });
                 }
             }
         }
         loss
+    }
+
+    /// How far above `data_junk`, the `s4` of a data packet, `offset` stands, when that is
+    /// inside the header such a packet carries in the clear: the offset of a handshake or cookie
+    /// message, `s1` to `s3`, then reads a field of the data packet's own.
+    pub fn bytes_into_clear_header(offset: u16, data_junk: u16) -> Option<u16> {
+        let above = offset.saturating_sub(data_junk);
+        (1..=CLEAR_HEADER_REACH).contains(&above).then_some(above)
     }
 
     /// The magic headers as the kernel module ends up with them, unset ones at their defaults.
@@ -688,14 +718,65 @@ mod tests {
     }
 
     #[test]
+    fn the_share_says_what_it_is_a_bound_of_and_which_messages_a_packet_is_taken_for() {
+        let share = TrailerLoss::Share { values: 102 }.to_string();
+        assert!(share.contains("a handshake or cookie message"), "{share}");
+        assert!(
+            share.contains("where those bytes are random, up to 102 packets"),
+            "{share}"
+        );
+    }
+
+    #[test]
+    fn an_offset_is_told_in_bytes_and_against_the_s4_in_force() {
+        let reads = |above, data_junk| {
+            TrailerLoss::ReadsHeader {
+                field: "s1",
+                above,
+                data_junk,
+            }
+            .to_string()
+        };
+        let one = reads(1, Some(20));
+        assert!(one.contains("s1 stands 1 byte above s4,"), "{one}");
+        let several = reads(8, Some(20));
+        assert!(several.contains("s1 stands 8 bytes above s4,"), "{several}");
+        // Nothing to look for in the file: the line says what an unset `s4` counts as.
+        let unset = reads(8, None);
+        assert!(
+            unset.contains("s1 stands 8 bytes above s4, which is not set and counts as 0,"),
+            "{unset}"
+        );
+    }
+
+    #[test]
+    fn a_header_protection_key_does_not_keep_a_range_from_costing_its_share() {
+        let mut o = header_protected([Some(21), Some(22), Some(23), Some(20)]);
+        o.random_trailers = Some(true);
+        o.h2 = Some("2200-2299".parse().unwrap());
+        assert_eq!(o.trailer_loss(), [TrailerLoss::Share { values: 102 }]);
+    }
+
+    #[test]
     fn an_offset_1_to_15_above_s4_reads_the_header_of_a_data_packet() {
-        let above = |field: &'static str, above: u16| TrailerLoss::ReadsHeader { field, above };
+        let above = |field: &'static str, above: u16| TrailerLoss::ReadsHeader {
+            field,
+            above,
+            data_junk: Some(20),
+        };
         for (yaml, loss) in [
             ("s1: 20, s4: 20", vec![]),
             ("s1: 21, s4: 20", vec![above("s1", 1)]),
             ("s2: 35, s4: 20", vec![above("s2", 15)]),
             ("s3: 36, s4: 20", vec![]),
-            ("s3: 8", vec![above("s3", 8)]),
+            (
+                "s3: 8",
+                vec![TrailerLoss::ReadsHeader {
+                    field: "s3",
+                    above: 8,
+                    data_junk: None,
+                }],
+            ),
             ("s1: 19, s4: 20", vec![]),
             (
                 "s1: 24, s2: 28, s3: 60, s4: 20",
@@ -722,7 +803,8 @@ mod tests {
                 TrailerLoss::Share { values: 102 },
                 TrailerLoss::ReadsHeader {
                     field: "s3",
-                    above: 8
+                    above: 8,
+                    data_junk: Some(20),
                 }
             ]
         );

@@ -24,7 +24,9 @@ pub fn run(config_path: &Path) -> Result<()> {
     // node's config is refused with must not reach the file.
     let edited = SlipmeshFile::read(&yaml)
         .context("slipmesh.yaml with what was minted does not read back - not written")?;
-    let refusals: Vec<anyhow::Error> = check::nodes(&edited, &check::network(&edited)?)
+    let network = check::network(&edited)?;
+    let written = sliplib_mesh::secrets::read(&network);
+    let refusals: Vec<anyhow::Error> = check::nodes(&edited, &network, &written)
         .into_iter()
         .filter_map(|(_, checked)| checked.err())
         .collect();

@@ -6,13 +6,13 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "slipmesh.yaml and the patch format the slipmesh generator writes and its readers take: Talos documents and the daemons' configs"
+description = "slipmesh.yaml, and the configs the slipmesh tools write from it for the daemons to read"
 
 [dependencies]
 anyhow.workspace = true
 indexmap.workspace = true
 serde.workspace = true
 sliplib-net.workspace = true
-thiserror.workspace = true
 sliplib-secrets.workspace = true
 sliplib-yaml.workspace = true
+thiserror.workspace = true
