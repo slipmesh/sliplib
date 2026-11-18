@@ -268,7 +268,6 @@ impl Aimed {
         if platform == Platform::Routeros {
             return Err(Error::NotTaken { place, platform });
         }
-        let nodes: Vec<Name> = network.nodes.keys().cloned().collect();
         let of_the_platform: Vec<Name> = network
             .nodes
             .iter()
@@ -280,7 +279,7 @@ impl Aimed {
             include: self.include,
             exclude: self.exclude,
         };
-        let reach = groups.reach(&selection, &nodes, &of_the_platform, &place.to_string())?;
+        let reach = groups.reach(&selection, &of_the_platform, &place.to_string())?;
         let of_another = reach
             .iter()
             .map(|node| (node, network.nodes[node].platform))
@@ -432,9 +431,10 @@ impl File {
 
         let nodes: Vec<Name> = network.nodes.keys().cloned().collect();
         let groups = match at_most_one(groups, GROUPS)? {
-            Some(document) => body::<Groups>(&document, GROUPS)?.resolve(&nodes)?,
-            None => Resolved::default(),
-        };
+            Some(document) => body::<Groups>(&document, GROUPS)?,
+            None => Groups::default(),
+        }
+        .resolve(&nodes)?;
 
         let mut templates = Vec::new();
         let mut patches = Vec::new();

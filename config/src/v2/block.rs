@@ -49,6 +49,12 @@ pub struct Include(Vec<Name>);
 pub struct Exclude(Vec<Name>);
 
 impl Include {
+    /// `names` as an `include`; never empty, or it would reach no node.
+    pub(super) fn listing(names: Vec<Name>) -> Self {
+        debug_assert!(!names.is_empty());
+        Self(names)
+    }
+
     pub fn names(&self) -> &[Name] {
         &self.0
     }
@@ -125,8 +131,15 @@ impl<'de> Deserialize<'de> for Exclude {
 /// another kind is an unknown one, so a misspelled `include` cannot aim a document at every
 /// node.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+#[serde(
+    remote = "Self",
+    tag = "kind",
+    rename_all = "lowercase",
+    deny_unknown_fields
+)]
 pub enum Block {
+    /// The values of `version` and `revision` are the loader's to check against the ones its
+    /// tool is built for.
     Network {
         version: u32,
         revision: u32,
@@ -161,6 +174,8 @@ pub enum Block {
         order: Order,
     },
 }
+
+from_a_mapping!(Block);
 
 impl Block {
     pub fn order(&self) -> Order {
@@ -260,6 +275,12 @@ mod tests {
             ("{kind: platform, platform: talos, include: [a]}", "include"),
             ("{kind: patch, platform: talos, revision: 1}", "revision"),
             ("{kind: template, platform: talos, inculde: [a]}", "inculde"),
+            ("{kind: groups, platform: talos}", "platform"),
+            (
+                "{kind: network, version: 2, revision: 1, exclude: [a]}",
+                "exclude",
+            ),
+            ("{kind: platform, platform: talos, exclude: [a]}", "exclude"),
         ] {
             let refused = block(yaml).unwrap_err();
             assert!(
@@ -267,6 +288,26 @@ mod tests {
                 "{yaml}: {refused}"
             );
         }
+    }
+
+    #[test]
+    fn a_block_is_a_mapping_and_one_written_as_a_list_is_refused() {
+        for list in [
+            "[network, 2, 1]",
+            "[groups]",
+            "[platform, talos]",
+            "[template, talos]",
+            "[patch, talos]",
+        ] {
+            let refused = block(list).unwrap_err();
+            assert!(refused.contains("a mapping"), "{list}: {refused}");
+        }
+    }
+
+    #[test]
+    fn a_block_without_a_kind_is_refused() {
+        let refused = block("{platform: talos}").unwrap_err();
+        assert!(refused.contains("missing field `kind`"), "{refused}");
     }
 
     #[test]
@@ -314,11 +355,53 @@ mod tests {
             Order(65535)
         );
         for order in ["65536", "-1", "1.5", "first"] {
-            assert!(
-                block(&format!("{{kind: groups, order: {order}}}")).is_err(),
-                "{order}"
-            );
+            let refused = block(&format!("{{kind: groups, order: {order}}}")).unwrap_err();
+            assert!(refused.contains("u16"), "{order}: {refused}");
         }
+    }
+
+    #[test]
+    fn an_order_left_out_is_1000_on_every_kind_that_is_aimed() {
+        for kind in ["template", "patch"] {
+            let read = block(&format!("{{kind: {kind}, platform: talos}}")).unwrap();
+            assert_eq!(read.order(), Order(1000), "{kind}");
+        }
+    }
+
+    /// The block as the loader takes it: out of its document as a value.
+    fn block_from_value(yaml: &str) -> Block {
+        let value: sliplib_yaml::Value = sliplib_yaml::from_str(yaml).unwrap();
+        sliplib_yaml::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn a_name_yaml_reads_as_a_number_or_a_boolean_is_the_name_written() {
+        let yaml = "{kind: patch, platform: talos, include: [7, 1.5], exclude: [true]}";
+        for read in [block(yaml).unwrap(), block_from_value(yaml)] {
+            let Block::Patch {
+                include, exclude, ..
+            } = read
+            else {
+                panic!("{read:?}");
+            };
+            assert_eq!(names(include.names()), ["7", "1.5"]);
+            assert_eq!(names(exclude.names()), ["true"]);
+        }
+    }
+
+    #[test]
+    fn a_negative_number_is_refused_by_the_name_rule() {
+        let refused = block("{kind: patch, platform: talos, include: [-7]}").unwrap_err();
+        assert!(
+            refused.contains("has to start and end with a letter or a digit"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn a_name_left_empty_is_refused() {
+        let refused = block("{kind: patch, platform: talos, include: [node-a, null]}").unwrap_err();
+        assert!(refused.contains("a name"), "{refused}");
     }
 
     fn aim(keys: &str) -> (Include, Exclude) {

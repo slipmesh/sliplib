@@ -3,13 +3,57 @@
 //! of a name in a node's routing configuration or of an annotation key, which take no more than
 //! this.
 
-use serde::Deserialize;
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer};
 use std::fmt;
 
 /// A name: ASCII letters, digits, `-`, `_` and `.`, with a letter or a digit first and last.
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
-#[serde(try_from = "String")]
+///
+/// A name YAML reads as a number or a boolean, `7` or `true`, is the name written so, wherever it
+/// stands: as a key of a mapping or in a list, read from the text or from a value. A number is
+/// written back as YAML reads it, so `07` is the name `7`; quoted, it keeps its spelling.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Name(String);
+
+impl<'de> Deserialize<'de> for Name {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Text;
+
+        impl Visitor<'_> for Text {
+            type Value = Name;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a name")
+            }
+
+            fn visit_str<E: de::Error>(self, text: &str) -> Result<Name, E> {
+                Name::try_from(text.to_owned()).map_err(E::custom)
+            }
+
+            fn visit_u64<E: de::Error>(self, number: u64) -> Result<Name, E> {
+                self.visit_str(&number.to_string())
+            }
+
+            fn visit_i64<E: de::Error>(self, number: i64) -> Result<Name, E> {
+                self.visit_str(&number.to_string())
+            }
+
+            fn visit_f64<E: de::Error>(self, number: f64) -> Result<Name, E> {
+                self.visit_str(&number.to_string())
+            }
+
+            fn visit_bool<E: de::Error>(self, word: bool) -> Result<Name, E> {
+                self.visit_str(&word.to_string())
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Name, E> {
+                Err(E::custom(NameError::Empty))
+            }
+        }
+
+        deserializer.deserialize_any(Text)
+    }
+}
 
 // A refusal quotes a name with `{:?}`, as it quotes a text.
 impl fmt::Debug for Name {
@@ -30,7 +74,7 @@ pub enum NameError {
     Character { name: String, character: char },
     #[error("the name {0:?} has to start and end with a letter or a digit")]
     Edge(String),
-    #[error("the name {name:?} is longer than {limit} characters")]
+    #[error("the name {name:?} of a route class is longer than {limit} characters")]
     TooLong { name: String, limit: usize },
 }
 
@@ -82,7 +126,7 @@ impl fmt::Display for Name {
 /// The name of a route class. It ends the key of a node annotation, which takes 63 characters,
 /// so it takes 48.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
-#[serde(try_from = "String")]
+#[serde(try_from = "Name")]
 pub struct ClassName(Name);
 
 impl fmt::Debug for ClassName {
@@ -103,7 +147,14 @@ impl TryFrom<String> for ClassName {
     type Error = NameError;
 
     fn try_from(name: String) -> Result<Self, NameError> {
-        let name = Name::try_from(name)?;
+        Self::try_from(Name::try_from(name)?)
+    }
+}
+
+impl TryFrom<Name> for ClassName {
+    type Error = NameError;
+
+    fn try_from(name: Name) -> Result<Self, NameError> {
         if name.as_str().len() > Self::LIMIT {
             return Err(NameError::TooLong {
                 name: name.0,
