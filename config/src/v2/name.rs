@@ -59,6 +59,13 @@ impl TryFrom<String> for Name {
     }
 }
 
+// A map keyed by names is looked up by the text of one; a `Name` hashes and compares as its text.
+impl std::borrow::Borrow<str> for Name {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 impl fmt::Display for Name {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
@@ -138,6 +145,17 @@ mod tests {
         for text in ["-a", "a-", ".a", "a.", "_a", "a_", "-"] {
             assert_eq!(name(text), Err(NameError::Edge(text.to_owned())), "{text}");
         }
+    }
+
+    #[test]
+    fn a_name_reads_as_its_text_wherever_a_message_names_it() {
+        assert_eq!(name("node-a").unwrap().to_string(), "node-a");
+        assert_eq!(
+            ClassName::try_from("egress".to_owned())
+                .unwrap()
+                .to_string(),
+            "egress"
+        );
     }
 
     #[test]

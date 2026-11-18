@@ -2,6 +2,7 @@
 
 mod block;
 mod name;
+pub mod network;
 
 pub use block::{ALL, Block, Exclude, Include, NONE, Order, Platform, Rank};
 pub use name::{ClassName, Name, NameError};

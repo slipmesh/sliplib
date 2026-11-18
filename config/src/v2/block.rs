@@ -301,6 +301,12 @@ mod tests {
     }
 
     #[test]
+    fn a_platform_reads_as_the_files_write_it() {
+        assert_eq!(Platform::Talos.to_string(), "talos");
+        assert_eq!(Platform::Routeros.to_string(), "routeros");
+    }
+
+    #[test]
     fn an_order_is_a_whole_number_up_to_65535() {
         assert_eq!(block("{kind: groups, order: 0}").unwrap().order(), Order(0));
         assert_eq!(
