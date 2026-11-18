@@ -37,6 +37,15 @@ mod name;
 pub use block::{ALL, Block, Exclude, Include, NONE, Order, Platform, Rank};
 pub use name::{ClassName, Name, NameError};
 
+use serde::de::{self, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer};
+#[cfg(test)]
+use sliplib_yaml::Value;
+use std::borrow::Borrow;
+use std::fmt;
+use std::hash::Hash;
+use std::marker::PhantomData;
+
 /// What is named, by its name, in the order written: the order reaches the nodes' configs.
 pub type Map<K, V> = indexmap::IndexMap<K, V>;
 
@@ -45,33 +54,29 @@ pub type Map<K, V> = indexmap::IndexMap<K, V>;
 /// later entry would replace the earlier.
 pub(crate) fn unique_keys<'de, D, K, V>(deserializer: D) -> Result<Map<K, V>, D::Error>
 where
-    D: serde::Deserializer<'de>,
-    K: serde::Deserialize<'de> + std::hash::Hash + Eq + std::fmt::Debug,
-    V: serde::Deserialize<'de>,
+    D: Deserializer<'de>,
+    K: Deserialize<'de> + Hash + Eq + Borrow<str>,
+    V: Deserialize<'de>,
 {
-    struct Entries<K, V>(std::marker::PhantomData<(K, V)>);
+    struct Entries<K, V>(PhantomData<(K, V)>);
 
-    impl<'de, K, V> serde::de::Visitor<'de> for Entries<K, V>
+    impl<'de, K, V> Visitor<'de> for Entries<K, V>
     where
-        K: serde::Deserialize<'de> + std::hash::Hash + Eq + std::fmt::Debug,
-        V: serde::Deserialize<'de>,
+        K: Deserialize<'de> + Hash + Eq + Borrow<str>,
+        V: Deserialize<'de>,
     {
         type Value = Map<K, V>;
 
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.write_str("a mapping")
         }
 
-        fn visit_map<A: serde::de::MapAccess<'de>>(
-            self,
-            mut entries: A,
-        ) -> Result<Map<K, V>, A::Error> {
-            let mut map = Map::with_capacity(entries.size_hint().unwrap_or(0));
+        fn visit_map<A: MapAccess<'de>>(self, mut entries: A) -> Result<Map<K, V>, A::Error> {
+            let mut map = Map::new();
             while let Some((key, value)) = entries.next_entry::<K, V>()? {
                 if map.contains_key(&key) {
-                    return Err(serde::de::Error::custom(format!(
-                        "the name {key:?} stands twice among the keys of one mapping, written in two ways YAML reads as one value - give each its own name, or quote both as written"
-                    )));
+                    let name: &str = key.borrow();
+                    return Err(de::Error::custom(NameError::Twice(name.to_owned())));
                 }
                 map.insert(key, value);
             }
@@ -79,5 +84,64 @@ where
         }
     }
 
-    deserializer.deserialize_map(Entries(std::marker::PhantomData))
+    deserializer.deserialize_map(Entries(PhantomData))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(yaml: &str) -> Result<Vec<String>, String> {
+        let read = sliplib_yaml::from_str::<Value>(yaml).map_err(|e| e.to_string())?;
+        let map: Map<Name, Value> = unique_keys(read).map_err(|e| e.to_string())?;
+        Ok(map.keys().map(Name::to_string).collect())
+    }
+
+    #[derive(Deserialize, Debug)]
+    #[serde(transparent)]
+    struct Named(#[serde(deserialize_with = "unique_keys")] Map<Name, Value>);
+
+    // Read from the text, where the reader leaves no duplicate behind it, and from a value.
+    #[test]
+    fn two_keys_that_read_as_one_name_are_refused_naming_it() {
+        for (yaml, name) in [
+            ("{True: a, true: b}", "true"),
+            ("{1.0: a, 1: b}", "1"),
+            ("{1e3: a, 1000: b}", "1000"),
+        ] {
+            let refused = sliplib_yaml::from_str::<Named>(yaml)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                refused.starts_with(&NameError::Twice(name.to_owned()).to_string()),
+                "{yaml}: {refused}"
+            );
+        }
+        let from_a_value = names("{1.0: a, 1: b}").unwrap_err();
+        assert!(
+            from_a_value.starts_with(&NameError::Twice("1".to_owned()).to_string()),
+            "{from_a_value}"
+        );
+    }
+
+    #[test]
+    fn keys_of_their_own_keep_the_order_written() {
+        let yaml = "{b: 1, 07: 2, a: 3, 7: 4}";
+        let from_text = sliplib_yaml::from_str::<Named>(yaml).unwrap();
+        let from_text: Vec<&str> = from_text.0.keys().map(Name::as_str).collect();
+        assert_eq!(from_text, ["b", "07", "a", "7"]);
+        assert_eq!(names(yaml).unwrap(), ["b", "07", "a", "7"]);
+    }
+
+    #[test]
+    fn two_class_names_that_read_as_one_are_refused_naming_it() {
+        let read = sliplib_yaml::from_str::<Value>("{1.0: a, 1: b}").unwrap();
+        let refused = unique_keys::<_, ClassName, Value>(read)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.starts_with(&NameError::Twice("1".to_owned()).to_string()),
+            "{refused}"
+        );
+    }
 }
