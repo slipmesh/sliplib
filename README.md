@@ -210,9 +210,10 @@ their checks only; reading and writing the files is `sliplib-yaml`'s.
 - `slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a `MultiDoc`
   (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
   `roadwarriors` document, and `patch` documents aimed at hosts by `include`/`exclude`. It gives the
-  hosts in order, the topology, and the Talos documents of one host (`patches_for`), merged defaults
-  first. `GENERATED` names the `ExtensionServiceConfig`s generated from the network, which a patch
-  may only add files to.
+  hosts in order, the topology, and the `patch` documents as written: all of them (`patches`) or
+  those that reach one host (`patches_for`), in the order of the file. A `Patch` gives its
+  document, its `rank` among the documents that reach the same host, and reads as where it stands
+  in the file. What a `patch` holds is for the tool of its platform to read and merge.
 - `mesh_config`: the topology - `MeshConfig` with its cluster settings, nodes, mesh links,
   roadwarriors pools and bypass entries - and `validate`, the checks across them.
   `missing_defaults` lists the network settings the topology leaves to a default that a node is
