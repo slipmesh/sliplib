@@ -78,6 +78,17 @@ fn mint_writes_a_key_for_every_node_on_a_link_and_the_obfuscation_of_every_amnez
 }
 
 #[test]
+fn mint_writes_into_the_network_document_wherever_it_stands_in_the_file() {
+    let config = Config::holding(&format!("{TALOS}---\n{MESH}"));
+    mint(&config);
+    let written = documents(&config);
+    let network = written.last().unwrap();
+    assert!(network["nodes"]["node-a"]["wireguard"]["private_key"].is_string());
+    assert!(network["mesh"]["links"]["a-b"]["amneziawg"]["obfuscation"]["h1"].is_number());
+    assert!(written[0].get("nodes").is_none());
+}
+
+#[test]
 fn a_second_mint_changes_nothing() {
     let config = minted();
     let first = config.text();
