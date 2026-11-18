@@ -78,8 +78,9 @@ pub enum GroupsError {
 /// The nodes a group stands for, or why it stands for none.
 type Members = Result<Vec<Name>, GroupsError>;
 
-/// Every group turned into its nodes.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// Every group turned into its nodes, and the nodes of the network they were turned against.
+/// Only [`Groups::resolve`] makes one: without the nodes, a selection would reach none.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
     /// Every node of the network, which the groups were resolved against.
     nodes: Vec<Name>,
@@ -101,7 +102,7 @@ impl Groups {
         }
         let mut resolved = Resolved {
             nodes: nodes.to_vec(),
-            ..Resolved::default()
+            groups: Map::new(),
         };
         for name in self.0.keys() {
             self.expand(name, nodes, &mut resolved, &mut Vec::new())?;
