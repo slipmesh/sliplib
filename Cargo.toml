@@ -18,6 +18,8 @@ anyhow = "1.0.104"
 atomic-write-file = "0.3.1"
 base64 = "0.23.1"
 clap = { version = "4.6.8", features = ["derive"] }
+# An ordered map with serde: the nodes and links of slipmesh.yaml keep the order written.
+indexmap = { version = "2.14.2", features = ["serde"] }
 ipnet = "2.12.2"
 # The terminal renderer alone: the default features bring an image encoder nothing here uses.
 qrcode = { version = "0.14.1", default-features = false }

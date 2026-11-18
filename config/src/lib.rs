@@ -10,6 +10,7 @@ mod obfuscation;
 mod range;
 pub mod router;
 pub mod slipmesh_file;
+pub mod v2;
 
 pub use metrics::{MetricsConfig, MetricsError};
 pub use obfuscation::{
