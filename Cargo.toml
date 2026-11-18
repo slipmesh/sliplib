@@ -17,11 +17,11 @@ publish = false
 anyhow = "1.0.104"
 atomic-write-file = "0.3.1"
 base64 = "0.23.1"
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.8", features = ["derive"] }
 ipnet = "2.12.2"
 # The terminal renderer alone: the default features bring an image encoder nothing here uses.
 qrcode = { version = "0.14.1", default-features = false }
-rand = "0.10.3"
+rand = "0.10.4"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # The version x25519-dalek builds on, for its clamping alone.
@@ -42,5 +42,5 @@ sliplib-secrets = { path = "secrets" }
 sliplib-yaml = { path = "yaml" }
 # `static_secrets` for a key that outlives one handshake, `getrandom` to generate one.
 x25519-dalek = { version = "3.0.0", features = ["static_secrets", "getrandom"] }
-zeroize = { version = "1.9.1", features = ["derive"] }
+zeroize = { version = "1.9.2", features = ["derive"] }
 yaml_serde = "0.10.7"
