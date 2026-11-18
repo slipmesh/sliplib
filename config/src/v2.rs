@@ -47,8 +47,6 @@ pub use name::{ClassName, Name, NameError};
 
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-#[cfg(test)]
-use sliplib_yaml::Value;
 use std::borrow::Borrow;
 use std::fmt;
 use std::hash::Hash;
@@ -111,6 +109,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sliplib_yaml::Value;
 
     fn names(yaml: &str) -> Result<Vec<String>, String> {
         let read = sliplib_yaml::from_str::<Value>(yaml).map_err(|e| e.to_string())?;
