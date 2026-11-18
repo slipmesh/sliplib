@@ -1,8 +1,8 @@
 //! `slipmesh.yaml` in format version 2, as `docs/slipmesh-yaml.md` describes it.
 
 /// Implements `Deserialize` for `$type`, whose `#[serde(remote = "Self")]` derive gives the reading
-/// of its keys, so that it is read from a mapping alone. serde reads a struct, and an internally
-/// tagged enum, from a list as well, by position, and the format writes neither as one.
+/// of its keys, so that it is read from a mapping alone. serde reads an internally tagged enum
+/// through a buffer that takes a list as well, by position, and the format writes none as one.
 macro_rules! from_a_mapping {
     ($type:ty) => {
         impl<'de> serde::Deserialize<'de> for $type {
