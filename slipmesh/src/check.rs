@@ -2,9 +2,9 @@
 //! computed and checked the way the tool that configures the node would. It writes nothing.
 
 use anyhow::{Context, Result};
+use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_config::v1::mesh_config::missing_defaults;
-use sliplib_config::v1::slipmesh_file::SlipmeshFile;
-use sliplib_mesh::model::Network;
+use sliplib_mesh::model::{MetricsPorts, Network};
 use sliplib_mesh::render::node_configs;
 use sliplib_mesh::secrets::ResolvedSecrets;
 use sliplib_yaml::MultiDoc;
@@ -16,19 +16,31 @@ fn read(config_path: &Path) -> Result<SlipmeshFile> {
         .with_context(|| format!("reading {}", config_path.display()))
 }
 
-/// What refuses the file whichever node is configured from it: a network setting left to its
-/// default, which a tool that publishes it to the nodes takes only as written.
+/// What is wrong with the file as a whole and stops no node by itself. In version 1, the network
+/// settings left to a default that `mint` writes. In version 2, a document of a platform whose
+/// keys do not read: the settings of `talos` and of `routeros`, and the keys of a `template`.
 fn whole_file(config_path: &Path, file: &SlipmeshFile) -> Result<()> {
-    let unset: Vec<&str> = missing_defaults(file.topology())
-        .into_iter()
-        .map(|(key, _)| key)
-        .collect();
-    anyhow::ensure!(
-        unset.is_empty(),
-        "{} lacks {} - `slipmesh mint` writes their defaults",
-        config_path.display(),
-        unset.join(", ")
-    );
+    match file {
+        SlipmeshFile::V1(file) => {
+            let unset: Vec<&str> = missing_defaults(file.topology())
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect();
+            anyhow::ensure!(
+                unset.is_empty(),
+                "{} lacks {} - `slipmesh mint` writes their defaults",
+                config_path.display(),
+                unset.join(", ")
+            );
+        }
+        SlipmeshFile::V2(files) => {
+            files.talos_settings()?;
+            files.routeros_settings()?;
+            for template in files.templates() {
+                template.read()?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -47,18 +59,27 @@ fn node(network: &Network, host: &str, resolved: &ResolvedSecrets) -> Result<()>
 
 /// Every node of `file` in its order, each with what refuses its configs: one refusal says nothing
 /// about the next node, so all of them are checked.
-pub fn nodes<'f>(file: &'f SlipmeshFile, network: &Network) -> Vec<(&'f str, Result<()>)> {
+pub fn nodes(network: &Network) -> Vec<(&str, Result<()>)> {
     let resolved = sliplib_mesh::secrets::read(network);
-    file.hosts()
-        .into_iter()
-        .map(|host| (host, node(network, host, &resolved)))
+    network
+        .nodes
+        .iter()
+        .map(|host| (host.name.as_str(), node(network, &host.name, &resolved)))
         .collect()
 }
 
 /// The network of `file`, which every node's configs are computed from: what refuses it refuses
 /// them all.
 pub fn network(file: &SlipmeshFile) -> Result<Network> {
-    Ok(sliplib_mesh::v1::lower(file.topology())?)
+    let mut network = sliplib_mesh::model::lower(file)?;
+    // The listeners are settings of `talos`. Settings that do not read are refused with the
+    // rest of the file, and leave the nodes to be checked without them.
+    if let SlipmeshFile::V2(files) = file
+        && let Ok(settings) = files.talos_settings()
+    {
+        network.metrics = MetricsPorts::from(&settings);
+    }
+    Ok(network)
 }
 
 /// Prints `<node>: ok` for each node that passes, every refusal on a line of its own, and then
@@ -78,7 +99,7 @@ pub fn run(config_path: &Path) -> ExitCode {
             match network(&file) {
                 Err(refusal) => refuse(refusal),
                 Ok(network) => {
-                    for (host, checked) in nodes(&file, &network) {
+                    for (host, checked) in nodes(&network) {
                         match checked {
                             Ok(()) => println!("{host}: ok"),
                             Err(refusal) => refuse(refusal),

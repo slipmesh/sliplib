@@ -3,21 +3,30 @@
 
 use crate::edit;
 use crate::file::{read_slipmesh, write_edits};
-use anyhow::{Context, Result};
+use anyhow::Result;
+use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_mesh::model::Format;
 use sliplib_secrets::wireguard::PrivateKey;
 use std::path::Path;
 
 pub fn run(node: &str, config_path: &Path) -> Result<()> {
     let (mut yaml, file) = read_slipmesh(config_path)?;
-    let hosts = file.hosts();
-    let index = hosts
-        .iter()
-        .position(|host| *host == node)
-        .with_context(|| format!("unknown node {node:?} - known nodes: {hosts:?}"))?;
-    edit::set_node_key(&mut yaml, &file, index, &PrivateKey::generate())?;
+    let (hosts, format): (Vec<&str>, Format) = match &file {
+        SlipmeshFile::V1(file) => (file.hosts(), Format::V1),
+        SlipmeshFile::V2(files) => {
+            let nodes = files.network().nodes.keys();
+            (nodes.map(|name| name.as_str()).collect(), Format::V2)
+        }
+    };
+    anyhow::ensure!(
+        hosts.contains(&node),
+        "unknown node {node:?} - known nodes: {hosts:?}"
+    );
+    edit::set_node_key(&mut yaml, &file, node, &PrivateKey::generate())?;
     write_edits(config_path, &yaml)?;
     println!(
-        "rekeyed nodes[{node}].mesh_private_key in {}",
+        "rekeyed {} in {}",
+        format.node_key(node),
         config_path.display()
     );
     Ok(())

@@ -19,6 +19,9 @@ pub const VERSION: u64 = 2;
 /// The generation of the rules that turn the files into configs, for which this code is built.
 pub const REVISION: u64 = 1;
 
+/// The reference value of `mesh.interface_prefix`.
+const REFERENCE_INTERFACE_PREFIX: &str = "mesh-";
+
 const NETWORK: &str = "network";
 const GROUPS: &str = "groups";
 const PLATFORM: &str = "platform";
@@ -469,6 +472,15 @@ impl File {
         self.network_document
     }
 
+    /// The required keys the files lack that have a reference value, each with that value:
+    /// what `slipmesh mint` writes, and no tool falls back to.
+    pub fn missing_reference_values(&self) -> Vec<(&'static str, Value)> {
+        match self.network.mesh.interface_prefix {
+            Some(_) => Vec::new(),
+            None => vec![("mesh.interface_prefix", REFERENCE_INTERFACE_PREFIX.into())],
+        }
+    }
+
     /// The settings of `platform`: the body of its `platform` document, and what a platform has
     /// without one where the files hold none.
     fn settings<T: DeserializeOwned + Default>(&self, platform: Platform) -> Result<T, Error> {
@@ -758,6 +770,17 @@ mod tests {
         )])
         .unwrap();
         assert_eq!(wireguard(&file, "a-r1").persistent_keepalive, None);
+    }
+
+    #[test]
+    fn the_interface_prefix_is_the_one_key_with_a_reference_value() {
+        let with_it = file(&[&network("{}")]).unwrap();
+        assert!(with_it.missing_reference_values().is_empty());
+        let without = file(&[&network("{mesh: {interface_prefix: null}}")]).unwrap();
+        assert_eq!(
+            without.missing_reference_values(),
+            [("mesh.interface_prefix", Value::from("mesh-"))]
+        );
     }
 
     #[test]

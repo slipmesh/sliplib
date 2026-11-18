@@ -12,6 +12,7 @@ use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_config::v1::mesh_config::{AddressFamily, BypassEntry, RoadwarriorPool, UnknownNode};
 use sliplib_config::v2::Platform;
+use sliplib_config::v2::platform::{Listener, TalosSettings};
 use sliplib_config::{Obfuscation, Range};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -115,6 +116,17 @@ pub struct MetricsPorts {
     pub router: Option<u16>,
 }
 
+impl From<&TalosSettings> for MetricsPorts {
+    fn from(settings: &TalosSettings) -> Self {
+        let port = |listener: &Option<Listener>| listener.as_ref().map(|l| l.port.get());
+        let metrics = settings.metrics.as_ref();
+        Self {
+            awg: metrics.and_then(|metrics| port(&metrics.mesh)),
+            router: metrics.and_then(|metrics| port(&metrics.router)),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Node {
     pub name: String,
@@ -199,6 +211,28 @@ mod tests {
 
     fn lowered(raw: &str) -> Result<Network, Error> {
         lower(&SlipmeshFile::parse(raw).unwrap())
+    }
+
+    #[test]
+    fn the_metrics_ports_are_those_of_the_settings_of_talos() {
+        let settings = |yaml: &str| -> TalosSettings { sliplib_yaml::from_str(yaml).unwrap() };
+        assert_eq!(
+            MetricsPorts::from(&settings(
+                "metrics: {mesh: {port: 9586}, router: {port: 9324}}"
+            )),
+            MetricsPorts {
+                awg: Some(9586),
+                router: Some(9324)
+            }
+        );
+        assert_eq!(
+            MetricsPorts::from(&settings("metrics: {router: {port: 9324}}")),
+            MetricsPorts {
+                awg: None,
+                router: Some(9324)
+            }
+        );
+        assert_eq!(MetricsPorts::from(&settings("{}")), MetricsPorts::default());
     }
 
     #[test]

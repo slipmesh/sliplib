@@ -5,16 +5,22 @@
 use crate::file::{read_slipmesh, write_edits};
 use crate::{check, edit};
 use anyhow::{Context, Result};
-use sliplib_config::v1::mesh_config::missing_defaults;
-use sliplib_config::v1::slipmesh_file::SlipmeshFile;
+use sliplib_config::slipmesh_file::SlipmeshFile;
 use std::path::Path;
 
 pub fn run(config_path: &Path) -> Result<()> {
-    let (mut yaml, file) = read_slipmesh(config_path)?;
-    let minted = sliplib_mesh::mint::create(&check::network(&file)?)?;
-    edit::record(&mut yaml, &file, &minted)?;
-    let unset = missing_defaults(file.topology());
+    let (mut yaml, mut file) = read_slipmesh(config_path)?;
+    // Before anything is minted: a file of version 2 gives no network without its reference
+    // value, and one of version 1 gives the same network with its defaults written or not.
+    let unset = edit::unset(&file);
     edit::write_defaults(&mut yaml, &file, &unset)?;
+    if !unset.is_empty() {
+        file = SlipmeshFile::read(&yaml)
+            .context("slipmesh.yaml with what it lacked does not read back - not written")?;
+    }
+    let network = check::network(&file)?;
+    let minted = sliplib_mesh::mint::create(&network)?;
+    edit::record(&mut yaml, &file, &network, &minted)?;
     if minted.is_empty() && unset.is_empty() {
         return Ok(());
     }
@@ -24,7 +30,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     // node's config is refused with must not reach the file.
     let edited = SlipmeshFile::read(&yaml)
         .context("slipmesh.yaml with what was minted does not read back - not written")?;
-    let refusals: Vec<anyhow::Error> = check::nodes(&edited, &check::network(&edited)?)
+    let refusals: Vec<anyhow::Error> = check::nodes(&check::network(&edited)?)
         .into_iter()
         .filter_map(|(_, checked)| checked.err())
         .collect();
@@ -43,7 +49,11 @@ pub fn run(config_path: &Path) -> Result<()> {
     }
     if !unset.is_empty() {
         let keys: Vec<&str> = unset.iter().map(|(key, _)| *key).collect();
-        println!("wrote the defaults of {} into {path}", keys.join(", "));
+        let what = match file {
+            SlipmeshFile::V1(_) => "the defaults",
+            SlipmeshFile::V2(_) => "the reference value",
+        };
+        println!("wrote {what} of {} into {path}", keys.join(", "));
     }
     Ok(())
 }

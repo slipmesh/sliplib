@@ -12,29 +12,54 @@
 
 use anyhow::{Context, Result};
 use sliplib_config::Obfuscation;
+use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_config::v1::mesh_config::RoadwarriorClient;
-use sliplib_config::v1::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::mesh_config::missing_defaults;
 use sliplib_mesh::mint::Minted;
+use sliplib_mesh::model::Network;
 use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{Mapping, MultiDoc, Value};
 
-/// Writes every value of `minted` into its field of `yaml`, the `slipmesh.yaml` `file` was read
-/// from.
-pub fn record(yaml: &mut MultiDoc, file: &SlipmeshFile, minted: &Minted) -> Result<()> {
-    for (node, key) in &minted.node_keys {
-        set_node_key(yaml, file, *node, key)?;
+/// The position of the `network` document of `file`, where a value of the network is written.
+fn network_document(file: &SlipmeshFile) -> usize {
+    match file {
+        SlipmeshFile::V1(file) => file.network_document(),
+        SlipmeshFile::V2(files) => files.network_document(),
     }
-    let network = document(yaml, file.network_document())?;
+}
+
+/// Writes every value of `minted` into its field of `yaml`, the `slipmesh.yaml` that `file` and
+/// then `network` were read from: `minted` names nodes and links by their positions in `network`.
+pub fn record(
+    yaml: &mut MultiDoc,
+    file: &SlipmeshFile,
+    network: &Network,
+    minted: &Minted,
+) -> Result<()> {
+    for (node, key) in &minted.node_keys {
+        set_node_key(yaml, file, &network.nodes[*node].name, key)?;
+    }
+    let mut links = document(yaml, network_document(file))?
+        .get_mut("mesh")
+        .and_then(|mesh| mesh.get_mut("links"));
     for (link, generated) in &minted.link_obfuscation {
-        let entry = network
-            .get_mut("mesh")
-            .and_then(|mesh| mesh.get_mut("links"))
-            .and_then(|links| links.get_mut(*link))
-            .context("a link the network document does not have")?;
+        // A list by position in version 1; in version 2 a mapping by name, each link with the
+        // block of its type, and only a link of type `amneziawg` is minted for.
+        let entry = match file {
+            SlipmeshFile::V1(_) => links.as_deref_mut().and_then(|links| links.get_mut(*link)),
+            SlipmeshFile::V2(_) => links
+                .as_deref_mut()
+                .and_then(|links| links.get_mut(network.links[*link].name.as_str()))
+                .and_then(|link| link.get_mut("amneziawg")),
+        }
+        .context("a link the network document does not have")?;
         write_obfuscation(entry, generated)?;
     }
 
     for pool_minted in &minted.pools {
+        let SlipmeshFile::V1(file) = file else {
+            anyhow::bail!("a pool minted for a file that holds none");
+        };
         let name = &pool_minted.name;
         let index = file
             .pool_document(name)
@@ -50,19 +75,44 @@ pub fn record(yaml: &mut MultiDoc, file: &SlipmeshFile, minted: &Minted) -> Resu
     Ok(())
 }
 
-/// Sets the mesh key of the node at position `node` of `nodes` in `yaml`, the `slipmesh.yaml`
-/// `file` was read from.
+/// Sets the key of `node` in `yaml`, the `slipmesh.yaml` `file` was read from, where the version
+/// of the file holds it.
 pub fn set_node_key(
     yaml: &mut MultiDoc,
     file: &SlipmeshFile,
-    node: usize,
+    node: &str,
     key: &PrivateKey,
 ) -> Result<()> {
-    let entry = document(yaml, file.network_document())?
-        .get_mut("nodes")
-        .and_then(|nodes| nodes.get_mut(node))
-        .context("a node the network document does not have")?;
-    set(entry, "mesh_private_key", key.expose().into())
+    let nodes = document(yaml, network_document(file))?.get_mut("nodes");
+    let missing = "a node the network document does not have";
+    match file {
+        SlipmeshFile::V1(file) => {
+            let position = file.hosts().iter().position(|host| *host == node);
+            let entry = nodes
+                .zip(position)
+                .and_then(|(nodes, position)| nodes.get_mut(position))
+                .context(missing)?;
+            set(entry, "mesh_private_key", key.expose().into())
+        }
+        SlipmeshFile::V2(_) => {
+            let entry = nodes
+                .and_then(|nodes| nodes.get_mut(node))
+                .context(missing)?;
+            if entry.get("wireguard").is_none_or(Value::is_null) {
+                set(entry, "wireguard", Value::Mapping(Mapping::new()))?;
+            }
+            set(&mut entry["wireguard"], "private_key", key.expose().into())
+        }
+    }
+}
+
+/// The keys of the network that `file` leaves out and `mint` writes, each with its value: the
+/// defaults of version 1, the reference values of version 2.
+pub fn unset(file: &SlipmeshFile) -> Vec<(&'static str, Value)> {
+    match file {
+        SlipmeshFile::V1(file) => missing_defaults(file.topology()),
+        SlipmeshFile::V2(files) => files.missing_reference_values(),
+    }
 }
 
 /// Writes each of `defaults` at its key in the network document of `yaml`, the `slipmesh.yaml`
@@ -73,7 +123,7 @@ pub fn write_defaults(
     file: &SlipmeshFile,
     defaults: &[(&str, Value)],
 ) -> Result<()> {
-    let network = document(yaml, file.network_document())?;
+    let network = document(yaml, network_document(file))?;
     for (key, value) in defaults {
         *key.split('.')
             .fold(&mut *network, |value, step| &mut value[step]) = value.clone();
@@ -236,9 +286,9 @@ plain: true
     fn run(raw: &str) -> String {
         let mut yaml = MultiDoc::parse(raw).unwrap();
         let file = SlipmeshFile::read(&yaml).unwrap();
-        let network = sliplib_mesh::v1::lower(file.topology()).unwrap();
+        let network = sliplib_mesh::model::lower(&file).unwrap();
         let minted = mint::create(&network).unwrap();
-        record(&mut yaml, &file, &minted).unwrap();
+        record(&mut yaml, &file, &network, &minted).unwrap();
         yaml.text().unwrap()
     }
 
@@ -266,7 +316,9 @@ plain: true
     }
 
     fn topology(raw: &str) -> MeshConfig {
-        SlipmeshFile::parse(raw).unwrap().into_topology()
+        sliplib_config::v1::slipmesh_file::SlipmeshFile::parse(raw)
+            .unwrap()
+            .into_topology()
     }
 
     fn keys_of(obfuscation: &Obfuscation) -> Vec<String> {
