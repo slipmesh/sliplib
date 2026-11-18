@@ -5,8 +5,8 @@
 
 use expect_test::expect_file;
 use sha2::{Digest, Sha256};
-use sliplib_config::mesh_config::MeshConfig;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::mesh_config::MeshConfig;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use sliplib_config::v2::Platform;
 use sliplib_mesh::model::MetricsPorts;
 use sliplib_mesh::render::node_configs;

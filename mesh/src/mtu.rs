@@ -9,7 +9,7 @@
 
 use crate::model::{Link, Network, Node};
 use crate::secrets::{ResolvedSecrets, link_key};
-use sliplib_config::mesh_config::{AddressFamily, UnknownNode};
+use sliplib_config::v1::mesh_config::{AddressFamily, UnknownNode};
 use std::net::IpAddr;
 
 /// An uplink's MTU when `nodes[].uplink_mtu` does not say.
@@ -167,7 +167,7 @@ fn endpoint_family(node: &Node) -> Result<Option<AddressFamily>, LinkError> {
 mod tests {
     use super::*;
     use crate::secrets;
-    use sliplib_config::mesh_config::MeshConfig;
+    use sliplib_config::v1::mesh_config::MeshConfig;
 
     /// Two nodes `a` and `b` and one link between them: `a`, `b` and `link` add fields to each,
     /// `cluster` adds lines to the cluster block.

@@ -5,8 +5,8 @@ use crate::model::{Endpoint, Keys, Link, MetricsPorts, Network, Node, V1Only};
 use crate::mtu::DEFAULT_UPLINK_MTU;
 use crate::render::RenderError;
 use crate::secrets::unless_plain;
-use sliplib_config::mesh_config::{MeshConfig, NodeEntry};
 use sliplib_config::router::AnnounceEntry;
+use sliplib_config::v1::mesh_config::{MeshConfig, NodeEntry};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// The label of the Kubernetes service range in a node's routing configuration.

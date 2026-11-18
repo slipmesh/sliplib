@@ -3,7 +3,7 @@
 
 use crate::secrets::{self, ResolvedSecrets};
 use sliplib_config::Obfuscation;
-use sliplib_config::mesh_config::MeshConfig;
+use sliplib_config::v1::mesh_config::MeshConfig;
 use sliplib_secrets::wireguard::PrivateKey;
 
 /// Every field a minted obfuscation carries, at values the kernel module accepts.

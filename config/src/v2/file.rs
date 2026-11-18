@@ -8,7 +8,7 @@ use super::groups::{Groups, GroupsError, Resolved, Selection};
 use super::network::{AMNEZIAWG, Network, WIREGUARD};
 use super::platform::{RouterosSettings, TalosSettings, Template};
 use super::{Name, Platform};
-use crate::slipmesh_file::{BlockError, META_KEY, Place};
+use crate::v1::slipmesh_file::{BlockError, META_KEY, Place};
 use serde::de::DeserializeOwned;
 use sliplib_yaml::{Document, Mapping, MultiDoc, Value, merge};
 use std::fmt;

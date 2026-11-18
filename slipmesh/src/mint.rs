@@ -5,8 +5,8 @@
 use crate::file::{read_slipmesh, write_edits};
 use crate::{check, edit};
 use anyhow::{Context, Result};
-use sliplib_config::mesh_config::missing_defaults;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::mesh_config::missing_defaults;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use std::path::Path;
 
 pub fn run(config_path: &Path) -> Result<()> {

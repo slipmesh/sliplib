@@ -218,18 +218,18 @@ a node, and what its readers take - Talos, the daemons on the node, and the Rout
 their checks only; reading and writing the files is `sliplib-yaml`'s.
 
 Every check and the loader return an error type of their own, one variant for each refusal:
-`slipmesh_file::Error`, `mesh_config::Invalid`, `awg::Invalid`, `router::Invalid`,
+`v1::slipmesh_file::Error`, `v1::mesh_config::Invalid`, `awg::Invalid`, `router::Invalid`,
 `ObfuscationError`, `MetricsError`, `talos::Error`. A variant's text is one line of the refusal,
 and what it was caused by is its `source`, so printing the whole chain gives the whole message.
 
-- `slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a `MultiDoc`
-  (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
+- `v1::slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a
+  `MultiDoc` (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
   `roadwarriors` document, and `patch` documents aimed at hosts by `include`/`exclude`. It gives the
   hosts in order, the topology, and the `patch` documents as written: all of them (`patches`) or
   those that reach one host (`patches_for`), in the order of the file. A `Patch` gives its
   document, its `rank` among the documents that reach the same host, and reads as where it stands
   in the file. What a `patch` holds is for the tool of its platform to read and merge.
-- `mesh_config`: the topology - `MeshConfig` with its cluster settings, nodes, mesh links,
+- `v1::mesh_config`: the topology - `MeshConfig` with its cluster settings, nodes, mesh links,
   roadwarriors pools and bypass entries - and `validate`, the checks across them.
   `missing_defaults` lists the network settings the topology leaves to a default that a node is
   told, each with that default.

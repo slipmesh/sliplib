@@ -1,7 +1,7 @@
 //! `slipmesh.yaml` on disk: read for editing, and written back with its edits.
 
 use anyhow::{Context, Result};
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use sliplib_yaml::MultiDoc;
 use std::path::Path;
 

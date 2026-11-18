@@ -12,8 +12,8 @@
 
 use anyhow::{Context, Result};
 use sliplib_config::Obfuscation;
-use sliplib_config::mesh_config::RoadwarriorClient;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::mesh_config::RoadwarriorClient;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use sliplib_mesh::mint::Minted;
 use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{Mapping, MultiDoc, Value};
@@ -165,7 +165,7 @@ fn document(yaml: &mut MultiDoc, index: usize) -> Result<&mut Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sliplib_config::mesh_config::MeshConfig;
+    use sliplib_config::v1::mesh_config::MeshConfig;
     use sliplib_mesh::mint;
 
     const NINE: [&str; 9] = ["jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"];

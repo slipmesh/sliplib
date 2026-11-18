@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result, bail};
 use sliplib_config::Obfuscation;
-use sliplib_config::mesh_config::{MeshConfig, RoadwarriorClient, RoadwarriorPool};
+use sliplib_config::v1::mesh_config::{MeshConfig, RoadwarriorClient, RoadwarriorPool};
 use sliplib_mesh::addressing;
 use sliplib_mesh::secrets::ResolvedSecrets;
 use sliplib_secrets::wireguard::PrivateKey;

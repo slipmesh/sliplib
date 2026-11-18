@@ -4,8 +4,8 @@
 use crate::addressing;
 use crate::model::{Endpoint, Keys, Link, MetricsPorts, Network, Node};
 use crate::mtu::DEFAULT_UPLINK_MTU;
-use sliplib_config::mesh_config::AddressFamily;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
+use sliplib_config::v1::mesh_config::AddressFamily;
 use sliplib_config::v2::File;
 use sliplib_config::v2::network::{self, Family, LinkKind};
 use sliplib_config::{Obfuscation, Range};

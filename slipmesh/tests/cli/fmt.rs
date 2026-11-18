@@ -1,6 +1,6 @@
 use crate::common::{Config, topology};
 use sliplib_config::Range;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{MultiDoc, Value};
 

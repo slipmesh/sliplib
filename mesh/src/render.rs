@@ -7,10 +7,10 @@ use crate::model::{Network, Node};
 use crate::mtu::MtuError;
 use crate::secrets::{MissingSecret, ResolvedSecrets, link_key, unminted};
 use sliplib_config::awg::{AwgConfig, InterfaceEntry, PeerEntry};
-use sliplib_config::mesh_config::UnknownNode;
 use sliplib_config::router::{
     BgpPeerEntry, BypassConfig, DEFAULT_BYPASS_REFRESH_INTERVAL_SECS, NodeIdentity, RouterConfig,
 };
+use sliplib_config::v1::mesh_config::UnknownNode;
 use sliplib_config::v2::Platform;
 use sliplib_config::{MetricsConfig, Obfuscation, ObfuscationError};
 use sliplib_secrets::wireguard::KeyError;
@@ -442,7 +442,7 @@ fn metrics_for(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sliplib_config::mesh_config::MeshConfig;
+    use sliplib_config::v1::mesh_config::MeshConfig;
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     // The fixtures are topologies of format version 1. Each function under test is reached

@@ -9,7 +9,7 @@
 
 use crate::model::Network;
 use sliplib_config::Obfuscation;
-use sliplib_config::mesh_config::{MeshConfig, RoadwarriorPool};
+use sliplib_config::v1::mesh_config::{MeshConfig, RoadwarriorPool};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::collections::HashMap;
 

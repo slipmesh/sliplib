@@ -6,8 +6,8 @@
 //! It refuses nothing: it can hold every file of version 1 that reads. What only one version
 //! refuses is refused where that version is read and lowered.
 
-use sliplib_config::mesh_config::{AddressFamily, BypassEntry, RoadwarriorPool, UnknownNode};
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
+use sliplib_config::v1::mesh_config::{AddressFamily, BypassEntry, RoadwarriorPool, UnknownNode};
 use sliplib_config::v2::Platform;
 use sliplib_config::{Obfuscation, Range};
 use sliplib_secrets::wireguard::PrivateKey;

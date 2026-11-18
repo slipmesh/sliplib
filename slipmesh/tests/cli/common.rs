@@ -1,7 +1,7 @@
 //! The `slipmesh` binary run on a file of its own, as a caller would run it.
 
-use sliplib_config::mesh_config::MeshConfig;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::mesh_config::MeshConfig;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 

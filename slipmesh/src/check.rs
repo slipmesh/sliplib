@@ -2,8 +2,8 @@
 //! computed and checked the way the tool that configures the node would. It writes nothing.
 
 use anyhow::{Context, Result};
-use sliplib_config::mesh_config::missing_defaults;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::mesh_config::missing_defaults;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use sliplib_mesh::model::Network;
 use sliplib_mesh::render::node_configs;
 use sliplib_mesh::secrets::ResolvedSecrets;

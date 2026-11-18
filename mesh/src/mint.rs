@@ -143,7 +143,7 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sliplib_config::mesh_config::MeshConfig;
+    use sliplib_config::v1::mesh_config::MeshConfig;
 
     // The fixtures are topologies of format version 1, read through its lowering.
     fn create(topology: &MeshConfig) -> Result<Minted, NoHeaderLeft> {

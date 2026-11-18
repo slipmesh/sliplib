@@ -55,7 +55,7 @@ pub fn warnings(mesh: &Network, resolved: &ResolvedSecrets) -> Vec<Warning> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sliplib_config::mesh_config::MeshConfig;
+    use sliplib_config::v1::mesh_config::MeshConfig;
 
     // The fixtures are topologies of format version 1, read through its lowering.
     fn warnings_of(mesh: &MeshConfig) -> Vec<Warning> {
