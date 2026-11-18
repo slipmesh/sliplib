@@ -55,14 +55,10 @@ pub enum Error {
 
 impl Error {
     /// The key or obfuscation the node's configs lack, when that is what refused them: creating
-    /// it cures the refusal.
+    /// it cures the refusal. Only the `awg` config is computed from secrets.
     pub fn missing_secret(&self) -> Option<&MissingSecret> {
         match self {
             Self::RenderingAwg {
-                source: RenderError::MissingSecret(missing),
-                ..
-            }
-            | Self::RenderingRouter {
                 source: RenderError::MissingSecret(missing),
                 ..
             } => Some(missing),

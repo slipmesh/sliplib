@@ -542,8 +542,9 @@ extraArgs:
 
     #[test]
     fn the_patches_of_a_host_come_in_the_order_of_the_file() {
-        let install =
-            "slipmesh:\n  kind: patch\napiVersion: v1alpha1\nkind: UnattendedInstallConfig\n";
+        // The one that names its host stands first and ranks above the other: sorted by rank,
+        // it would come last.
+        let install = "slipmesh:\n  kind: patch\n  include: [node-a]\napiVersion: v1alpha1\nkind: UnattendedInstallConfig\n";
         let parsed = SlipmeshFile::parse(&file(&[NETWORK, install, KUBELET])).unwrap();
         let kinds: Vec<_> = parsed
             .patches_for("node-a")
@@ -552,6 +553,15 @@ extraArgs:
             .map(|patch| patch.value()["kind"].as_str().unwrap())
             .collect();
         assert_eq!(kinds, ["UnattendedInstallConfig", "KubeletConfig"]);
+    }
+
+    #[test]
+    fn what_a_patch_holds_is_not_the_loaders_to_refuse() {
+        let without_a_kind = "slipmesh:\n  kind: patch\nmachine:\n  install: {disk: /dev/vda}\n";
+        let over_a_generated_one = "slipmesh:\n  kind: patch\napiVersion: v1alpha1\nkind: ExtensionServiceConfig\nname: router\nenvironment:\n  - RUST_LOG=debug\nconfigFiles:\n  - mountPath: /etc/talos-extensions/router.yaml\n    content: x\n";
+        let parsed =
+            SlipmeshFile::parse(&file(&[NETWORK, without_a_kind, over_a_generated_one])).unwrap();
+        assert_eq!(parsed.patches().len(), 2);
     }
 
     #[test]
