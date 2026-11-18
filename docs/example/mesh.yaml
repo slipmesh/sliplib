@@ -1,0 +1,107 @@
+# The architecture of an example network in format version 2, described in ../slipmesh-yaml.md.
+# secrets.yaml is laid over it, and talos.yaml holds the documents of the Talos platform and two
+# groups.
+#
+# Every network and address is from a range reserved for documentation, but the link-local
+# fe80:: of the links; a node_id is an identity, not an address. The AS number is reserved for
+# documentation and every name stands for nothing. The comments are for the reader: the first
+# write by `slipmesh` drops them.
+
+slipmesh:
+  kind: network
+  version: 2
+  revision: 1
+addressing:
+  loopback:
+    ipv4: 198.51.100.0/25
+    ipv6: 3fff:0:0:1::/64
+  tunnel:
+    ipv4: 198.51.100.128/25
+routing:
+  bgp:
+    as: 64500
+  # Present, so BFD is on.
+  bfd:
+    min_rx_ms: 300
+    min_tx_ms: 300
+    multiplier: 5
+  direct_interfaces: [lan0]
+  learn: [203.0.113.0/26]
+  announce: [203.0.113.64/26]
+  classes:
+    egress:
+      protocol: 152
+mesh:
+  interface_prefix: mesh-
+  # Below the least limit of the links, which is 1344 here.
+  mtu: 1320
+  # What every link of type amneziawg starts from.
+  amneziawg:
+    obfuscation:
+      s3: 40
+      s4: 16
+      i1: "<b 0xabcd><r 16>"
+      i2: "<r 32>"
+      i3: "<t><r 8>"
+      i4: "<rc 12>"
+      i5: "<rd 6>"
+      random_trailers: true
+      disable_cookies: false
+  links:
+    a-b:
+      type: amneziawg
+      ends: {node-a: {}, node-b: {}}
+      amneziawg:
+        port: 51830
+    a-c:
+      type: amneziawg
+      ends: {node-a: {}, node-c: {}}
+      amneziawg:
+        port: 51831
+        # node-c dials node-a through its NAT and sends these; node-a sends none to node-c.
+        persistent_keepalive: 15-20
+        # Written by hand: a header as a range, h4 since random_trailers is on, and two of the
+        # timing values. `slipmesh mint` wrote the other three headers outside the range, in
+        # secrets.yaml.
+        obfuscation:
+          h4: 5505-5599
+          rekey_after_time: 100-140
+          keepalive_timeout: 12
+    # The RouterOS tool serves links of type wireguard alone.
+    a-r1:
+      type: wireguard
+      ends: {node-a: {}, router1: {}}
+      wireguard:
+        port: 51832
+nodes:
+  node-a:
+    platform: talos
+    node_id: 0.0.0.1
+    underlay:
+      wan:
+        endpoint: {ipv4: 192.0.2.1}
+  node-b:
+    platform: talos
+    node_id: 0.0.0.2
+    underlay:
+      # A host name, dialed over the family of its key.
+      wan:
+        endpoint: {ipv4: node-b.example.com}
+  # Behind NAT: it has no endpoint and dials node-a.
+  node-c:
+    platform: talos
+    node_id: 0.0.0.3
+    underlay:
+      wan:
+        mtu: 1420
+  # Outside the cluster whose ranges `learn` and `announce` name, so it takes neither.
+  router1:
+    platform: routeros
+    node_id: 0.0.0.4
+    underlay:
+      wan:
+        endpoint: {ipv4: 192.0.2.4}
+    routing:
+      direct_interfaces: [bridge-lan]
+      learn: []
+      announce: []
