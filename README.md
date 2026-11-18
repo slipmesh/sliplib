@@ -441,6 +441,24 @@ reviewed with the rest of the pull request; the test refuses to record in CI:
 UPDATE_EXPECT=1 cargo test -p sliplib-mesh --test golden
 ```
 
+`v2` and `v2-alternate` beside them are the same two networks written in format version 2 by hand.
+The same test shows that every node of such a twin gets the configs the file of version 1 gave
+it, but for what [a conversion changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand).
+
+[`fuzz/`](fuzz) holds a target for [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz.html),
+which needs a nightly toolchain: `read_slipmesh` gives a text to everything a tool does with a
+file, from reading it in either version to the configs of every node, and expects a refusal or
+a result and never a panic. It is run before a pull request that changes how a file is read,
+from the fixtures as its first inputs:
+
+```bash
+mkdir -p fuzz/corpus/read_slipmesh
+```
+
+```bash
+cargo +nightly fuzz run read_slipmesh fuzz/corpus/read_slipmesh docs/example mesh/tests/golden/v2 -- -max_total_time=180
+```
+
 ## Releasing
 
 Releases come from `main` only. Run the Release PR workflow, with the version or empty to compute it
