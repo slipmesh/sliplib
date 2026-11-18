@@ -58,6 +58,12 @@ It also refuses a file that leaves `cluster.interface_prefix.mesh` or
 `cluster.route_proto_id.egress` to its default, and still checks its nodes: a tool that publishes
 them to the nodes takes them only as written. A refusal that `mint` cures says so.
 
+After the nodes it prints a warning, on a line that starts with `warning:`, for every link that
+loses data packets it should deliver. A warning refuses nothing and leaves the exit code as it is.
+There are two, both for a link with `random_trailers` on: one of `h1` to `h3` is a range, with the
+share of data packets dropped at most; and the link has no `header_protection_key` while one of
+`s1` to `s3` stands 1 to 15 bytes above `s4`.
+
 What only one platform's tool knows is that tool's own check - the Talos generator's `--check`
 for the templates and patches of a Talos node.
 
@@ -236,7 +242,10 @@ and what it was caused by is its `source`, so printing the whole chain gives the
 - `router`: `RouterConfig` with its identity, iBGP peers, BFD settings, announcements and bypass
   sources, and `validate`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would
-  otherwise fail on; `MetricsConfig`, where a daemon serves its Prometheus endpoint.
+  otherwise fail on. `Obfuscation::trailer_loss` says how a tunnel with `random_trailers` on loses
+  data packets, as `TrailerLoss`: a share of them where one of `h1` to `h3` is a range, or by
+  their own header where an offset reads it. `MetricsConfig` is where a daemon serves its
+  Prometheus endpoint.
 - `Range`, the type of the magic headers and the timing and padding values of `Obfuscation`. The
   kernel module draws each of them from a range, written as one number or as `lo-hi`. A number
   is rendered into a node's config as a number and a range as a string, which a daemon built
@@ -272,6 +281,9 @@ A refusal is a `render::Error`, which names the node and which of its configs it
   no junk.
 - `addressing` gives a node's IPv4 loopback from its `node_id`, the link-local of a loopback, and
   an endpoint to dial.
+- `warnings::warnings` lists what the tools accept and tell about: for every link, in order, each
+  `TrailerLoss` of its obfuscation. A `Warning` reads as the line a tool prints and says whether it
+  `concerns` a node, so a tool run for some nodes can tell about their links alone.
 
 ### `sliplib-runtime`
 

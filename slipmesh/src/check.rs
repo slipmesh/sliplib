@@ -55,7 +55,8 @@ pub fn nodes(file: &SlipmeshFile) -> Vec<(&str, Result<()>)> {
         .collect()
 }
 
-/// Prints `<node>: ok` for each node that passes and every refusal on a line of its own.
+/// Prints `<node>: ok` for each node that passes, every refusal on a line of its own, and then
+/// every warning, which fails nothing.
 pub fn run(config_path: &Path) -> ExitCode {
     let mut passed = ExitCode::SUCCESS;
     let mut refuse = |refusal: anyhow::Error| {
@@ -73,6 +74,10 @@ pub fn run(config_path: &Path) -> ExitCode {
                     Ok(()) => println!("{host}: ok"),
                     Err(refusal) => refuse(refusal),
                 }
+            }
+            let resolved = sliplib_mesh::secrets::read(file.topology());
+            for warning in sliplib_mesh::warnings::warnings(file.topology(), &resolved) {
+                eprintln!("warning: {warning}");
             }
         }
     }

@@ -9,6 +9,7 @@ pub mod mint;
 pub mod mtu;
 pub mod render;
 pub mod secrets;
+pub mod warnings;
 
 #[cfg(test)]
 mod test_support;

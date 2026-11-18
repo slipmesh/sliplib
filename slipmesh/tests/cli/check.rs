@@ -86,6 +86,21 @@ fn a_file_whose_every_node_renders_passes_naming_each_node() {
 }
 
 #[test]
+fn a_link_that_loses_packets_is_warned_about_and_the_file_still_passes() {
+    let losing = network("", &[]).replace("h1: 5,", "h1: 100-199, random_trailers: true,");
+    let (checked, _) = check(&losing);
+    assert_eq!(checked.code, Some(0), "{}", checked.stderr);
+    assert_eq!(checked.stdout, "a: ok\nb: ok\nc: ok\nd: ok\n");
+    refusals(
+        &checked.stderr,
+        &[
+            &["warning: mesh link b-c: ", "102 packets in 4294967296"],
+            &["warning: mesh link b-c: ", "s1 stands 15 bytes above s4"],
+        ],
+    );
+}
+
+#[test]
 fn every_refused_node_is_reported_and_the_others_still_pass() {
     let (checked, _) = check(&network("", &["a", "d"]));
     assert_eq!(checked.code, Some(1));
