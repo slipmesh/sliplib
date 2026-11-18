@@ -614,6 +614,30 @@ mod tests {
     }
 
     #[test]
+    fn a_node_whose_routing_is_written_with_nothing_after_it_has_the_networks() {
+        let text = network_edited(BLOCK, |tree| {
+            tree["nodes"]["node-b"]["routing"] = Value::Null;
+        });
+        let file = file(&[&text]).unwrap();
+        let node = &file.network().nodes["node-b"].routing;
+        assert_eq!(node.direct_interfaces, ["lan0"]);
+    }
+
+    #[test]
+    fn two_nodes_of_one_name_are_refused() {
+        let twice = format!(
+            "{}  node-a: {{platform: talos, node_id: 0.0.0.9, underlay: {{wan: {{}}}}}}\n",
+            network("{}")
+        );
+        assert!(
+            twice.trim_end().ends_with("underlay: {wan: {}}}"),
+            "{twice}"
+        );
+        let refusal = refusal(&[&twice]);
+        assert!(refusal.contains("duplicate"), "{refusal}");
+    }
+
+    #[test]
     fn a_null_in_the_networks_own_routing_is_the_key_left_out() {
         let text = network_edited(BLOCK, |tree| {
             tree["routing"]["learn"] = Value::Null;

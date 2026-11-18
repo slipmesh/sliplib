@@ -1,9 +1,16 @@
 //! What is wrong in a network across its tree: what no one key can refuse by itself.
 
-use super::network::{Class, LinkKind, Map, Mesh, Network, Node};
+use super::network::{Addressing, Class, LinkKind, Map, Mesh, Network, Node};
 use super::{ALL, ClassName, NONE, Name, Platform};
 use crate::Range;
-use std::net::Ipv4Addr;
+use sliplib_net::Ipv6Net;
+use std::net::{Ipv4Addr, Ipv6Addr};
+
+/// The longest IPv6 loopback network: a node's address takes its `node_id` as the low 32 bits.
+const LOOPBACK_LIMIT: u8 = 96;
+
+/// The link-local unicast range of IPv6.
+const LINK_LOCAL: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10);
 
 /// The protocol numbers the kernel keeps for its own routes.
 const KERNEL_PROTOCOLS: std::ops::RangeInclusive<u8> = 0..=4;
@@ -15,6 +22,14 @@ const POOL_PROTOCOL: u8 = 200;
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Invalid {
+    #[error(
+        "addressing.loopback.ipv6 is {0}, which leaves no room for the 32 bits of a `node_id` - make it /{LOOPBACK_LIMIT} or shorter"
+    )]
+    LoopbackTooLong(Ipv6Net),
+    #[error(
+        "addressing.tunnel.link_local is {0}, outside fe80::/10, the range of link-local addresses - take a network inside it, or leave the key out for fe80::/64"
+    )]
+    LinkLocalOutside(Ipv6Net),
     #[error("`nodes` is empty, and a network has at least one node")]
     NoNodes,
     #[error("no node is named `{0}`: the word is reserved - give the node another name")]
@@ -85,10 +100,27 @@ pub enum Invalid {
 }
 
 pub(super) fn check(network: &Network) -> Result<(), Invalid> {
+    addressing(&network.addressing)?;
     nodes(&network.nodes)?;
     links(network)?;
     classes(&network.routing.classes)?;
     keepalive(&network.mesh)
+}
+
+fn addressing(addressing: &Addressing) -> Result<(), Invalid> {
+    let loopback = addressing.loopback.ipv6.0;
+    if loopback.prefix_len() > LOOPBACK_LIMIT {
+        return Err(Invalid::LoopbackTooLong(loopback));
+    }
+    let link_local = addressing
+        .tunnel
+        .as_ref()
+        .and_then(|tunnel| tunnel.link_local)
+        .map(|prefix| prefix.0);
+    match link_local {
+        Some(network) if !LINK_LOCAL.contains(&network) => Err(Invalid::LinkLocalOutside(network)),
+        _ => Ok(()),
+    }
 }
 
 fn nodes(nodes: &Map<Name, Node>) -> Result<(), Invalid> {
@@ -254,6 +286,35 @@ mod tests {
             "{mesh: {links: null}, nodes: {node-a: null, node-b: null, node-c: null, router1: null}}",
         );
         assert_eq!(refusal, Invalid::NoNodes);
+    }
+
+    #[test]
+    fn an_ipv6_loopback_network_that_leaves_no_room_for_a_node_id_is_refused() {
+        assert_eq!(
+            refusal("{addressing: {loopback: {ipv6: '3fff:0:0:1::/97'}}}"),
+            Invalid::LoopbackTooLong("3fff:0:0:1::/97".parse().unwrap())
+        );
+        let widest = with("{addressing: {loopback: {ipv6: '3fff:0:0:1::/96'}}}").unwrap();
+        assert_eq!(check(&widest), Ok(()));
+    }
+
+    #[test]
+    fn a_link_local_network_outside_the_link_local_range_is_refused() {
+        for outside in ["3fff:0:0:2::/64", "fe00::/9"] {
+            assert_eq!(
+                refusal(&format!(
+                    "{{addressing: {{tunnel: {{link_local: '{outside}'}}}}}}"
+                )),
+                Invalid::LinkLocalOutside(outside.parse().unwrap()),
+            );
+        }
+        for inside in ["fe80::/10", "fe80:0:0:1::/64", "febf::/120"] {
+            let network = with(&format!(
+                "{{addressing: {{tunnel: {{link_local: '{inside}'}}}}}}"
+            ))
+            .unwrap();
+            assert_eq!(check(&network), Ok(()), "{inside}");
+        }
     }
 
     #[test]
