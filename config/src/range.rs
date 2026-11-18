@@ -329,5 +329,8 @@ mod tests {
         assert!(Range::<u16>::new(0, 5).unwrap().starts_at_zero());
         assert!(!Range::<u16>::from(0).starts_at_zero());
         assert!(!Range::<u16>::new(1, 5).unwrap().starts_at_zero());
+        assert!(Range::<u32>::new(0, 5).unwrap().starts_at_zero());
+        assert!(!Range::<u32>::from(0).starts_at_zero());
+        assert!(!Range::<u32>::new(1, 5).unwrap().starts_at_zero());
     }
 }
