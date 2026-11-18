@@ -140,6 +140,48 @@ fn least(value: Option<Range<u16>>, constant: u16) -> u32 {
     }
 }
 
+/// A combination the kernel module refuses when the interface is configured, or mishandles
+/// afterwards.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ObfuscationError {
+    #[error(
+        "obfuscation.header_protection_key needs {} to be at least {HEADER_PROTECTION_NONCE_SIZE}, the size of its nonce",
+        .too_small.join(", ")
+    )]
+    NoRoomForNonce { too_small: Vec<&'static str> },
+    #[error(
+        "obfuscation.h{} ({}) and obfuscation.h{} ({}) share a value; the four magic headers must not overlap, an unset h1..h4 counting as 1..4",
+        .first.0, .first.1, .second.0, .second.1
+    )]
+    HeadersOverlap {
+        /// Which of h1..h4, and what it holds.
+        first: (usize, Range<u32>),
+        second: (usize, Range<u32>),
+    },
+    #[error(
+        "obfuscation.{name} is {range}; a range of it must start at 1 or above, and 0 alone selects the module's own value"
+    )]
+    RangeStartsAtZero {
+        name: &'static str,
+        range: Range<u16>,
+    },
+    #[error(
+        "obfuscation.rekey_after_time ({0}) must end below {REJECT_AFTER_TIME}: the module stops using a key {REJECT_AFTER_TIME} seconds after its handshake, whatever reject_after_time says"
+    )]
+    RekeyAfterKeyIsGone(Range<u16>),
+    #[error(
+        "obfuscation.reject_after_time ({reject}) must be above keepalive_timeout ({keepalive}) plus rekey_timeout ({rekey}), each by the low end of its range; an unset or zero one counts as the module's own {REJECT_AFTER_TIME}, {KEEPALIVE_TIMEOUT} and {REKEY_TIMEOUT}"
+    )]
+    RejectTooEarly {
+        reject: u32,
+        keepalive: u32,
+        rekey: u32,
+    },
+    #[error("obfuscation.jmin ({jmin}) must not exceed obfuscation.jmax ({jmax})")]
+    JunkSizesReversed { jmin: u16, jmax: u16 },
+}
+
 impl Obfuscation {
     /// The magic headers as the kernel module ends up with them, unset ones at their defaults.
     pub fn magic_headers(&self) -> [Range<u32>; 4] {
@@ -153,7 +195,7 @@ impl Obfuscation {
     }
 
     /// Rejects combinations the kernel module refuses at `SetDevice` or mishandles afterwards.
-    pub fn validate(&self) -> anyhow::Result<()> {
+    pub fn validate(&self) -> Result<(), ObfuscationError> {
         if self.header_protection_key.is_some() {
             let too_small: Vec<_> = [
                 ("s1", self.s1),
@@ -165,25 +207,21 @@ impl Obfuscation {
             .filter(|(_, size)| size.unwrap_or(0) < HEADER_PROTECTION_NONCE_SIZE)
             .map(|(name, _)| name)
             .collect();
-            anyhow::ensure!(
-                too_small.is_empty(),
-                "obfuscation.header_protection_key needs {} to be at least {HEADER_PROTECTION_NONCE_SIZE}, the size of its nonce",
-                too_small.join(", ")
-            );
+            if !too_small.is_empty() {
+                return Err(ObfuscationError::NoRoomForNonce { too_small });
+            }
         }
 
         // The module refuses overlapping magic headers with a bare EINVAL.
         let headers = self.magic_headers();
         for i in 0..4 {
             for j in i + 1..4 {
-                anyhow::ensure!(
-                    !headers[i].overlaps(headers[j]),
-                    "obfuscation.h{} ({}) and obfuscation.h{} ({}) share a value; the four magic headers must not overlap, an unset h1..h4 counting as 1..4",
-                    i + 1,
-                    headers[i],
-                    j + 1,
-                    headers[j]
-                );
+                if headers[i].overlaps(headers[j]) {
+                    return Err(ObfuscationError::HeadersOverlap {
+                        first: (i + 1, headers[i]),
+                        second: (j + 1, headers[j]),
+                    });
+                }
             }
         }
 
@@ -196,22 +234,21 @@ impl Obfuscation {
             ("keepalive_timeout", self.keepalive_timeout),
             ("max_handshake_attempts", self.max_handshake_attempts),
         ] {
-            if let Some(range) = value {
-                anyhow::ensure!(
-                    range.is_zero() || range.lo() >= 1,
-                    "obfuscation.{name} is {range}; a range of it must start at 1 or above, and 0 alone selects the module's own value"
-                );
+            if let Some(range) = value
+                && !range.is_zero()
+                && range.lo() < 1
+            {
+                return Err(ObfuscationError::RangeStartsAtZero { name, range });
             }
         }
 
         // The module stops using a key at its own constant, whatever reject_after_time says; a
         // renewal drawn at that age or later comes after the key is gone, and an end that only
         // sends then waits for a handshake at every expiry.
-        if let Some(range) = self.rekey_after_time {
-            anyhow::ensure!(
-                range.hi() < REJECT_AFTER_TIME,
-                "obfuscation.rekey_after_time ({range}) must end below {REJECT_AFTER_TIME}: the module stops using a key {REJECT_AFTER_TIME} seconds after its handshake, whatever reject_after_time says"
-            );
+        if let Some(range) = self.rekey_after_time
+            && range.hi() >= REJECT_AFTER_TIME
+        {
+            return Err(ObfuscationError::RekeyAfterKeyIsGone(range));
         }
 
         // The module takes a key for due once it is older than reject_after_time less the low
@@ -222,10 +259,13 @@ impl Obfuscation {
             least(self.keepalive_timeout, KEEPALIVE_TIMEOUT),
             least(self.rekey_timeout, REKEY_TIMEOUT),
         );
-        anyhow::ensure!(
-            reject > keepalive + rekey,
-            "obfuscation.reject_after_time ({reject}) must be above keepalive_timeout ({keepalive}) plus rekey_timeout ({rekey}), each by the low end of its range; an unset or zero one counts as the module's own {REJECT_AFTER_TIME}, {KEEPALIVE_TIMEOUT} and {REKEY_TIMEOUT}"
-        );
+        if reject <= keepalive + rekey {
+            return Err(ObfuscationError::RejectTooEarly {
+                reject,
+                keepalive,
+                rekey,
+            });
+        }
 
         // When jc and jmax are non-zero, the module draws each junk packet's size from
         // jmin..=jmax, into a buffer of jmax bytes, without checking the order.
@@ -234,10 +274,9 @@ impl Obfuscation {
             self.jmin.unwrap_or(0),
             self.jmax.unwrap_or(0),
         );
-        anyhow::ensure!(
-            jc == 0 || jmax == 0 || jmin <= jmax,
-            "obfuscation.jmin ({jmin}) must not exceed obfuscation.jmax ({jmax})"
-        );
+        if jc != 0 && jmax != 0 && jmin > jmax {
+            return Err(ObfuscationError::JunkSizesReversed { jmin, jmax });
+        }
         Ok(())
     }
 }

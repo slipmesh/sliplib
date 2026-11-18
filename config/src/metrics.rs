@@ -10,36 +10,57 @@ pub struct MetricsConfig {
     pub listen: String,
 }
 
+/// What is wrong with where a daemon would serve its metrics. `field` is the caller's own path
+/// to the section, so the message points at the document the reader is holding.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum MetricsError {
+    #[error("{field} {listen:?} is not an ip:port: {error}")]
+    NotAnAddress {
+        field: String,
+        listen: String,
+        error: std::net::AddrParseError,
+    },
+    #[error(
+        "{field} {listen:?} is not IPv4 - Prometheus discovers a node by its InternalIP, which is the v4 loopback"
+    )]
+    NotIpv4 { field: String, listen: String },
+    #[error(
+        "{field} {listen:?} is a wildcard address - bind this node's own mesh loopback, which exists only inside the overlay"
+    )]
+    Wildcard { field: String, listen: String },
+    #[error("{field} {listen:?} has no port - omit the section to serve nothing")]
+    NoPort { field: String, listen: String },
+}
+
 impl MetricsConfig {
-    /// `field` names the caller's own path to this section, so the message points at the document
-    /// the reader is holding rather than at this crate.
-    pub fn validate(&self, field: &str) -> anyhow::Result<()> {
-        let listen: std::net::SocketAddr = self
-            .listen
-            .parse()
-            .map_err(|e| anyhow::anyhow!("{field} {:?} is not an ip:port: {e}", self.listen))?;
-        anyhow::ensure!(
-            listen.is_ipv4(),
-            "{field} {:?} is not IPv4 - Prometheus discovers a node by its InternalIP, which is \
-             the v4 loopback",
-            self.listen
-        );
+    /// `field` names the caller's own path to this section.
+    pub fn validate(&self, field: &str) -> Result<(), MetricsError> {
+        let (field, listen) = (field.to_owned(), self.listen.clone());
+        let address: std::net::SocketAddr = match self.listen.parse() {
+            Ok(address) => address,
+            Err(error) => {
+                return Err(MetricsError::NotAnAddress {
+                    field,
+                    listen,
+                    error,
+                });
+            }
+        };
+        if !address.is_ipv4() {
+            return Err(MetricsError::NotIpv4 { field, listen });
+        }
         // Both of the below parse happily and would bind, which is why they are worth refusing
         // here. A wildcard address puts the endpoint on every interface the node has, public ones
         // included, when being reachable only inside the overlay is its whole protection.
-        anyhow::ensure!(
-            !listen.ip().is_unspecified(),
-            "{field} {:?} is a wildcard address - bind this node's own mesh loopback, which \
-             exists only inside the overlay",
-            self.listen
-        );
+        if address.ip().is_unspecified() {
+            return Err(MetricsError::Wildcard { field, listen });
+        }
         // Port 0 asks the kernel for an ephemeral one, which nothing can then be pointed at.
         // "Serve nothing" is spelled by omitting the section.
-        anyhow::ensure!(
-            listen.port() != 0,
-            "{field} {:?} has no port - omit the section to serve nothing",
-            self.listen
-        );
+        if address.port() == 0 {
+            return Err(MetricsError::NoPort { field, listen });
+        }
         Ok(())
     }
 }

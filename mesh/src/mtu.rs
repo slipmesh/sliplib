@@ -8,8 +8,7 @@
 //! TCP in the tunnel down to a few Mbit/s, which is what this guards against.
 
 use crate::secrets::{ResolvedSecrets, link_key};
-use anyhow::{Context, Result, bail, ensure};
-use sliplib_config::mesh_config::{AddressFamily, MeshConfig, MeshLink, NodeEntry};
+use sliplib_config::mesh_config::{AddressFamily, MeshConfig, MeshLink, NodeEntry, UnknownNode};
 use std::net::IpAddr;
 
 /// An uplink's MTU when `nodes[].uplink_mtu` does not say.
@@ -18,44 +17,88 @@ pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
 /// The least MTU IPv6 allows a link (RFC 8200); the mesh carries OSPFv3 over IPv6 link-locals.
 pub(crate) const MIN_MESH_MTU: u32 = 1280;
 
+/// Why the mesh has no MTU: every node's interfaces take the same one, so this stops them all.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum MtuError {
+    #[error("mesh link {link}")]
+    Link {
+        link: String,
+        #[source]
+        source: LinkError,
+    },
+    #[error("cluster.mesh_mtu is set, but the mesh has no link to give it to")]
+    NoLink,
+    #[error("cluster.mesh_mtu {mtu} is above {limit}, the limit of mesh link {link}")]
+    AboveLimit { mtu: u32, limit: u32, link: String },
+    #[error("cluster.mesh_mtu {0} is below {MIN_MESH_MTU}, the least IPv6 allows a link")]
+    BelowMinimum(u32),
+    #[error(
+        "mesh link {link} limits the mesh MTU to {limit}, below {MIN_MESH_MTU}, the least IPv6 allows a link"
+    )]
+    LimitBelowMinimum { link: String, limit: u32 },
+}
+
+/// Why a link has no limit to count.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum LinkError {
+    #[error(transparent)]
+    UnknownNode(#[from] UnknownNode),
+    #[error(
+        "the endpoints of {0:?} and {1:?} differ in address family, so which one carries the link depends on who starts the handshake"
+    )]
+    FamiliesDiffer(String, String),
+    #[error("neither {0:?} nor {1:?} has an endpoint, so neither can dial the other")]
+    NoEndpoint(String, String),
+    #[error("node {node:?}: address_family {said:?} contradicts its endpoint {endpoint}")]
+    FamilyContradicts {
+        node: String,
+        said: AddressFamily,
+        endpoint: String,
+    },
+}
+
 /// The MTU of every mesh interface: `cluster.mesh_mtu` when it fits every link, else the least
 /// link limit. None for a mesh without links, which has no mesh interface to give it to.
-pub fn mesh_mtu(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Result<Option<u32>> {
+pub fn mesh_mtu(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Result<Option<u32>, MtuError> {
     let mut least: Option<(u32, &MeshLink)> = None;
     for link in &mesh.mesh.links {
-        let limit = link_limit(mesh, link, resolved)
-            .with_context(|| format!("mesh link {}", link_name(link)))?;
+        let limit = link_limit(mesh, link, resolved).map_err(|source| MtuError::Link {
+            link: link_name(link),
+            source,
+        })?;
         if least.is_none_or(|(least, _)| limit < least) {
             least = Some((limit, link));
         }
     }
     let Some((limit, link)) = least else {
-        ensure!(
-            mesh.cluster.mesh_mtu.is_none(),
-            "cluster.mesh_mtu is set, but the mesh has no link to give it to"
-        );
+        if mesh.cluster.mesh_mtu.is_some() {
+            return Err(MtuError::NoLink);
+        }
         return Ok(None);
     };
     let mtu = match mesh.cluster.mesh_mtu {
         Some(mtu) => {
-            ensure!(
-                mtu <= limit,
-                "cluster.mesh_mtu {mtu} is above {limit}, the limit of mesh link {}",
-                link_name(link)
-            );
-            ensure!(
-                mtu >= MIN_MESH_MTU,
-                "cluster.mesh_mtu {mtu} is below {MIN_MESH_MTU}, the least IPv6 allows a link"
-            );
+            if mtu > limit {
+                return Err(MtuError::AboveLimit {
+                    mtu,
+                    limit,
+                    link: link_name(link),
+                });
+            }
+            if mtu < MIN_MESH_MTU {
+                return Err(MtuError::BelowMinimum(mtu));
+            }
             mtu
         }
         None => {
-            ensure!(
-                limit >= MIN_MESH_MTU,
-                "mesh link {} limits the mesh MTU to {limit}, below {MIN_MESH_MTU}, the least \
-                 IPv6 allows a link",
-                link_name(link)
-            );
+            if limit < MIN_MESH_MTU {
+                return Err(MtuError::LimitBelowMinimum {
+                    link: link_name(link),
+                    limit,
+                });
+            }
             limit
         }
     };
@@ -63,7 +106,11 @@ pub fn mesh_mtu(mesh: &MeshConfig, resolved: &ResolvedSecrets) -> Result<Option<
 }
 
 /// The largest MTU at which a full-size packet crosses `link` unfragmented.
-fn link_limit(mesh: &MeshConfig, link: &MeshLink, resolved: &ResolvedSecrets) -> Result<u32> {
+fn link_limit(
+    mesh: &MeshConfig,
+    link: &MeshLink,
+    resolved: &ResolvedSecrets,
+) -> Result<u32, LinkError> {
     let [a, b] = &link.pair;
     let (a, b) = (mesh.node(a)?, mesh.node(b)?);
     let ip_header = match link_family(a, b)? {
@@ -84,24 +131,17 @@ fn uplink(node: &NodeEntry) -> u32 {
 }
 
 /// The family of the endpoint a link is dialed at: either side's, and the same when both have one.
-fn link_family(a: &NodeEntry, b: &NodeEntry) -> Result<AddressFamily> {
+fn link_family(a: &NodeEntry, b: &NodeEntry) -> Result<AddressFamily, LinkError> {
     match (endpoint_family(a)?, endpoint_family(b)?) {
-        (Some(x), Some(y)) if x != y => bail!(
-            "the endpoints of {:?} and {:?} differ in address family, so which one carries the \
-             link depends on who starts the handshake",
-            a.name,
-            b.name
-        ),
+        (Some(x), Some(y)) if x != y => {
+            Err(LinkError::FamiliesDiffer(a.name.clone(), b.name.clone()))
+        }
         (Some(family), _) | (None, Some(family)) => Ok(family),
-        (None, None) => bail!(
-            "neither {:?} nor {:?} has an endpoint, so neither can dial the other",
-            a.name,
-            b.name
-        ),
+        (None, None) => Err(LinkError::NoEndpoint(a.name.clone(), b.name.clone())),
     }
 }
 
-fn endpoint_family(node: &NodeEntry) -> Result<Option<AddressFamily>> {
+fn endpoint_family(node: &NodeEntry) -> Result<Option<AddressFamily>, LinkError> {
     let Some(endpoint) = &node.endpoint else {
         return Ok(None);
     };
@@ -113,13 +153,14 @@ fn endpoint_family(node: &NodeEntry) -> Result<Option<AddressFamily>> {
     } else {
         AddressFamily::Ipv6
     };
-    ensure!(
-        node.address_family.is_none_or(|said| said == family),
-        "node {:?}: address_family {:?} contradicts its endpoint {endpoint}",
-        node.name,
-        node.address_family.expect("checked just above")
-    );
-    Ok(Some(family))
+    match node.address_family {
+        Some(said) if said != family => Err(LinkError::FamilyContradicts {
+            node: node.name.clone(),
+            said,
+            endpoint: endpoint.clone(),
+        }),
+        _ => Ok(Some(family)),
+    }
 }
 
 /// A link as `mesh.links` writes its pair.
@@ -144,7 +185,7 @@ mod tests {
         sliplib_yaml::from_str(&yaml).unwrap()
     }
 
-    fn computed(mesh: &MeshConfig) -> Result<Option<u32>> {
+    fn computed(mesh: &MeshConfig) -> Result<Option<u32>, MtuError> {
         mesh_mtu(mesh, &secrets::read(mesh))
     }
 
@@ -153,7 +194,10 @@ mod tests {
     }
 
     fn error(a: &str, b: &str, link: &str, cluster: &str) -> String {
-        format!("{:#}", computed(&mesh(a, b, link, cluster)).unwrap_err())
+        format!(
+            "{:#}",
+            anyhow::Error::new(computed(&mesh(a, b, link, cluster)).unwrap_err())
+        )
     }
 
     const PLAIN: &str = ", plain: true";
@@ -284,7 +328,7 @@ mod tests {
         assert_eq!(computed(&topology).unwrap(), None);
         let mut topology = mesh(V4, V6, PLAIN, "  mesh_mtu: 1400\n");
         topology.mesh.links.clear();
-        let err = format!("{:#}", computed(&topology).unwrap_err());
+        let err = format!("{:#}", anyhow::Error::new(computed(&topology).unwrap_err()));
         assert!(
             err.contains("cluster.mesh_mtu is set, but the mesh has no link"),
             "{err}"

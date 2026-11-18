@@ -207,6 +207,14 @@ mean.
 a node, and what its readers take - Talos, the daemons on the node, and the RouterOS tool. Types and
 their checks only; reading and writing the files is `sliplib-yaml`'s.
 
+Every check and the loader return an error type of their own, one variant for each refusal:
+`slipmesh_file::Error`, `mesh_config::Invalid` and `UnknownNode`, `awg::Invalid`, `router::Invalid`
+and `LoopbackAddressError`, `ObfuscationError`, `MetricsError`, `talos::Error`. A variant's text is
+one line of the refusal. Where that line names its cause itself - an address that does not parse,
+with why - the variant holds the cause as a field and has no `source`; where the cause is a line
+of its own, it is the variant's `source`. A variant never does both, so printing the whole chain
+gives the whole message, each part once.
+
 - `slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a `MultiDoc`
   (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
   `roadwarriors` document, and `patch` documents aimed at hosts by `include`/`exclude`. It gives the
@@ -243,6 +251,9 @@ their checks only; reading and writing the files is `sliplib-yaml`'s.
 What a node's daemons are configured with, computed from the topology `sliplib-config` reads, for
 every tool that configures a node of any platform.
 
+A refusal is a `render::Error`, which names the node and which of its configs it is about, with
+its cause as its `source`, or an `mtu::MtuError`.
+
 - `secrets::read` takes the secrets the file sets: each node's mesh private key, each pool's private
   key, and each link's and pool's obfuscation layered over the topology's. It never creates one: a
   key the file lacks is absent from `ResolvedSecrets`, while every link and pool gets an obfuscation
@@ -252,8 +263,8 @@ every tool that configures a node of any platform.
   and the link's obfuscation; for each pool on it, the pool's key and obfuscation. It refuses what
   of these is missing, or an obfuscation not `plain` without one of `jc`, `jmin`, `jmax`, `s1`,
   `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes, links
-  and pools the node is not on. Such a refusal carries `secrets::MissingSecret` in its chain
-  (`anyhow::Error::is`), so a tool can add how its user creates the secret.
+  and pools the node is not on. Such a refusal gives its `secrets::MissingSecret` through
+  `render::Error::missing_secret`, so a tool can add how its user creates the secret.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks,
   created, each by the entry it belongs to, or `NoHeaderLeft` when an entry's magic headers leave
   no room for the ones it lacks. `slipmesh` builds with it; a tool that only reads the file leaves

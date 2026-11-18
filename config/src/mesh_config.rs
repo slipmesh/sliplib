@@ -41,11 +41,11 @@ pub struct RouteProtoId {
 }
 
 impl MeshConfig {
-    pub fn node(&self, name: &str) -> anyhow::Result<&NodeEntry> {
+    pub fn node(&self, name: &str) -> Result<&NodeEntry, UnknownNode> {
         self.nodes
             .iter()
             .find(|n| n.name == name)
-            .ok_or_else(|| anyhow::anyhow!("unknown node {name:?}"))
+            .ok_or_else(|| UnknownNode(name.to_owned()))
     }
 }
 
@@ -320,54 +320,101 @@ pub fn missing_defaults(topology: &MeshConfig) -> Vec<(&'static str, Value)> {
     missing
 }
 
+/// A name that is not one of `nodes`.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("unknown node {0:?}")]
+pub struct UnknownNode(pub String);
+
+/// What is wrong across the topology, beyond what its types rule out.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Invalid {
+    #[error("nodes must not be empty")]
+    NoNodes,
+    #[error("cluster.interface_prefix.mesh must not be empty: it is what tells a mesh interface")]
+    EmptyInterfacePrefix,
+    #[error(
+        "cluster.interface_prefix.mesh {0:?} may hold only ASCII letters, digits, `-`, `_` and `.`, the characters an interface name and its glob both take as they are"
+    )]
+    InterfacePrefix(String),
+    #[error("cluster.route_proto_id.egress {0} is one the kernel keeps for its own routes (0-4)")]
+    KernelRouteProtocol(u8),
+    #[error("nodes[].name must not be empty")]
+    EmptyNodeName,
+    #[error("duplicate node name {0:?}")]
+    DuplicateNode(String),
+    #[error("node {node:?}: node_id {node_id:?} is not a valid IPv4-shaped identity: {error}")]
+    NodeId {
+        node: String,
+        node_id: String,
+        error: std::net::AddrParseError,
+    },
+    #[error(
+        "node {node:?}: node_id {node_id:?} is already used by another node - each node needs a distinct node_id, or they'll collide onto the same loopback address"
+    )]
+    DuplicateNodeId { node: String, node_id: String },
+    #[error("mesh.links: pair references unknown node {0:?}")]
+    LinkToUnknownNode(String),
+    #[error("mesh.links: pair {0:?} links a node to itself")]
+    LinkToItself([String; 2]),
+    #[error("node {node:?}: port {port} used by more than one mesh link/roadwarriors pool")]
+    PortTaken { node: String, port: u16 },
+    #[error("duplicate roadwarriors pool name {0:?}")]
+    DuplicatePool(String),
+    #[error("roadwarriors pool {0:?}: node_hostnames must not be empty")]
+    PoolWithoutNodes(String),
+    #[error("roadwarriors pool {pool:?}: node_hostnames references unknown node {node:?}")]
+    PoolOnUnknownNode { pool: String, node: String },
+    #[error("roadwarriors pool {pool:?}: duplicate client public_key {public_key:?}")]
+    DuplicateClient { pool: String, public_key: String },
+    #[error("bypass: entry references unknown node {0:?}")]
+    BypassOnUnknownNode(String),
+}
+
 /// The checks across the topology that its types alone cannot make; the configs rendered from it
 /// are the daemons' checks to make.
-pub fn validate(cfg: &MeshConfig) -> anyhow::Result<()> {
-    anyhow::ensure!(!cfg.nodes.is_empty(), "nodes must not be empty");
+pub fn validate(cfg: &MeshConfig) -> Result<(), Invalid> {
+    if cfg.nodes.is_empty() {
+        return Err(Invalid::NoNodes);
+    }
     let prefix = cfg.cluster.mesh_interface_prefix();
-    anyhow::ensure!(
-        !prefix.is_empty(),
-        "cluster.interface_prefix.mesh must not be empty: it is what tells a mesh interface"
-    );
+    if prefix.is_empty() {
+        return Err(Invalid::EmptyInterfacePrefix);
+    }
     // The kernel refuses `/`, `:` and whitespace in an interface name, and BIRD reads the prefix
     // in a glob, where `*`, `?` and `[` would match interfaces that are not the mesh's.
-    anyhow::ensure!(
-        prefix
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')),
-        "cluster.interface_prefix.mesh {prefix:?} may hold only ASCII letters, digits, `-`, `_` and \
-         `.`, the characters an interface name and its glob both take as they are"
-    );
+    if !prefix
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(Invalid::InterfacePrefix(prefix.to_owned()));
+    }
     // 0..=4 are the kernel's own: unspec, redirect, kernel, boot and static (`RTPROT_*`).
     let egress = cfg.cluster.egress_route_proto_id();
-    anyhow::ensure!(
-        egress > 4,
-        "cluster.route_proto_id.egress {egress} is one the kernel keeps for its own routes (0-4)"
-    );
+    if egress <= 4 {
+        return Err(Invalid::KernelRouteProtocol(egress));
+    }
 
     let mut seen_node_names = HashSet::new();
     let mut seen_node_ids = HashSet::new();
     for node in &cfg.nodes {
-        anyhow::ensure!(!node.name.is_empty(), "nodes[].name must not be empty");
-        anyhow::ensure!(
-            seen_node_names.insert(node.name.as_str()),
-            "duplicate node name {:?}",
-            node.name
-        );
-        let node_id: Ipv4Addr = node.node_id.parse().map_err(|e| {
-            anyhow::anyhow!(
-                "node {:?}: node_id {:?} is not a valid IPv4-shaped identity: {e}",
-                node.name,
-                node.node_id
-            )
+        if node.name.is_empty() {
+            return Err(Invalid::EmptyNodeName);
+        }
+        if !seen_node_names.insert(node.name.as_str()) {
+            return Err(Invalid::DuplicateNode(node.name.clone()));
+        }
+        let node_id: Ipv4Addr = node.node_id.parse().map_err(|error| Invalid::NodeId {
+            node: node.name.clone(),
+            node_id: node.node_id.clone(),
+            error,
         })?;
-        anyhow::ensure!(
-            seen_node_ids.insert(node_id),
-            "node {:?}: node_id {:?} is already used by another node - each node needs a distinct \
-             node_id, or they'll collide onto the same loopback address",
-            node.name,
-            node.node_id
-        );
+        if !seen_node_ids.insert(node_id) {
+            return Err(Invalid::DuplicateNodeId {
+                node: node.name.clone(),
+                node_id: node.node_id.clone(),
+            });
+        }
     }
     let known_node = |name: &str| seen_node_names.contains(name);
 
@@ -376,72 +423,68 @@ pub fn validate(cfg: &MeshConfig) -> anyhow::Result<()> {
 
     for link in &cfg.mesh.links {
         for name in &link.pair {
-            anyhow::ensure!(
-                known_node(name),
-                "mesh.links: pair references unknown node {name:?}"
-            );
+            if !known_node(name) {
+                return Err(Invalid::LinkToUnknownNode(name.clone()));
+            }
         }
-        anyhow::ensure!(
-            link.pair[0] != link.pair[1],
-            "mesh.links: pair {:?} links a node to itself",
-            link.pair
-        );
+        if link.pair[0] == link.pair[1] {
+            return Err(Invalid::LinkToItself(link.pair.clone()));
+        }
         for name in &link.pair {
-            anyhow::ensure!(
-                ports_by_node
-                    .entry(name.as_str())
-                    .or_default()
-                    .insert(link.port),
-                "node {name:?}: port {} used by more than one mesh link/roadwarriors pool",
-                link.port
-            );
+            if !ports_by_node
+                .entry(name.as_str())
+                .or_default()
+                .insert(link.port)
+            {
+                return Err(Invalid::PortTaken {
+                    node: name.clone(),
+                    port: link.port,
+                });
+            }
         }
     }
 
     let mut seen_pool_names = HashSet::new();
     for pool in &cfg.roadwarriors {
-        anyhow::ensure!(
-            seen_pool_names.insert(pool.name.as_str()),
-            "duplicate roadwarriors pool name {:?}",
-            pool.name
-        );
-        anyhow::ensure!(
-            !pool.node_hostnames.is_empty(),
-            "roadwarriors pool {:?}: node_hostnames must not be empty",
-            pool.name
-        );
+        if !seen_pool_names.insert(pool.name.as_str()) {
+            return Err(Invalid::DuplicatePool(pool.name.clone()));
+        }
+        if pool.node_hostnames.is_empty() {
+            return Err(Invalid::PoolWithoutNodes(pool.name.clone()));
+        }
         for name in &pool.node_hostnames {
-            anyhow::ensure!(
-                known_node(name),
-                "roadwarriors pool {:?}: node_hostnames references unknown node {name:?}",
-                pool.name
-            );
-            anyhow::ensure!(
-                ports_by_node
-                    .entry(name.as_str())
-                    .or_default()
-                    .insert(pool.listen_port),
-                "node {name:?}: port {} used by more than one mesh link/roadwarriors pool",
-                pool.listen_port
-            );
+            if !known_node(name) {
+                return Err(Invalid::PoolOnUnknownNode {
+                    pool: pool.name.clone(),
+                    node: name.clone(),
+                });
+            }
+            if !ports_by_node
+                .entry(name.as_str())
+                .or_default()
+                .insert(pool.listen_port)
+            {
+                return Err(Invalid::PortTaken {
+                    node: name.clone(),
+                    port: pool.listen_port,
+                });
+            }
         }
         let mut seen_client_keys = HashSet::new();
         for client in &pool.clients {
-            anyhow::ensure!(
-                seen_client_keys.insert(client.public_key.as_str()),
-                "roadwarriors pool {:?}: duplicate client public_key {:?}",
-                pool.name,
-                client.public_key
-            );
+            if !seen_client_keys.insert(client.public_key.as_str()) {
+                return Err(Invalid::DuplicateClient {
+                    pool: pool.name.clone(),
+                    public_key: client.public_key.clone(),
+                });
+            }
         }
     }
 
     for entry in &cfg.bypass {
-        anyhow::ensure!(
-            known_node(&entry.node),
-            "bypass: entry references unknown node {:?}",
-            entry.node
-        );
+        if !known_node(&entry.node) {
+            return Err(Invalid::BypassOnUnknownNode(entry.node.clone()));
+        }
     }
 
     Ok(())
@@ -797,6 +840,9 @@ listen-port: 1
             ],
         });
         assert!(validate(&cfg).is_err());
+
+        cfg.roadwarriors[0].clients[1].public_key = "another".to_string();
+        validate(&cfg).unwrap();
     }
 
     #[test]

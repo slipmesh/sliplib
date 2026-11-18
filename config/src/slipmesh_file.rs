@@ -6,8 +6,7 @@
 //! of whatever configures a host, aimed at hosts by `include`/`exclude`; what it holds is for that
 //! tool to read. The block is for the file's reader and never reaches a host.
 
-use crate::mesh_config::{self, MeshConfig, RoadwarriorPool};
-use anyhow::{Context, Result, bail, ensure};
+use crate::mesh_config::{self, Invalid, MeshConfig, RoadwarriorPool};
 use serde::Deserialize;
 use sliplib_yaml::{MultiDoc, Value};
 use std::fmt;
@@ -35,6 +34,81 @@ impl Kind {
         }
     }
 }
+
+type Source = Box<dyn std::error::Error + Send + Sync>;
+
+/// Where a document stands in the file: its kind and the line it starts at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    kind: &'static str,
+    line: usize,
+}
+
+impl fmt::Display for Place {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the `kind: {}` document at line {}",
+            self.kind, self.line
+        )
+    }
+}
+
+/// What is wrong with a document's `slipmesh:` block.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum BlockError {
+    #[error("no `slipmesh:` block saying what the document is for")]
+    Missing,
+    #[error("its `slipmesh:` block")]
+    Malformed(#[source] Source),
+}
+
+/// Why `slipmesh.yaml` does not read.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// The text is not a stream of YAML documents.
+    #[error(transparent)]
+    Yaml(Source),
+    #[error("the document starting at line {line}")]
+    Block {
+        line: usize,
+        #[source]
+        source: BlockError,
+    },
+    /// The body of the document at `place` does not read as its kind.
+    #[error("{place}")]
+    Body {
+        place: Place,
+        #[source]
+        source: Source,
+    },
+    #[error(
+        "{place}: the ruleset is now the file {path} of a `kind: patch` document holding `ExtensionServiceConfig` `nftables` - aimed at hosts the same way"
+    )]
+    NftablesKind { place: Place, path: &'static str },
+    #[error("slipmesh.yaml needs exactly one `kind: network` document, found {0}")]
+    NetworkDocuments(usize),
+    #[error("{0}: `include`/`exclude` aim a document at hosts, and this kind is not aimed")]
+    NotAimed(Place),
+    #[error("{0}: `roadwarriors` belongs in its own `kind: roadwarriors` document")]
+    PoolInNetwork(Place),
+    #[error("{0}: `include: []` reaches no host - leave `include` out to reach every host")]
+    EmptyInclude(Place),
+    #[error("{place}: names host {host:?}, which the network document does not have")]
+    NamesUnknownHost { place: Place, host: String },
+    #[error("the network document is not a mapping")]
+    NetworkNotAMapping,
+    #[error("assembling the topology")]
+    Assembling(#[source] Source),
+    #[error(transparent)]
+    Invalid(#[from] Invalid),
+    #[error("host {0:?} is not in the network document")]
+    UnknownHost(String),
+}
+
+type Result<T> = std::result::Result<T, Error>;
 
 /// A document's `slipmesh:` block. Strict, so that a misspelled `include` is an error rather than
 /// a document that silently reaches every host.
@@ -66,25 +140,28 @@ impl Document {
         let line = inner.line;
         let meta = inner
             .take(META_KEY)
-            .context("no `slipmesh:` block saying what the document is for")
+            .ok_or(BlockError::Missing)
             .and_then(|meta| {
-                sliplib_yaml::from_value::<Meta>(meta).context("its `slipmesh:` block")
+                sliplib_yaml::from_value::<Meta>(meta)
+                    .map_err(|source| BlockError::Malformed(source.into()))
             })
-            .with_context(|| format!("the document starting at line {line}"))?;
+            .map_err(|source| Error::Block { line, source })?;
         Ok(Self { meta, inner })
     }
 
     /// The document as `T`, with an error that names the field and the line of the file.
     fn deserialize<T: serde::de::DeserializeOwned>(&self) -> Result<T> {
-        self.inner.deserialize().with_context(|| self.at())
+        self.inner.deserialize().map_err(|source| Error::Body {
+            place: self.place(),
+            source: source.into(),
+        })
     }
 
-    fn at(&self) -> String {
-        format!(
-            "the `kind: {}` document at line {}",
-            self.meta.kind.name(),
-            self.line
-        )
+    fn place(&self) -> Place {
+        Place {
+            kind: self.meta.kind.name(),
+            line: self.line,
+        }
     }
 
     fn reaches(&self, host: &str) -> bool {
@@ -120,7 +197,7 @@ impl Patch {
 
 impl fmt::Display for Patch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0.at())
+        self.0.place().fmt(f)
     }
 }
 
@@ -135,7 +212,7 @@ pub struct SlipmeshFile {
 
 impl SlipmeshFile {
     pub fn parse(raw: &str) -> Result<Self> {
-        Self::read(&MultiDoc::parse(raw)?)
+        Self::read(&MultiDoc::parse(raw).map_err(|source| Error::Yaml(source.into()))?)
     }
 
     /// `slipmesh.yaml` as `yaml` holds it - for a caller that goes on to edit it.
@@ -148,44 +225,34 @@ impl SlipmeshFile {
             match document.meta.kind {
                 Kind::Network => networks.push(document),
                 Kind::Roadwarriors => pools.push(document),
-                Kind::Nftables => bail!(
-                    "{}: the ruleset is now the file {} of a `kind: patch` document holding \
-                     `ExtensionServiceConfig` `nftables` - aimed at hosts the same way",
-                    document.at(),
-                    crate::nftables::TEMPLATE_PATH
-                ),
+                Kind::Nftables => {
+                    return Err(Error::NftablesKind {
+                        place: document.place(),
+                        path: crate::nftables::TEMPLATE_PATH,
+                    });
+                }
                 Kind::Patch => patches.push(Patch(document)),
             }
         }
 
-        ensure!(
-            networks.len() == 1,
-            "slipmesh.yaml needs exactly one `kind: network` document, found {}",
-            networks.len()
-        );
+        if networks.len() != 1 {
+            return Err(Error::NetworkDocuments(networks.len()));
+        }
         let network = networks.remove(0);
         for untargeted in std::iter::once(&network).chain(&pools) {
-            ensure!(
-                untargeted.meta.include.is_none() && untargeted.meta.exclude.is_none(),
-                "{}: `include`/`exclude` aim a document at hosts, and this kind is not aimed",
-                untargeted.at()
-            );
+            if untargeted.meta.include.is_some() || untargeted.meta.exclude.is_some() {
+                return Err(Error::NotAimed(untargeted.place()));
+            }
         }
-        ensure!(
-            network.value.get("roadwarriors").is_none(),
-            "{}: `roadwarriors` belongs in its own `kind: roadwarriors` document",
-            network.at()
-        );
+        if network.value.get("roadwarriors").is_some() {
+            return Err(Error::PoolInNetwork(network.place()));
+        }
         let topology: MeshConfig = network.deserialize()?;
         let hosts: Vec<String> = topology.nodes.into_iter().map(|n| n.name).collect();
 
         for targeted in patches.iter().map(|patch| &patch.0) {
-            if let Some(include) = &targeted.meta.include {
-                ensure!(
-                    !include.is_empty(),
-                    "{}: `include: []` reaches no host - leave `include` out to reach every host",
-                    targeted.at()
-                );
+            if targeted.meta.include.as_ref().is_some_and(Vec::is_empty) {
+                return Err(Error::EmptyInclude(targeted.place()));
             }
             for host in targeted
                 .meta
@@ -194,11 +261,12 @@ impl SlipmeshFile {
                 .chain(&targeted.meta.exclude)
                 .flatten()
             {
-                ensure!(
-                    hosts.contains(host),
-                    "{}: names host {host:?}, which the network document does not have",
-                    targeted.at()
-                );
+                if !hosts.contains(host) {
+                    return Err(Error::NamesUnknownHost {
+                        place: targeted.place(),
+                        host: host.clone(),
+                    });
+                }
             }
         }
 
@@ -266,10 +334,9 @@ impl SlipmeshFile {
     }
 
     fn ensure_host(&self, host: &str) -> Result<()> {
-        ensure!(
-            self.hosts.iter().any(|h| h == host),
-            "host {host:?} is not in the network document"
-        );
+        if !self.hosts.iter().any(|h| h == host) {
+            return Err(Error::UnknownHost(host.to_owned()));
+        }
         Ok(())
     }
 }
@@ -277,12 +344,11 @@ impl SlipmeshFile {
 /// `network` with every pool, as one validated model.
 fn model(network: &Value, pools: &[Document]) -> Result<MeshConfig> {
     let mut value = network.clone();
-    let mapping = value
-        .as_mapping_mut()
-        .context("the network document is not a mapping")?;
+    let mapping = value.as_mapping_mut().ok_or(Error::NetworkNotAMapping)?;
     let pools = pools.iter().map(|p| p.value.clone()).collect();
     mapping.insert("roadwarriors".into(), Value::Sequence(pools));
-    let model: MeshConfig = sliplib_yaml::from_value(value).context("assembling the topology")?;
+    let model: MeshConfig =
+        sliplib_yaml::from_value(value).map_err(|source| Error::Assembling(source.into()))?;
     mesh_config::validate(&model)?;
     Ok(model)
 }
@@ -329,7 +395,7 @@ extraArgs:
     fn error(raw: &str) -> String {
         match SlipmeshFile::parse(raw) {
             Ok(_) => panic!("parsed, but should have been refused:\n{raw}"),
-            Err(err) => format!("{err:#}"),
+            Err(err) => format!("{:#}", anyhow::Error::new(err)),
         }
     }
 

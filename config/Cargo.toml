@@ -14,3 +14,4 @@ serde.workspace = true
 sliplib-net.workspace = true
 sliplib-secrets.workspace = true
 sliplib-yaml.workspace = true
+thiserror.workspace = true

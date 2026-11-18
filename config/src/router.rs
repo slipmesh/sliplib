@@ -2,8 +2,7 @@
 //! needs is declared statically - nothing is discovered from the cluster or from the node's own
 //! interfaces.
 
-use crate::MetricsConfig;
-use anyhow::Result;
+use crate::{MetricsConfig, MetricsError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr};
@@ -162,20 +161,95 @@ pub struct LabeledPrefix {
     pub label: Option<String>,
 }
 
+/// What is wrong with an entry of `node.loopback_addresses`.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum LoopbackAddressError {
+    #[error(transparent)]
+    Cidr(#[from] sliplib_net::ParseError),
+    #[error("{text:?} is not a valid IP address: {error}")]
+    NotAnAddress {
+        text: String,
+        error: std::net::AddrParseError,
+    },
+}
+
 /// Parses a loopback-identity address: `"<addr>/<prefix>"`, or a bare address (defaults to `/32`
 /// for IPv4, `/128` for IPv6 - the whole point of a loopback identity is that it has no host
 /// bits). Delegates to `sliplib_net::parse` whenever a prefix is present, so it accepts exactly
 /// what every other CIDR in the configs accepts.
-pub fn parse_loopback_address(s: &str) -> Result<(IpAddr, u8)> {
+pub fn parse_loopback_address(s: &str) -> Result<(IpAddr, u8), LoopbackAddressError> {
     if s.contains('/') {
         let net = sliplib_net::parse(s)?;
         return Ok((net.addr(), net.prefix_len()));
     }
     let addr: IpAddr = s
         .parse()
-        .map_err(|e| anyhow::anyhow!("{s:?} is not a valid IP address: {e}"))?;
+        .map_err(|error| LoopbackAddressError::NotAnAddress {
+            text: s.to_owned(),
+            error,
+        })?;
     let prefix = if addr.is_ipv4() { 32 } else { 128 };
     Ok((addr, prefix))
+}
+
+/// What the `router` daemon would refuse a config for, or fail on once it is running.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Invalid {
+    #[error("bgp_as must not be 0 (reserved, RFC 7607)")]
+    BgpAsZero,
+    #[error("node.loopback_addresses: {0}")]
+    LoopbackAddress(LoopbackAddressError),
+    #[error("node.loopback_addresses must contain exactly one IPv4 address, found {0}")]
+    Ipv4Loopbacks(usize),
+    #[error("node.loopback_addresses must contain exactly one IPv6 address, found {0}")]
+    Ipv6Loopbacks(usize),
+    #[error(transparent)]
+    Metrics(#[from] MetricsError),
+    #[error("bfd: min_rx_ms and min_tx_ms must be greater than 0")]
+    BfdIntervalZero,
+    #[error("bfd: multiplier must be greater than 0")]
+    BfdMultiplierZero,
+    #[error("bgp_peers: name must not be empty")]
+    EmptyPeerName,
+    #[error("bgp_peers: duplicate name {0:?}")]
+    DuplicatePeer(String),
+    #[error("bgp_peers {name:?}: address {address:?} is not a valid IPv6 address: {error}")]
+    PeerAddress {
+        name: String,
+        address: String,
+        error: std::net::AddrParseError,
+    },
+    #[error("ospf_interfaces: entry must not be empty")]
+    EmptyOspfInterface,
+    #[error("learn: invalid IPv4 CIDR {cidr:?}: {error}")]
+    Learn {
+        cidr: String,
+        error: sliplib_net::ParseError,
+    },
+    #[error("announce: invalid IPv4 CIDR {cidr:?}: {error}")]
+    Announce {
+        cidr: String,
+        error: sliplib_net::ParseError,
+    },
+    #[error("bypass.refresh_interval_secs must be greater than 0")]
+    BypassRefreshZero,
+    #[error("literal bypass source requires `prefixes`")]
+    LiteralWithoutPrefixes,
+    #[error("bypass: invalid literal prefix {net:?}: {error}")]
+    LiteralPrefix {
+        net: String,
+        error: sliplib_net::ParseError,
+    },
+    /// A bypass source of `kind` lacks the key `field`.
+    #[error("{kind} bypass source requires `{field}`")]
+    SourceLacks {
+        kind: &'static str,
+        field: &'static str,
+    },
+    #[error("unknown bypass source kind: {0:?}")]
+    UnknownSourceKind(String),
 }
 
 /// Pure validation, no I/O: `node.loopback_addresses` has exactly one IPv4 and one IPv6 entry,
@@ -184,31 +258,30 @@ pub fn parse_loopback_address(s: &str) -> Result<(IpAddr, u8)> {
 /// CIDR, and every `bypass` entry's `kind` is recognized (with `literal` prefixes validated
 /// eagerly, since that's a local check - `asn`/`geoip`/`dns` are only checked when the daemon
 /// resolves them, since that's genuinely network-dependent).
-pub fn validate(cfg: &RouterConfig) -> Result<()> {
+pub fn validate(cfg: &RouterConfig) -> Result<(), Invalid> {
     // AS 0 is reserved and explicitly invalid per RFC 7607 ("Codification of AS 0 Processing") -
     // BIRD would only surface this once it tries to actually start an iBGP session, well past
     // where this config's own fail-fast validation should have caught it. Not checking against
     // the private-use ranges (64512-65534/4200000000-4294967294): this project's own test nodes
     // use 64512, a legitimate and common choice for an internal-only network like this one.
-    anyhow::ensure!(cfg.bgp_as != 0, "bgp_as must not be 0 (reserved, RFC 7607)");
+    if cfg.bgp_as == 0 {
+        return Err(Invalid::BgpAsZero);
+    }
     let mut v4_count = 0;
     let mut v6_count = 0;
     for addr in &cfg.node.loopback_addresses {
-        let (addr, _prefix) = parse_loopback_address(addr)
-            .map_err(|e| anyhow::anyhow!("node.loopback_addresses: {e}"))?;
+        let (addr, _prefix) = parse_loopback_address(addr).map_err(Invalid::LoopbackAddress)?;
         match addr {
             IpAddr::V4(_) => v4_count += 1,
             IpAddr::V6(_) => v6_count += 1,
         }
     }
-    anyhow::ensure!(
-        v4_count == 1,
-        "node.loopback_addresses must contain exactly one IPv4 address, found {v4_count}"
-    );
-    anyhow::ensure!(
-        v6_count == 1,
-        "node.loopback_addresses must contain exactly one IPv6 address, found {v6_count}"
-    );
+    if v4_count != 1 {
+        return Err(Invalid::Ipv4Loopbacks(v4_count));
+    }
+    if v6_count != 1 {
+        return Err(Invalid::Ipv6Loopbacks(v6_count));
+    }
 
     if let Some(metrics) = &cfg.metrics {
         metrics.validate("metrics.listen")?;
@@ -219,55 +292,56 @@ pub fn validate(cfg: &RouterConfig) -> Result<()> {
         // when `birdc configure` fails on the node - long past where a typo in the topology should
         // have been caught. BIRD's own documentation puts the practical floor at tens of
         // milliseconds, so this checks for the meaningless value rather than for a good one.
-        anyhow::ensure!(
-            bfd.min_rx_ms > 0 && bfd.min_tx_ms > 0,
-            "bfd: min_rx_ms and min_tx_ms must be greater than 0"
-        );
-        anyhow::ensure!(bfd.multiplier > 0, "bfd: multiplier must be greater than 0");
+        if bfd.min_rx_ms == 0 || bfd.min_tx_ms == 0 {
+            return Err(Invalid::BfdIntervalZero);
+        }
+        if bfd.multiplier == 0 {
+            return Err(Invalid::BfdMultiplierZero);
+        }
     }
 
     let mut seen_names = HashSet::new();
     for peer in &cfg.bgp_peers {
-        anyhow::ensure!(!peer.name.is_empty(), "bgp_peers: name must not be empty");
-        anyhow::ensure!(
-            seen_names.insert(peer.name.as_str()),
-            "bgp_peers: duplicate name {:?}",
-            peer.name
-        );
-        peer.address.parse::<Ipv6Addr>().map_err(|e| {
-            anyhow::anyhow!(
-                "bgp_peers {:?}: address {:?} is not a valid IPv6 address: {e}",
-                peer.name,
-                peer.address
-            )
-        })?;
+        if peer.name.is_empty() {
+            return Err(Invalid::EmptyPeerName);
+        }
+        if !seen_names.insert(peer.name.as_str()) {
+            return Err(Invalid::DuplicatePeer(peer.name.clone()));
+        }
+        peer.address
+            .parse::<Ipv6Addr>()
+            .map_err(|error| Invalid::PeerAddress {
+                name: peer.name.clone(),
+                address: peer.address.clone(),
+                error,
+            })?;
     }
 
-    for iface in &cfg.ospf_interfaces {
-        anyhow::ensure!(
-            !iface.is_empty(),
-            "ospf_interfaces: entry must not be empty"
-        );
+    if cfg.ospf_interfaces.iter().any(String::is_empty) {
+        return Err(Invalid::EmptyOspfInterface);
     }
 
     for cidr in &cfg.learn {
-        sliplib_net::parse_ipv4(cidr)
-            .map_err(|e| anyhow::anyhow!("learn: invalid IPv4 CIDR {cidr:?}: {e}"))?;
+        sliplib_net::parse_ipv4(cidr).map_err(|error| Invalid::Learn {
+            cidr: cidr.clone(),
+            error,
+        })?;
     }
 
     for entry in &cfg.announce {
-        sliplib_net::parse_ipv4(&entry.net)
-            .map_err(|e| anyhow::anyhow!("announce: invalid IPv4 CIDR {:?}: {e}", entry.net))?;
+        sliplib_net::parse_ipv4(&entry.net).map_err(|error| Invalid::Announce {
+            cidr: entry.net.clone(),
+            error,
+        })?;
     }
 
     if let Some(bypass) = &cfg.bypass {
         // `bypass_refresh_loop` builds `tokio::time::interval(Duration::from_secs(refresh_interval_secs))`
         // - a zero period panics there per tokio's own documented contract, taking the whole
         // process down instead of failing here with a clear message.
-        anyhow::ensure!(
-            bypass.refresh_interval_secs > 0,
-            "bypass.refresh_interval_secs must be greater than 0"
-        );
+        if bypass.refresh_interval_secs == 0 {
+            return Err(Invalid::BypassRefreshZero);
+        }
         for entry in bypass.include.iter().chain(bypass.exclude.iter()) {
             validate_bypass_entry(entry)?;
         }
@@ -276,37 +350,33 @@ pub fn validate(cfg: &RouterConfig) -> Result<()> {
     Ok(())
 }
 
-fn validate_bypass_entry(entry: &BypassSourceEntry) -> Result<()> {
+fn validate_bypass_entry(entry: &BypassSourceEntry) -> Result<(), Invalid> {
+    let lacks = |kind, field| Invalid::SourceLacks { kind, field };
     match entry.kind.as_str() {
         "literal" => {
             let prefixes = entry
                 .prefixes
                 .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("literal bypass source requires `prefixes`"))?;
+                .ok_or(Invalid::LiteralWithoutPrefixes)?;
             for p in prefixes {
-                sliplib_net::parse_ipv4(&p.net).map_err(|e| {
-                    anyhow::anyhow!("bypass: invalid literal prefix {:?}: {e}", p.net)
+                sliplib_net::parse_ipv4(&p.net).map_err(|error| Invalid::LiteralPrefix {
+                    net: p.net.clone(),
+                    error,
                 })?;
             }
         }
         "asn" => {
-            anyhow::ensure!(entry.label.is_some(), "asn bypass source requires `label`");
-            anyhow::ensure!(entry.asns.is_some(), "asn bypass source requires `asns`");
+            entry.label.as_ref().ok_or(lacks("asn", "label"))?;
+            entry.asns.as_ref().ok_or(lacks("asn", "asns"))?;
         }
         "dns" => {
-            anyhow::ensure!(entry.label.is_some(), "dns bypass source requires `label`");
-            anyhow::ensure!(
-                entry.hostnames.is_some(),
-                "dns bypass source requires `hostnames`"
-            );
+            entry.label.as_ref().ok_or(lacks("dns", "label"))?;
+            entry.hostnames.as_ref().ok_or(lacks("dns", "hostnames"))?;
         }
         "geoip" => {
-            anyhow::ensure!(
-                entry.country.is_some(),
-                "geoip bypass source requires `country`"
-            );
+            entry.country.as_ref().ok_or(lacks("geoip", "country"))?;
         }
-        other => anyhow::bail!("unknown bypass source kind: {other:?}"),
+        other => return Err(Invalid::UnknownSourceKind(other.to_owned())),
     }
     Ok(())
 }
@@ -337,6 +407,17 @@ bgp_as: 64512
         let cfg: RouterConfig = sliplib_yaml::from_str(&yaml).unwrap();
         let err = validate(&cfg).unwrap_err().to_string();
         assert!(err.contains("wildcard"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_each_bfd_setting_of_zero_alone() {
+        let refusal = |setting: &str| {
+            let yaml = format!("{}bfd:\n  {setting}: 0\n", minimal_yaml());
+            validate(&sliplib_yaml::from_str(&yaml).unwrap()).unwrap_err()
+        };
+        assert!(matches!(refusal("min_rx_ms"), Invalid::BfdIntervalZero));
+        assert!(matches!(refusal("min_tx_ms"), Invalid::BfdIntervalZero));
+        assert!(matches!(refusal("multiplier"), Invalid::BfdMultiplierZero));
     }
 
     /// A zero interval renders a bird.conf BIRD refuses, and the daemon would only find out
