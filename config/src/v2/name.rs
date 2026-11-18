@@ -10,8 +10,9 @@ use std::fmt;
 /// A name: ASCII letters, digits, `-`, `_` and `.`, with a letter or a digit first and last.
 ///
 /// A name YAML reads as a number or a boolean, `7` or `true`, is the name written so, wherever it
-/// stands: as a key of a mapping or in a list, read from the text or from a value. A number is
-/// written back as YAML reads it, so `07` is the name `7`; quoted, it keeps its spelling.
+/// stands: as a key of a mapping or in a list, read from the text or from a value. Such a value
+/// becomes the name it prints as, so `1.0` is the name `1`, `1e3` the name `1000` and `True` the
+/// name `true`; quoted, a name keeps its spelling. `07` YAML reads as text, and it stays `07`.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Name(String);
 
