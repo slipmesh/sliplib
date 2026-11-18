@@ -1,7 +1,7 @@
 //! A topology of format version 1 as the network the configs are computed from.
 
 use crate::addressing;
-use crate::model::{Endpoint, Link, MetricsPorts, Network, Node, V1Only};
+use crate::model::{Endpoint, Keys, Link, MetricsPorts, Network, Node, V1Only};
 use crate::mtu::DEFAULT_UPLINK_MTU;
 use crate::render::RenderError;
 use crate::secrets::unless_plain;
@@ -76,6 +76,7 @@ fn node(
     let cluster = &mesh.cluster;
     Ok(Node {
         name: entry.name.clone(),
+        platform: None,
         loopback,
         link_local,
         tunnel_ipv4,
@@ -139,6 +140,7 @@ pub fn lower(mesh: &MeshConfig) -> Result<Network, RenderError> {
             awg: cluster.awg_metrics_port,
             router: cluster.router_metrics_port,
         },
+        keys: Keys::V1,
         v1: Some(V1Only {
             pools: mesh.roadwarriors.clone(),
             obfuscation: mesh.obfuscation.clone(),

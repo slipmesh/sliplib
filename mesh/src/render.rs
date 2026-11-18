@@ -11,6 +11,7 @@ use sliplib_config::mesh_config::UnknownNode;
 use sliplib_config::router::{
     BgpPeerEntry, BypassConfig, DEFAULT_BYPASS_REFRESH_INTERVAL_SECS, NodeIdentity, RouterConfig,
 };
+use sliplib_config::v2::Platform;
 use sliplib_config::{MetricsConfig, Obfuscation, ObfuscationError};
 use sliplib_secrets::wireguard::KeyError;
 
@@ -93,9 +94,11 @@ pub enum RenderError {
         #[source]
         source: std::net::AddrParseError,
     },
-    #[error("node {node:?}: mesh_private_key")]
+    #[error("node {node:?}: {key}")]
     Key {
         node: String,
+        /// How the files name a node's private key.
+        key: &'static str,
         #[source]
         source: KeyError,
     },
@@ -184,9 +187,10 @@ pub(crate) fn render_router_config(mesh: &Network, node_name: &str) -> Result<Ro
     })
 }
 
-fn key_of(node: &str) -> impl Fn(KeyError) -> RenderError {
+fn key_of(node: &str, key: &'static str) -> impl Fn(KeyError) -> RenderError {
     move |source| RenderError::Key {
         node: node.to_owned(),
+        key,
         source,
     }
 }
@@ -200,13 +204,16 @@ fn mesh_interfaces_for(
     resolved: &ResolvedSecrets,
 ) -> Result<Vec<InterfaceEntry>> {
     let node = mesh.node(node_name)?;
+    let key = mesh.keys.private_key;
     let own_private_key = resolved
         .mesh_private_keys
         .get(node_name)
-        .ok_or_else(|| MissingSecret(format!("node {node_name:?}: mesh_private_key is not set")))?;
+        .ok_or_else(|| MissingSecret(format!("node {node_name:?}: {key} is not set")))?;
     // Decoded for every node, whether or not a link uses its key: where one does, the daemon
     // would otherwise be the first to decode it, and refuse a config it is already running on.
-    own_private_key.public_key().map_err(key_of(node_name))?;
+    own_private_key
+        .public_key()
+        .map_err(key_of(node_name, key))?;
 
     let mtu = crate::mtu::mesh_mtu(mesh, resolved)?;
     let mut out = Vec::new();
@@ -219,9 +226,10 @@ fn mesh_interfaces_for(
             continue;
         };
         let peer_node = mesh.node(peer_name)?;
-        let peer_private_key = resolved.mesh_private_keys.get(peer_name).ok_or_else(|| {
-            MissingSecret(format!("node {peer_name:?}: mesh_private_key is not set"))
-        })?;
+        let peer_private_key = resolved
+            .mesh_private_keys
+            .get(peer_name)
+            .ok_or_else(|| MissingSecret(format!("node {peer_name:?}: {key} is not set")))?;
         let obfuscation = minted_obfuscation(
             resolved.mesh_link_obfuscation.get(&link_key(&link.ends)),
             link.plain,
@@ -233,7 +241,7 @@ fn mesh_interfaces_for(
             addresses.push(format!("{tunnel_v4}/32"));
         }
 
-        out.push(InterfaceEntry {
+        let mut interface = InterfaceEntry {
             name: format!("{}{peer_name}", mesh.interface_prefix),
             listen_port: link.port,
             addresses,
@@ -242,7 +250,9 @@ fn mesh_interfaces_for(
             handshake_stale_secs: None,
             mtu,
             peers: vec![PeerEntry {
-                public_key: peer_private_key.public_key().map_err(key_of(peer_name))?,
+                public_key: peer_private_key
+                    .public_key()
+                    .map_err(key_of(peer_name, key))?,
                 name: Some(peer_name.clone()),
                 endpoint: peer_node
                     .endpoint
@@ -251,7 +261,16 @@ fn mesh_interfaces_for(
                 allowed_ips: None,
                 persistent_keepalive: None,
             }],
-        });
+        };
+        // Only a dialed peer is sent keepalives, and the one every reader takes for a peer that
+        // sets none is left out.
+        let peer = &interface.peers[0];
+        let default = interface.keepalive_of(peer);
+        let own = link
+            .persistent_keepalive
+            .filter(|own| peer.endpoint.is_some() && *own != default);
+        interface.peers[0].persistent_keepalive = own;
+        out.push(interface);
     }
     Ok(out)
 }
@@ -402,7 +421,12 @@ fn metrics_for(
     port: Option<u16>,
     field: &'static str,
 ) -> Result<Option<MetricsConfig>> {
-    let Some(port) = port else {
+    // The listeners are those of the daemons the Talos generator installs. A file of version 1
+    // names no platform, and every node of it gets them.
+    let served = node
+        .platform
+        .is_none_or(|platform| platform == Platform::Talos);
+    let Some(port) = port.filter(|_| served) else {
         return Ok(None);
     };
     // Refused here, not by the daemon: unset already serves nothing, so 0 is a mistake, better

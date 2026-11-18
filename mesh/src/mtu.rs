@@ -28,12 +28,17 @@ pub enum MtuError {
         #[source]
         source: LinkError,
     },
-    #[error("cluster.mesh_mtu is set, but the mesh has no link to give it to")]
-    NoLink,
-    #[error("cluster.mesh_mtu {mtu} is above {limit}, the limit of mesh link {link}")]
-    AboveLimit { mtu: u32, limit: u32, link: String },
-    #[error("cluster.mesh_mtu {0} is below {MIN_MESH_MTU}, the least IPv6 allows a link")]
-    BelowMinimum(u32),
+    #[error("{key} is set, but the mesh has no link to give it to")]
+    NoLink { key: &'static str },
+    #[error("{key} {mtu} is above {limit}, the limit of mesh link {link}")]
+    AboveLimit {
+        key: &'static str,
+        mtu: u32,
+        limit: u32,
+        link: String,
+    },
+    #[error("{key} {mtu} is below {MIN_MESH_MTU}, the least IPv6 allows a link")]
+    BelowMinimum { key: &'static str, mtu: u32 },
     #[error(
         "mesh link {link} limits the mesh MTU to {limit}, below {MIN_MESH_MTU}, the least IPv6 allows a link"
     )]
@@ -63,6 +68,7 @@ pub enum LinkError {
 /// The MTU of every mesh interface: `cluster.mesh_mtu` when it fits every link, else the least
 /// link limit. None for a mesh without links, which has no mesh interface to give it to.
 pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32>, MtuError> {
+    let key = mesh.keys.mtu;
     let mut least: Option<(u32, &Link)> = None;
     for link in &mesh.links {
         let limit = link_limit(mesh, link, resolved).map_err(|source| MtuError::Link {
@@ -75,7 +81,7 @@ pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32
     }
     let Some((limit, link)) = least else {
         if mesh.mtu.is_some() {
-            return Err(MtuError::NoLink);
+            return Err(MtuError::NoLink { key });
         }
         return Ok(None);
     };
@@ -83,13 +89,14 @@ pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32
         Some(mtu) => {
             if mtu > limit {
                 return Err(MtuError::AboveLimit {
+                    key,
                     mtu,
                     limit,
                     link: link.name.clone(),
                 });
             }
             if mtu < MIN_MESH_MTU {
-                return Err(MtuError::BelowMinimum(mtu));
+                return Err(MtuError::BelowMinimum { key, mtu });
             }
             mtu
         }

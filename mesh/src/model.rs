@@ -8,6 +8,7 @@
 
 use sliplib_config::mesh_config::{AddressFamily, BypassEntry, RoadwarriorPool, UnknownNode};
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
+use sliplib_config::v2::Platform;
 use sliplib_config::{Obfuscation, Range};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -28,8 +29,29 @@ pub struct Network {
     /// The classes of routes by name, each with its protocol number.
     pub classes: Vec<(String, u8)>,
     pub metrics: MetricsPorts,
+    pub keys: Keys,
     /// What only a file of version 1 holds.
     pub v1: Option<V1Only>,
+}
+
+/// How a message names the keys of the files, which differ between the versions of the format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Keys {
+    /// A node's private key, under the node.
+    pub private_key: &'static str,
+    /// The MTU set for the mesh.
+    pub mtu: &'static str,
+}
+
+impl Keys {
+    pub const V1: Self = Self {
+        private_key: "mesh_private_key",
+        mtu: "cluster.mesh_mtu",
+    };
+    pub const V2: Self = Self {
+        private_key: "wireguard.private_key",
+        mtu: "mesh.mtu",
+    };
 }
 
 impl Network {
@@ -52,6 +74,8 @@ pub struct MetricsPorts {
 #[derive(Debug)]
 pub struct Node {
     pub name: String,
+    /// Whose tool configures the node. A file of version 1 does not say.
+    pub platform: Option<Platform>,
     pub loopback: (Ipv4Addr, Ipv6Addr),
     /// The IPv6 link-local of every link's interface on the node.
     pub link_local: Ipv6Addr,
