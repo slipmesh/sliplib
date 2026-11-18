@@ -7,9 +7,16 @@ use serde::Deserialize;
 use std::fmt;
 
 /// A name: ASCII letters, digits, `-`, `_` and `.`, with a letter or a digit first and last.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
 #[serde(try_from = "String")]
 pub struct Name(String);
+
+// A refusal quotes a name with `{:?}`, as it quotes a text.
+impl fmt::Debug for Name {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
 
 /// What keeps a text from being a name.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -74,9 +81,15 @@ impl fmt::Display for Name {
 
 /// The name of a route class. It ends the key of a node annotation, which takes 63 characters,
 /// so it takes 48.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
 #[serde(try_from = "String")]
 pub struct ClassName(Name);
+
+impl fmt::Debug for ClassName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
 
 impl ClassName {
     pub const LIMIT: usize = 48;
@@ -145,6 +158,13 @@ mod tests {
         for text in ["-a", "a-", ".a", "a.", "_a", "a_", "-"] {
             assert_eq!(name(text), Err(NameError::Edge(text.to_owned())), "{text}");
         }
+    }
+
+    #[test]
+    fn a_refusal_quotes_a_name_as_it_quotes_a_text() {
+        assert_eq!(format!("{:?}", name("node-a").unwrap()), "\"node-a\"");
+        let class = ClassName::try_from("egress".to_owned()).unwrap();
+        assert_eq!(format!("{class:?}"), "\"egress\"");
     }
 
     #[test]
