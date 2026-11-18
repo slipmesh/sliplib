@@ -315,8 +315,7 @@ impl Obfuscation {
             ("max_handshake_attempts", self.max_handshake_attempts),
         ] {
             if let Some(range) = value
-                && !range.is_zero()
-                && range.lo() < 1
+                && range.starts_at_zero()
             {
                 return Err(ObfuscationError::RangeStartsAtZero { name, range });
             }
