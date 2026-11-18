@@ -83,3 +83,36 @@ pub fn exclude(net: IpNet, excluded: IpNet) -> Vec<IpNet> {
     rest.sort();
     rest
 }
+
+/// An address no host takes on an interface, because of the prefix it stands with there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reserved {
+    /// IPv4, the host part of all zeros: it names the network (RFC 1812, section 4.2.3).
+    Network,
+    /// IPv4, the host part of all ones: the network's broadcast address (the same section).
+    Broadcast,
+    /// IPv6, the host part of all zeros: the Subnet-Router anycast address (RFC 4291, section
+    /// 2.6.1), which every router on the link answers for.
+    SubnetRouterAnycast,
+}
+
+/// What `address` is on an interface where it stands with its prefix length, if it is one no host
+/// takes there. A point-to-point prefix, an IPv4 /31 (RFC 3021) or an IPv6 /127 (RFC 6164), and a
+/// single address, /32 or /128, have no such address.
+pub fn reserved(address: IpNet) -> Option<Reserved> {
+    match address {
+        IpNet::V4(v4) if v4.prefix_len() < 31 => {
+            if v4.addr() == v4.network() {
+                Some(Reserved::Network)
+            } else if v4.addr() == v4.broadcast() {
+                Some(Reserved::Broadcast)
+            } else {
+                None
+            }
+        }
+        IpNet::V6(v6) if v6.prefix_len() < 127 && v6.addr() == v6.network() => {
+            Some(Reserved::SubnetRouterAnycast)
+        }
+        _ => None,
+    }
+}

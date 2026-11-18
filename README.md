@@ -185,7 +185,11 @@ aggregation are `ipnet`'s own methods. On top of them:
 - `parse`, `parse_ipv4` and `parse_ipv6` read `"<address>/<prefix length>"` as a config writes it, keeping the
   host bits, with errors that name the input;
 - `exclude(net, excluded)` is what `ipnet` lacks: the rest of `net` without `excluded`, as the fewest
-  networks, in address order.
+  networks, in address order;
+- `reserved(address)` says whether an address is one no host takes on an interface where it stands
+  with that prefix length: the network and broadcast addresses of an IPv4 prefix shorter than /31,
+  the Subnet-Router anycast address of an IPv6 prefix shorter than /127. `ipnet` leaves the two
+  IPv4 ones out only when it lists the hosts of a network, and has no such rule for IPv6.
 
 ### `sliplib-yaml`
 
