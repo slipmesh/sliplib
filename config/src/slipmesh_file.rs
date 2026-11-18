@@ -2,26 +2,18 @@
 //! with.
 //!
 //! Every document carries a `slipmesh:` block saying what it is for. `network` is the topology,
-//! exactly one of it. `roadwarriors` is one pool per document. `patch` is a Talos document, aimed
-//! at hosts by `include`/`exclude`. The block is for the file's reader and never reaches a patch
-//! file.
+//! exactly one of it. `roadwarriors` is one pool per document. `patch` is a document in the format
+//! of whatever configures a host, aimed at hosts by `include`/`exclude`; what it holds is for that
+//! tool to read. The block is for the file's reader and never reaches a host.
 
 use crate::mesh_config::{self, MeshConfig, RoadwarriorPool};
-use crate::talos::{self, Identity};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use sliplib_yaml::{MultiDoc, Value};
+use std::fmt;
 
 /// The top-level block of every document: what the document is for and which hosts it reaches.
 pub const META_KEY: &str = "slipmesh";
-
-/// The `ExtensionServiceConfig`s generated from the network, by name, with the file each one
-/// mounts. Talos keeps `name` unique per `kind`, so a `patch` document of one of these names is
-/// that same document: it may add files to it, and nothing else - not the generated file itself.
-pub const GENERATED: [(&str, &str); 2] = [
-    ("awg", "/etc/talos-extensions/awg.yaml"),
-    ("router", "/etc/talos-extensions/router.yaml"),
-];
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -104,15 +96,32 @@ impl Document {
     }
 }
 
-/// One Talos document as it goes into one host's patch file, serialized - its comments stay in
-/// `slipmesh.yaml`.
-#[derive(Debug, PartialEq)]
-pub struct HostDocument {
-    /// `kind`, plus `/name` when the document has one.
-    pub identity: String,
-    pub text: String,
-    /// What `text` serializes - for a caller that reads its fields.
-    pub value: Value,
+/// A `patch` document: one in the format of whatever configures the hosts it reaches. It reads as
+/// where it stands in the file, for a refusal to name.
+pub struct Patch(Document);
+
+/// Which of two `patch` documents that reach one host is laid over the other: the greater over the
+/// lesser, and of two equal ones the later in the file.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct Rank(bool);
+
+impl Patch {
+    /// The document without its `slipmesh:` block.
+    pub fn value(&self) -> &Value {
+        &self.0.value
+    }
+
+    /// A document that names its hosts in `include` ranks above one for every host, wherever the
+    /// two stand in the file.
+    pub fn rank(&self) -> Rank {
+        Rank(self.0.meta.include.is_some())
+    }
+}
+
+impl fmt::Display for Patch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0.at())
+    }
 }
 
 pub struct SlipmeshFile {
@@ -120,7 +129,7 @@ pub struct SlipmeshFile {
     network_index: usize,
     hosts: Vec<String>,
     pools: Vec<Document>,
-    patches: Vec<Document>,
+    patches: Vec<Patch>,
     topology: MeshConfig,
 }
 
@@ -145,7 +154,7 @@ impl SlipmeshFile {
                     document.at(),
                     crate::nftables::TEMPLATE_PATH
                 ),
-                Kind::Patch => patches.push(document),
+                Kind::Patch => patches.push(Patch(document)),
             }
         }
 
@@ -170,7 +179,7 @@ impl SlipmeshFile {
         let topology: MeshConfig = network.deserialize()?;
         let hosts: Vec<String> = topology.nodes.into_iter().map(|n| n.name).collect();
 
-        for targeted in &patches {
+        for targeted in patches.iter().map(|patch| &patch.0) {
             if let Some(include) = &targeted.meta.include {
                 ensure!(
                     !include.is_empty(),
@@ -196,48 +205,6 @@ impl SlipmeshFile {
         for pool in &pools {
             pool.deserialize::<RoadwarriorPool>()?;
         }
-        for patch in &patches {
-            let identity = Identity::of(&patch.value);
-            let Some(kind) = &identity.kind else {
-                bail!(
-                    "{}: has no Talos `kind`, so it has no identity to merge by",
-                    patch.at()
-                );
-            };
-            if let Some(name) = &identity.name
-                && kind == "ExtensionServiceConfig"
-                && let Some((_, generated)) = GENERATED.iter().find(|(n, _)| n == name)
-            {
-                let others: Vec<&str> = patch
-                    .value
-                    .as_mapping()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|(key, _)| key.as_str())
-                    .filter(|key| !["apiVersion", "kind", "name", "configFiles"].contains(key))
-                    .collect();
-                ensure!(
-                    others.is_empty(),
-                    "{}: `ExtensionServiceConfig` {name:?} is generated from the network - a \
-                     patch may add `configFiles` to it and nothing else, not {others:?}",
-                    patch.at()
-                );
-                let over_generated = patch
-                    .value
-                    .get("configFiles")
-                    .and_then(Value::as_sequence)
-                    .into_iter()
-                    .flatten()
-                    .any(|f| f.get("mountPath").and_then(Value::as_str) == Some(generated));
-                ensure!(
-                    !over_generated,
-                    "{}: {generated} is the file generated for {name:?} - add files next to it, \
-                     not over it",
-                    patch.at()
-                );
-            }
-        }
-
         let topology = model(&network.value, &pools)?;
         Ok(Self {
             network_index: network.index,
@@ -283,58 +250,19 @@ impl SlipmeshFile {
         model(&self.network, &self.pools)
     }
 
-    /// The Talos documents that go into `host`'s patch file, in the order their identities first
-    /// appear.
-    ///
-    /// Documents of one identity are merged defaults first, then those naming the host in
-    /// `include`, each in file order - so the more specific document wins wherever it sits in the
-    /// file.
-    pub fn patches_for(&self, host: &str) -> Result<Vec<HostDocument>> {
-        self.ensure_host(host)?;
-        let reaching: Vec<&Document> = self.patches.iter().filter(|p| p.reaches(host)).collect();
-
-        let mut identities: Vec<Identity> = Vec::new();
-        for patch in &reaching {
-            let identity = Identity::of(&patch.value);
-            if !identities.contains(&identity) {
-                identities.push(identity);
-            }
-        }
-
-        identities
-            .into_iter()
-            .map(|identity| {
-                let defaults = reaching.iter().filter(|p| p.meta.include.is_none());
-                let included = reaching.iter().filter(|p| p.meta.include.is_some());
-                let sources: Vec<&Document> = defaults
-                    .chain(included)
-                    .filter(|p| Identity::of(&p.value) == identity)
-                    .copied()
-                    .collect();
-                let [first, rest @ ..] = sources.as_slice() else {
-                    unreachable!("every identity comes from at least one document")
-                };
-                let mut document = rest.iter().fold(first.value.clone(), |base, patch| {
-                    talos::merge(base, &patch.value)
-                });
-                talos::contents_as_text(&mut document)?;
-                let text =
-                    sliplib_yaml::to_string(&document).context("serializing a patch document")?;
-                Ok(HostDocument {
-                    identity: identity.to_string(),
-                    text,
-                    value: document,
-                })
-            })
-            .collect()
+    /// Every `patch` document, in the order of the file.
+    pub fn patches(&self) -> &[Patch] {
+        &self.patches
     }
 
-    /// Whether a `patch` document, for whichever hosts, sets the file `mount_path` of
-    /// `ExtensionServiceConfig` `service`.
-    pub fn sets_file(&self, service: &str, mount_path: &str) -> bool {
-        self.patches
+    /// The `patch` documents that reach `host`, in the order of the file.
+    pub fn patches_for(&self, host: &str) -> Result<Vec<&Patch>> {
+        self.ensure_host(host)?;
+        Ok(self
+            .patches
             .iter()
-            .any(|p| talos::sets_file(&p.value, service, mount_path))
+            .filter(|patch| patch.0.reaches(host))
+            .collect())
     }
 
     fn ensure_host(&self, host: &str) -> Result<()> {
@@ -546,138 +474,49 @@ extraArgs:
         assert!(parsed.patches_for("node-c").unwrap().is_empty());
     }
 
-    const DEVICE: &str = "slipmesh:\n  kind: patch\n  include: [node-b]\n# the device the converger talks to\napiVersion: v1alpha1\nkind: ExtensionServiceConfig\nname: device\nconfigFiles:\n  - mountPath: /etc/device.yaml\n    content:\n      host: router1.example.com\n      port: 8729\n      username: admin\n      password: hunter2   # the one secret here\n";
-
-    /// A `configFiles[].content` in `text`.
-    fn content(text: &str, index: usize) -> sliplib_yaml::Value {
-        let value: sliplib_yaml::Value = sliplib_yaml::from_str(text).unwrap();
-        value["configFiles"][index]["content"].clone()
-    }
-
     #[test]
-    fn a_content_mapping_goes_out_as_the_text_of_that_yaml() {
-        let parsed = SlipmeshFile::parse(&file(&[NETWORK, DEVICE])).unwrap();
-        let text = &parsed.patches_for("node-b").unwrap()[0].text;
-        assert_eq!(
-            content(text, 0).as_str(),
-            Some("host: router1.example.com\nport: 8729\nusername: admin\npassword: hunter2\n"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn a_content_ending_in_blank_lines_keeps_them() {
-        let patch = "slipmesh:\n  kind: patch\napiVersion: v1alpha1\nkind: ExtensionServiceConfig\nname: script\nconfigFiles:\n  - mountPath: /etc/script\n    content: \"run\\n\\n\\n\"\n";
-        let parsed = SlipmeshFile::parse(&file(&[NETWORK, patch])).unwrap();
-        let text = &parsed.patches_for("node-a").unwrap()[0].text;
-        assert_eq!(content(text, 0).as_str(), Some("run\n\n\n"), "{text}");
-    }
-
-    #[test]
-    fn a_content_mapping_goes_out_as_text_after_a_merge_too() {
-        let default = "slipmesh:\n  kind: patch\napiVersion: v1alpha1\nkind: ExtensionServiceConfig\nname: device\nconfigFiles:\n  - mountPath: /etc/device.yaml\n    content:\n      host: router0.example.com\n";
-        let parsed = SlipmeshFile::parse(&file(&[NETWORK, default, DEVICE])).unwrap();
-        let documents = parsed.patches_for("node-b").unwrap();
-        assert_eq!(
-            content(&documents[0].text, 0).as_str(),
-            Some("host: router1.example.com\nport: 8729\nusername: admin\npassword: hunter2\n")
-        );
-        assert_eq!(
-            content(&parsed.patches_for("node-a").unwrap()[0].text, 0).as_str(),
-            Some("host: router0.example.com\n")
-        );
-    }
-
-    #[test]
-    fn patches_of_one_identity_merge_with_the_included_one_over_the_default() {
-        let host = "slipmesh:\n  kind: patch\n  include: [node-a]\napiVersion: v1alpha1\nkind: KubeletConfig\nextraArgs:\n    v: \"4\"\n";
-        // The host document comes first in the file and still lands on top.
-        let parsed = SlipmeshFile::parse(&file(&[NETWORK, host, KUBELET])).unwrap();
-
-        let merged = parsed.patches_for("node-a").unwrap();
-        assert_eq!(merged.len(), 1);
-        let value: sliplib_yaml::Value = sliplib_yaml::from_str(&merged[0].text).unwrap();
-        assert_eq!(value["extraArgs"]["v"].as_str(), Some("4"));
-        assert_eq!(
-            value["extraArgs"]["rotate-server-certificates"].as_str(),
-            Some("true")
-        );
-    }
-
-    #[test]
-    fn patches_come_out_in_the_order_their_identities_first_appear() {
-        let install =
-            "slipmesh:\n  kind: patch\napiVersion: v1alpha1\nkind: UnattendedInstallConfig\n";
+    fn the_patches_of_a_host_come_in_the_order_of_the_file() {
+        // The one that names its host stands first and ranks above the other: sorted by rank,
+        // it would come last.
+        let install = "slipmesh:\n  kind: patch\n  include: [node-a]\napiVersion: v1alpha1\nkind: UnattendedInstallConfig\n";
         let parsed = SlipmeshFile::parse(&file(&[NETWORK, install, KUBELET])).unwrap();
-        let identities: Vec<_> = parsed
+        let kinds: Vec<_> = parsed
             .patches_for("node-a")
             .unwrap()
             .into_iter()
-            .map(|d| d.identity)
+            .map(|patch| patch.value()["kind"].as_str().unwrap())
             .collect();
-        assert_eq!(identities, ["UnattendedInstallConfig", "KubeletConfig"]);
+        assert_eq!(kinds, ["UnattendedInstallConfig", "KubeletConfig"]);
     }
 
     #[test]
-    fn a_patch_without_kind_is_refused() {
-        let err = error(&file(&[
-            NETWORK,
-            "slipmesh:\n  kind: patch\nmachine:\n  install: {disk: /dev/vda}\n",
-        ]));
-        assert!(
-            err.contains("the `kind: patch` document at line 11: has no Talos `kind`"),
-            "{err}"
+    fn what_a_patch_holds_is_not_the_loaders_to_refuse() {
+        let without_a_kind = "slipmesh:\n  kind: patch\nmachine:\n  install: {disk: /dev/vda}\n";
+        let over_a_generated_one = "slipmesh:\n  kind: patch\napiVersion: v1alpha1\nkind: ExtensionServiceConfig\nname: router\nenvironment:\n  - RUST_LOG=debug\nconfigFiles:\n  - mountPath: /etc/talos-extensions/router.yaml\n    content: x\n";
+        let parsed =
+            SlipmeshFile::parse(&file(&[NETWORK, without_a_kind, over_a_generated_one])).unwrap();
+        assert_eq!(parsed.patches().len(), 2);
+    }
+
+    #[test]
+    fn a_patch_that_names_its_hosts_ranks_above_one_for_every_host() {
+        let named = KUBELET.replace("  kind: patch\n", "  kind: patch\n  include: [node-a]\n");
+        let excluding = KUBELET.replace("  kind: patch\n", "  kind: patch\n  exclude: [node-c]\n");
+        let parsed = SlipmeshFile::parse(&file(&[NETWORK, &named, KUBELET, &excluding])).unwrap();
+        let [named, for_all, excluding] = parsed.patches() else {
+            panic!("three patch documents were written");
+        };
+        assert!(named.rank() > for_all.rank());
+        assert_eq!(excluding.rank(), for_all.rank());
+    }
+
+    #[test]
+    fn a_patch_reads_as_its_kind_and_the_line_it_starts_at() {
+        let parsed = SlipmeshFile::parse(&file(&[NETWORK, KUBELET])).unwrap();
+        assert_eq!(
+            parsed.patches()[0].to_string(),
+            "the `kind: patch` document at line 11"
         );
-    }
-
-    fn generated_with(name: &str, body: &str) -> String {
-        format!(
-            "slipmesh:
-  kind: patch
-apiVersion: v1alpha1
-kind: ExtensionServiceConfig
-name: {name}
-{body}"
-        )
-    }
-
-    #[test]
-    fn a_patch_adding_files_to_a_generated_document_is_accepted() {
-        for name in ["awg", "router", "nftables"] {
-            let patch = generated_with(
-                name,
-                "configFiles:
-  - mountPath: /etc/talos-extensions/extra
-    content: x
-",
-            );
-            SlipmeshFile::parse(&file(&[NETWORK, &patch])).unwrap();
-        }
-    }
-
-    #[test]
-    fn a_patch_setting_more_than_files_on_a_generated_document_is_refused() {
-        let patch = generated_with(
-            "router",
-            "environment:
-  - RUST_LOG=debug
-",
-        );
-        let err = error(&file(&[NETWORK, &patch]));
-        assert!(err.contains("configFiles"), "{err}");
-    }
-
-    #[test]
-    fn a_patch_replacing_the_generated_file_is_refused() {
-        let patch = generated_with(
-            "router",
-            "configFiles:
-  - mountPath: /etc/talos-extensions/router.yaml
-    content: x
-",
-        );
-        let err = error(&file(&[NETWORK, &patch]));
-        assert!(err.contains("/etc/talos-extensions/router.yaml"), "{err}");
     }
 
     #[test]
@@ -783,13 +622,5 @@ name: {name}
         let parsed = SlipmeshFile::parse(NETWORK).unwrap();
         assert!(parsed.effective_for("node-x").is_err());
         assert!(parsed.patches_for("node-x").is_err());
-    }
-
-    #[test]
-    fn a_file_is_set_only_by_a_patch_that_sets_it() {
-        let parsed = SlipmeshFile::parse(&file(&[NETWORK, &ruleset("", "t")])).unwrap();
-        assert!(parsed.sets_file("nftables", crate::nftables::TEMPLATE_PATH));
-        assert!(!parsed.sets_file("nftables", "/etc/talos-extensions/other.conf"));
-        assert!(!parsed.sets_file("router", crate::nftables::TEMPLATE_PATH));
     }
 }
