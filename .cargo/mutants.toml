@@ -5,6 +5,9 @@ exclude_re = [
     # Which of two links of one limit a mesh MTU refusal names: the first, a choice nothing else
     # depends on.
     "replace < with <= in mesh_mtu",
+    # The share of lost packets is a whole number of 2^32, and 0.01% of 2^32 is not one: no share
+    # sits on the line between the two ways of writing it.
+    "replace < with <= in <impl fmt::Display for TrailerLoss>::fmt",
     # The network and node_id halves of a loopback share no bit, so `|` and `^` agree.
     "replace \\| with \\^ in ipv[46]_loopback",
 ]
