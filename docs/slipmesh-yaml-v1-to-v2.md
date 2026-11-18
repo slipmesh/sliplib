@@ -16,8 +16,8 @@ In general:
 - A document may set its place among the others with `order`, which ranks before everything else.
   In version 1 a document had the place it stood in.
 - The format says its `version` and `revision`.
-- Every node names its `platform`, and a document written for one platform reaches only that
-  platform's nodes.
+- Every node names its `platform`. A document written for one platform is for that platform's
+  nodes, and a node of another that its `include` reaches makes it an error.
 - `include` and `exclude` take groups, and `all`, as well as nodes. Groups are a kind of document of
   their own, and a group may name other groups and take nodes out. A document left reaching no node
   once `exclude` is taken out is refused.
@@ -102,7 +102,7 @@ The keys of the `network` document:
 | `mesh.links[].pair` | `ends`, a mapping by node name. |
 | `mesh.links[].port`, `obfuscation`, `plain` | `type`, required; `port` and `obfuscation` in the block of the type. `plain: true` is `type: wireguard`, and `plain` is gone. |
 
-### What leaves the file
+## What leaves the file
 
 Version 1 also held two parts that describe what runs over the mesh rather than the mesh:
 roadwarriors pools, one `roadwarriors` document each, and the lists of destinations that leave the
@@ -116,7 +116,7 @@ The `slipmesh rw` commands work on a version 1 file alone.
 **Planned:** the operators, and the command each of them has to write its resources out of a
 version 1 file, once.
 
-### Converting a file by hand
+## Converting a file by hand
 
 No command converts a file. It is edited by hand, and the tools then show that nothing changed that
 was not meant to. Steps 1 and 6 run the first release that reads version 2, which reads a version 1
@@ -134,7 +134,10 @@ file as before, so that what step 6 shows comes from the conversion and not from
    1. In the `slipmesh:` block of the `network` document, write `version: 2` and `revision: 1`.
    2. Write `addressing`: `loopback` is `cluster.loopback_networks`. Where the file has
       `cluster.tunnel_networks`, `tunnel.ipv4` is its `ipv4`, and `tunnel.link_local` its `ipv6`,
-      moved as it is: the link-local addresses are derived from it as before.
+      moved as it is: the link-local addresses are derived from it as before. Version 1 took two
+      networks that step 5 refuses: an IPv6 loopback network longer than /96, and an `ipv6` of
+      `tunnel_networks` outside `fe80::/10`. Such a network has to change, and the addresses
+      derived from it move with it.
    3. Write `routing`: `bgp.as` is `cluster.bgp_as`; `direct_interfaces` is the list of the same
       name; `learn` holds `pod_subnet` and `announce` holds `service_subnet`, each in a list. The
       label `k8s-services` has no place in version 2. `bfd` moves here without `enable`: where
@@ -146,20 +149,21 @@ file as before, so that what step 6 shows comes from the conversion and not from
       `amneziawg.persistent_keepalive: 25`.
    5. Move `awg_metrics_port` and `router_metrics_port` into a new `platform` document for `talos`,
       as `metrics.mesh.port` and `metrics.router.port`. Delete `cluster`.
-   6. Turn `nodes` into a mapping: each node's `name` becomes its key. A name outside
-      [the rule](slipmesh-yaml.md#names), or `all` or `none`, has to change, and so do the names of the interfaces
-      named after it on the node's peers. Give every node its `platform`. Its `mesh_private_key`
-      becomes `wireguard.private_key`, and its `direct_interfaces` moves under its `routing`.
-   7. Give every node one `underlay` entry, named as you like. Its `mtu` is the node's
-      `uplink_mtu`, left out where that was. Its `endpoint` holds the node's `endpoint` without any
-      port, under the key of its family: the family of the address, or for a host name the family it
-      resolves to first. Without `address_family`, version 1 counted for IPv6 every endpoint that is
-      not a bare address, a host name or an address with a port; where it is IPv4, the MTU of the
-      mesh may now come out up to 20 higher, so write a `mesh.mtu` of the value it had: the MTU of a
-      working mesh does not move in a conversion. Version 1 dialed a port written in the endpoint;
-      a peer now dials the link's `port`. Where the two differed, as behind a port forward, forward
-      the link's `port` to the node before the conversion. A node without `endpoint` gets an entry
-      without one.
+   6. Turn `nodes` into a mapping: each node's `name` becomes its key. A name outside [the
+      rule](slipmesh-yaml.md#names), or `all` or `none`, has to change, and so do the names of the
+      interfaces named after it on the node's peers. Give every node its `platform`. Its
+      `mesh_private_key` becomes `wireguard.private_key`, and its `direct_interfaces` moves under
+      its `routing`.
+   7. Give every node one `underlay` entry, named as you like. Its `mtu` is the node's `uplink_mtu`,
+      left out where that was. Its `endpoint` holds the node's `endpoint` without any port and
+      without the brackets of an IPv6 address, under the key of its family: the family of the
+      address, or for a host name the family it resolves to first. Without `address_family`, version
+      1 counted for IPv6 every endpoint that is not a bare address, a host name or an address with a
+      port; where it is IPv4, the MTU of the mesh may now come out up to 20 higher, so write a
+      `mesh.mtu` of the value it had: the MTU of a working mesh does not move in a conversion.
+      Version 1 dialed a port written in the endpoint; a peer now dials the link's `port`. Where the
+      two differed, as behind a port forward, forward the link's `port` to the node before the
+      conversion. A node without `endpoint` gets an entry without one.
    8. Give every node outside the cluster those two ranges belong to, a `routeros` router for one,
       `learn: []` and `announce: []` under its `routing`.
    9. Turn `mesh.links` into a mapping, giving each link a name. Its `pair` becomes `ends`, each node
@@ -176,8 +180,8 @@ file as before, so that what step 6 shows comes from the conversion and not from
    12. What else such a `patch` held: its other `configFiles` stay in a `patch` of the same
        document, which sets `configFiles` only, and none at a path the generator writes, the
        template's among them. Version 1 already refused any other key in a `patch` of the `router`
-       document; of the `nftables` document the generator now writes the rest itself, and the key has no place in
-       the files.
+       document. The rest of the `nftables` document the generator now writes itself, so its other
+       keys have no place in the files.
    13. Give every remaining `patch` its `platform`, drop the `exclude` that kept it from the nodes of
        other platforms, take a node of another platform out of its `include`, and delete the
        `mikrotik` document.
@@ -197,8 +201,10 @@ file as before, so that what step 6 shows comes from the conversion and not from
      configuration loses the comment the label made;
    - a node given `learn: []` in step 4.8 no longer announces what it held inside the pod range,
      and one given `announce: []` no longer announces the service range;
-   - where a node's endpoint had a port, its annotation `slipmesh.net/endpoint` no longer carries
-     it;
+   - where a node's endpoint had a port or the brackets of an IPv6 address, its annotation
+     `slipmesh.net/endpoint` carries the bare address or name; where that port differed from the
+     link's `port`, every peer's endpoint for that node, in the `awg` config and on a RouterOS peer;
+   - where step 4.2 changed a network, the addresses derived from it;
    - unless step 4.4 wrote `persistent_keepalive: 25`, the keepalive of every link of type
      `amneziawg` is `20-30` where it was 25;
    - where a node was renamed in step 4.6, the interfaces named after it, and what refers to them.

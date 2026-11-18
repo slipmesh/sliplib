@@ -1,6 +1,6 @@
 # The architecture of an example network in format version 2, described in ../slipmesh-yaml.md.
-# secrets.yaml is laid over it, and talos.yaml holds the documents of the Talos platform and the
-# groups they are aimed with.
+# secrets.yaml is laid over it, and talos.yaml holds the documents of the Talos platform and two
+# groups.
 #
 # Every network and address is from a range reserved for documentation, but the link-local
 # fe80:: of the links; a node_id is an identity, not an address. The AS number is reserved for

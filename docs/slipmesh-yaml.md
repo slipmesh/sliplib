@@ -38,6 +38,8 @@ kind: ExtensionServiceConfig
 name: example
 ```
 
+The keys of the block:
+
 | key | type | where | what it is |
 | --- | --- | --- | --- |
 | `kind` | string | every document | What the document is: one of the kinds below. |
@@ -45,6 +47,8 @@ name: example
 | `platform` | `talos` or `routeros` | the kinds for one platform | [The platform](#aiming-a-document-at-nodes) whose tool serves the document. One value. |
 | `include`, `exclude` | list of names, or `all` and `none` | the kinds aimed at nodes | [The nodes the document reaches](#aiming-a-document-at-nodes). |
 | `order` | integer, 0 to 65535 | every document, optional, `1000` when left out | [Where the document stands](#several-files) among all the documents read. |
+
+The kinds:
 
 | kind | how many | `include`, `exclude` | `platform` | what it holds |
 | --- | --- | --- | --- | --- |
@@ -107,12 +111,17 @@ It is used in three places:
   for that node, whichever document it is written in.
 - **For a link:** `mesh.links.<name>.<type>` over `mesh.<type>`, the defaults of the type: today
   the [keepalive](#keepalive) of both types and the [obfuscation](#obfuscation) of `amneziawg`. A
-  `null` at one of its keys takes the network's value away for that link, whichever document it
-  is written in: it is how a link drops one field of `mesh.amneziawg.obfuscation`.
+  `null` at any depth of it, a key of the block or a field of its `obfuscation`, takes the
+  network's value away for that link, whichever document it is written in: it is how a link drops
+  one field of `mesh.amneziawg.obfuscation`. A `null` at a field `slipmesh mint` writes leaves the
+  link without it, and the link is refused as any link that lacks the field is.
 
-A mapping keeps the order of its keys: a key stands where it first appears as the documents are
-laid over each other. The order reaches the node as written: a node's iBGP peers follow the order
-of `nodes`, and its interfaces that of `mesh.links`.
+Every key of these two places takes `null`, besides the type its table gives.
+
+A mapping keeps the order of its keys: a key stands where it first appears as the documents are laid
+over each other, and one that a `null` removed and a later document writes again goes last. The
+order reaches the node as written: a node's iBGP peers follow the order of `nodes`, and its
+interfaces that of `mesh.links`.
 
 A key with nothing after it is `null` in YAML: `node-a:` alone under a link's `ends` removes that
 end, so an end with no keys is written `node-a: {}`.
@@ -193,11 +202,12 @@ Only `template` and `patch` take the two keys, both optional. The other kinds ar
 particular, and there the keys are an error.
 
 A document written in the terms of one platform names it with `platform`, one value: a
-[platform of the nodes](#who-serves-a-document). It reaches that platform's nodes alone. With an
-`include` other than `all`, written as the word or as a list of it alone, every node it is left
-reaching once `exclude` is taken out has to be of that platform: a node of another is an error, not
-something passed over. Inside a group, `all` is every node of every platform, so a document of one
-platform aimed at such a group reaches the nodes of the others too, and is refused for them.
+[platform of the nodes](#who-serves-a-document). Its `all`, written as the word or as a list of it
+alone, is every node of that platform. With any other `include`, every node it is left reaching
+once `exclude` is taken out has to be of that platform, and a node of another makes the document an
+error, not something passed over. Inside a group there is no platform, and `all` there is every
+node: a group that names it holds nodes of every platform, and makes such a document an error in
+the same way.
 
 ### Strict parsing
 
@@ -262,7 +272,7 @@ These keys default to a value, each with one consumer chain and nothing to agree
 | `order` of a `slipmesh:` block | `1000` | the place of every document that does not set one |
 | `addressing.tunnel.link_local` | `fe80::/64` | the link-local prefix of every interface |
 | `nodes.<name>.underlay.<entry>.mtu` | `1500` | the MTU of Ethernet |
-| `mesh.<type>.persistent_keepalive` and a link's own | `25` on `wireguard`, `20-30` on `amneziawg` | [Keepalive](#keepalive) |
+| `mesh.<type>.persistent_keepalive` and a link's own | `25` on `wireguard`, `20-30` on `amneziawg` | the interval version 1 sends, on `amneziawg` drawn around it at each timer |
 | `routing.bfd.min_rx_ms`, `min_tx_ms`, `multiplier` | `300`, `300`, `5` | a link is a tunnel, some of them long: detection in about 1.5 s, where a tighter timer would flap |
 
 For an absent required key `slipmesh mint` may write a *reference value*: the value a network takes
@@ -571,6 +581,8 @@ What stands outside the blocks holds for every type: the `ends` of a link; the `
 which says where and over what its peers reach it; and `addressing.tunnel`, the MTU of the mesh and
 OSPFv3, which run over every link.
 
+Which platform serves which type:
+
 | type | `talos` | `routeros` |
 | --- | --- | --- |
 | `wireguard` | served | served |
@@ -762,15 +774,23 @@ It is less for short packets: a packet shorter than the message of an offset, th
 ranges some 58, 340 and 337 million values wide cost about 16%.
 
 The bytes are random with a `header_protection_key`. Without one, a data packet is `s4` random
-bytes and then its type, key index and counter in the clear, so an `s1`, `s2` or `s3` 1 to 15 above
-`s4` reads those fields, and packets are dropped by their counter, not by chance: with the offset 8
-above `s4`, every packet whose counter is a value of that header.
+bytes and then its 16-byte header in the clear: its type, its key index, which stays the same for
+the life of a key, and its counter. An `s1`, `s2` or `s3` 1 to 15 above `s4` reads those fields,
+and what is dropped is then decided by the packet's own key index and counter, not by chance. 8
+above `s4` reads the low half of the counter: the packets whose counter is a value of that header
+are dropped. 4 above reads the key index: where it is a value of the header, every data packet
+under that key is dropped until the next handshake.
 
-The tools accept the combination. `slipmesh check` and each generator warn for every link where
-`random_trailers` is on and one of `h1` to `h3` is a range, once `mesh.amneziawg.obfuscation` is
-laid under the link's own, and the warning names the link and the share. With `random_trailers`
-on, keep `h1` to `h3` single values or narrow ranges, or put the range in `h4`; and set a
-`header_protection_key`, or keep each of `s1` to `s3` from being 1 to 15 above `s4`.
+The tools accept both cases and refuse nothing. Once `mesh.amneziawg.obfuscation` is laid under
+the link's own, `slipmesh check` and each generator warn for every link where `random_trailers` is
+on and:
+
+- one of `h1` to `h3` is a range. The warning names the link and the share;
+- the link has no `header_protection_key`, and one of `s1` to `s3` is 1 to 15 above `s4`. The
+  warning names the link and the offset, and gives no share.
+
+With `random_trailers` on, keep `h1` to `h3` single values or narrow ranges, or put the range in
+`h4`; and set a `header_protection_key`, or keep each of `s1` to `s3` from being 1 to 15 above `s4`.
 
 ### What a node gets
 
@@ -874,8 +894,8 @@ way to remove. A link's `ends` name nodes, never a group.
 The documents of a platform are written in its terms and name it in their `slipmesh:` block. They
 may stand in the files of the network or in files of their own. Today the one such platform is
 `talos`: `routeros` has no settings, templates or documents of its own and needs no `platform`
-document. One is taken, and any key in its body is refused; a `template` or a `patch` that names
-`routeros` is refused.
+document. One is taken, and the RouterOS tool and `slipmesh check` refuse any key in its body; a
+`template` or a `patch` that names `routeros` is refused.
 
 ### `platform`
 

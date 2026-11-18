@@ -1,5 +1,5 @@
-# The documents of the Talos platform for the example network of mesh.yaml, and the groups they
-# are aimed with.
+# The documents of the Talos platform for the example network of mesh.yaml, and two groups:
+# workers, which a patch is aimed with, and core, which workers is made of.
 
 slipmesh:
   kind: groups
