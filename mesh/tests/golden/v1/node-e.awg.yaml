@@ -1,0 +1,27 @@
+interfaces:
+- name: mesh-node-c
+  listen_port: 51833
+  addresses:
+  - fe80::1:5/64
+  - 198.51.100.133/32
+  private_key: QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ=
+  obfuscation:
+    jc: 6
+    jmin: 60
+    jmax: 600
+    s1: 60
+    s2: 61
+    s3: 40
+    s4: 16
+    h1: 21
+    h2: 22
+    h3: 23
+    h4: 24
+    i1: <b 0xabcd><r 16>
+    random_trailers: true
+  mtu: 1324
+  peers:
+  - public_key: <public key of node-c>
+    name: node-c
+metrics:
+  listen: 198.51.100.5:9586

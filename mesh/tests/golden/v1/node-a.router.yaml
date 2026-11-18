@@ -1,0 +1,35 @@
+node:
+  loopback_addresses:
+  - 198.51.100.1/32
+  - 3fff:0:0:1::1/128
+bgp_as: 64500
+bgp_peers:
+- name: node-b
+  address: 3fff:0:0:1::2
+- name: node-c
+  address: 3fff:0:0:1::3
+- name: node-d
+  address: 3fff:0:0:1::4
+- name: node-e
+  address: 3fff:0:0:1::5
+- name: node-f
+  address: 3fff:0:0:1::6
+- name: router1
+  address: 3fff:0:0:1::7
+bfd:
+  min_rx_ms: 300
+  min_tx_ms: 300
+  multiplier: 3
+ospf_interfaces:
+- mesh-*
+- router-lo
+direct_interfaces:
+- lan0
+- mesh-*
+learn:
+- 203.0.113.0/26
+announce:
+- net: 203.0.113.64/26
+  label: k8s-services
+metrics:
+  listen: 198.51.100.1:9324

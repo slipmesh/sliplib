@@ -352,6 +352,15 @@ cargo mutants
 [`cargo-mutants`](https://mutants.rs) changes the code one place at a time and expects a test to
 fail each time; [`.cargo/mutants.toml`](.cargo/mutants.toml) lists what it skips and why.
 
+[`mesh/tests/golden.rs`](mesh/tests/golden.rs) pins what a file of format version 1 gives its
+nodes: the configs of every node of [`mesh/tests/golden/v1/slipmesh.yaml`](mesh/tests/golden/v1/slipmesh.yaml)
+are compared byte for byte with the files beside it. A change meant to move them records the new
+ones, and the difference is reviewed with the rest of the pull request:
+
+```bash
+UPDATE_EXPECT=1 cargo test -p sliplib-mesh --test golden
+```
+
 ## Releasing
 
 Releases come from `main` only. Run the Release PR workflow, with the version or empty to compute it

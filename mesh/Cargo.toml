@@ -21,4 +21,5 @@ sliplib-net.workspace = true
 sliplib-secrets.workspace = true
 
 [dev-dependencies]
+expect-test.workspace = true
 sliplib-yaml.workspace = true
