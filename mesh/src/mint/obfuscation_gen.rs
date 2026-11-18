@@ -79,17 +79,31 @@ pub fn generate(held: &Obfuscation) -> Option<Fresh> {
     let data_junk = held.s4.unwrap_or(0);
     let mut offset = || loop {
         let offset: u16 = rng.random_range(15..=150);
-        if Obfuscation::into_clear_header(offset, data_junk).is_none() {
+        if Obfuscation::bytes_into_clear_header(offset, data_junk).is_none() {
             break offset;
         }
     };
-    let s1 = offset();
-    // S2 = S1 + 56 would give the handshake initiation and response the same length.
-    let s2 = loop {
-        let s2 = offset();
-        if s2 != s1 + 56 {
-            break s2;
-        }
+    // S2 = S1 + 56 would give the handshake initiation and response the same length. It is the
+    // two the entry ends up with that must not: one it holds is kept, and the other is drawn
+    // beside it.
+    let same_length = |s1: u16, s2: u16| s1.checked_add(56) == Some(s2);
+    let s1 = match held.s1 {
+        Some(s1) => s1,
+        None => loop {
+            let s1 = offset();
+            if !held.s2.is_some_and(|s2| same_length(s1, s2)) {
+                break s1;
+            }
+        },
+    };
+    let s2 = match held.s2 {
+        Some(s2) => s2,
+        None => loop {
+            let s2 = offset();
+            if !same_length(s1, s2) {
+                break s2;
+            }
+        },
     };
     Some(Fresh {
         jc: rng.random_range(4..=12),
@@ -159,6 +173,26 @@ mod tests {
                     "s4 {s4:?}: {drawn:?}"
                 );
             }
+        }
+    }
+
+    // S2 = S1 + 56 gives the handshake initiation and response one length, and only the offsets
+    // the entry ends up with matter: one it holds is kept, whatever is drawn beside it.
+    #[test]
+    fn a_created_offset_keeps_the_two_handshakes_apart_from_the_one_the_entry_holds() {
+        let holding_s1 = Obfuscation {
+            s1: Some(94),
+            ..Obfuscation::default()
+        };
+        let holding_s2 = Obfuscation {
+            s2: Some(150),
+            ..Obfuscation::default()
+        };
+        for _ in 0..3000 {
+            let beside_s1 = super::generate(&holding_s1).unwrap();
+            assert_ne!(beside_s1.s2, 150, "{beside_s1:?}");
+            let beside_s2 = super::generate(&holding_s2).unwrap();
+            assert_ne!(beside_s2.s1, 94, "{beside_s2:?}");
         }
     }
 
