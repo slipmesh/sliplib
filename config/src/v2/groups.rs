@@ -46,15 +46,13 @@ impl<'de> Deserialize<'de> for Group {
 
 /// What `include` reaches less what `exclude` reaches.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
-#[serde(remote = "Self", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct Selection {
     #[serde(default)]
     pub include: Include,
     #[serde(default)]
     pub exclude: Exclude,
 }
-
-from_a_mapping!(Selection);
 
 /// The body of a `groups` document: each group by its name.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
@@ -397,14 +395,6 @@ mod tests {
                 .unwrap_err()
                 .to_string();
         assert!(refused.contains("unknown field `only`"), "{refused}");
-    }
-
-    #[test]
-    fn a_selection_is_a_mapping_and_one_written_as_a_list_is_refused() {
-        let refused = sliplib_yaml::from_str::<Selection>("[[node-a], [node-b]]")
-            .unwrap_err()
-            .to_string();
-        assert!(refused.contains("a mapping"), "{refused}");
     }
 
     fn selection(yaml: &str) -> Selection {
