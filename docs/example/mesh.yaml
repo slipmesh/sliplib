@@ -38,7 +38,7 @@ mesh:
   # What every link of type amneziawg starts from.
   amneziawg:
     obfuscation:
-      s3: 24
+      s3: 40
       s4: 16
       i1: "<b 0xabcd><r 16>"
       i2: "<r 32>"

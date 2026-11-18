@@ -39,7 +39,9 @@ In general:
   `addressing.tunnel.link_local`, written with or without an IPv4 network beside it. Version 1 took
   it from `tunnel_networks.ipv6`, which came only together with `ipv4`, and did not check that it
   lay inside `fe80::/10`.
-- Two links between one pair of nodes are refused.
+- Two links between one pair of nodes are refused, and so is a link's `port` of 0.
+- A node's private key is created only for a node on a link. Version 1 required one of every
+  node.
 - With `addressing.tunnel.ipv4`, the pattern of the links' interfaces no longer has to stand in
   `direct_interfaces`: it is added at the end of the list. Version 1 refused a file without it.
 - Every link has a `type`, and the keys of that type stand in a block named after it. A link that
@@ -54,7 +56,8 @@ In general:
 - The numbers of route classes are checked against each other and against `200`. Version 1 checked
   one number, against `0` to `4`.
 - Without the class `egress` a `talos` node gets no annotation `slipmesh.net/route_proto_id.egress`.
-  Version 1 always set it, to 152 when the file had no value.
+  Version 1 always set it: its generator refused a file without the number and named
+  `slipmesh mint`, which wrote 152.
 - `slipmesh mint` writes one reference value, that of `mesh.interface_prefix`. The second one
   version 1 wrote, 152 for `cluster.route_proto_id.egress`, has no successor: the number of a route
   class is written by hand.
@@ -108,13 +111,16 @@ mesh through a node, under the key `bypass` of the `network` document with
 Kubernetes cluster, read by the operators that serve them: a list becomes an egress list, and a pool
 a roadwarriors pool with its clients.
 
+The `slipmesh rw` commands work on a version 1 file alone.
+
 **Planned:** the operators, and the command each of them has to write its resources out of a
 version 1 file, once.
 
 ### Converting a file by hand
 
 No command converts a file. It is edited by hand, and the tools then show that nothing changed that
-was not meant to.
+was not meant to. Steps 1 and 6 run the first release that reads version 2, which reads a version 1
+file as before, so that what step 6 shows comes from the conversion and not from the tools.
 
 1. Before editing, leave nothing pending: `slipmesh-taloscfg generate --diff` prints no change to a
    patch file, and `slipmesh-routeros --node <name> --check --diff` plans none on its device.
@@ -122,7 +128,8 @@ was not meant to.
 2. Move what the file's comments say to where it will be kept: the first write by `slipmesh` drops
    them.
 3. Have the pools and the lists written out as resources of the cluster, as
-   [What leaves the file](#what-leaves-the-file) says. **Planned.**
+   [What leaves the file](#what-leaves-the-file) says. **Planned:** until the operators exist, a
+   file with pools or `bypass` cannot be converted. A file with neither skips this step.
 4. Edit the file:
    1. In the `slipmesh:` block of the `network` document, write `version: 2` and `revision: 1`.
    2. Write `addressing`: `loopback` is `cluster.loopback_networks`. Where the file has
@@ -132,7 +139,7 @@ was not meant to.
       name; `learn` holds `pod_subnet` and `announce` holds `service_subnet`, each in a list. The
       label `k8s-services` has no place in version 2. `bfd` moves here without `enable`: where
       `enable` was `false` or absent, delete the block. `classes.egress.protocol` is
-      `cluster.route_proto_id.egress`.
+      `cluster.route_proto_id.egress`, which a file that passes step 1 always has.
    4. Write `mesh`: `interface_prefix` is `cluster.interface_prefix.mesh`, `mtu` is
       `cluster.mesh_mtu`, and `amneziawg.obfuscation` is the network's `obfuscation`. To keep the
       keepalive of the links of type `amneziawg` where it was, write
@@ -146,10 +153,13 @@ was not meant to.
    7. Give every node one `underlay` entry, named as you like. Its `mtu` is the node's
       `uplink_mtu`, left out where that was. Its `endpoint` holds the node's `endpoint` without any
       port, under the key of its family: the family of the address, or for a host name the family it
-      resolves to first. Version 1 counted a host name without `address_family` for IPv6; where it
-      resolves to IPv4, the MTU of the mesh may now come out up to 20 higher, so write a `mesh.mtu`
-      of the value it had: the MTU of a working mesh does not move in a conversion. A node without
-      `endpoint` gets an entry without one.
+      resolves to first. Without `address_family`, version 1 counted for IPv6 every endpoint that is
+      not a bare address, a host name or an address with a port; where it is IPv4, the MTU of the
+      mesh may now come out up to 20 higher, so write a `mesh.mtu` of the value it had: the MTU of a
+      working mesh does not move in a conversion. Version 1 dialed a port written in the endpoint;
+      a peer now dials the link's `port`. Where the two differed, as behind a port forward, forward
+      the link's `port` to the node before the conversion. A node without `endpoint` gets an entry
+      without one.
    8. Give every node outside the cluster those two ranges belong to, a `routeros` router for one,
       `learn: []` and `announce: []` under its `routing`.
    9. Turn `mesh.links` into a mapping, giving each link a name. Its `pair` becomes `ends`, each node
@@ -165,9 +175,9 @@ was not meant to.
        without anything having been compared.
    12. What else such a `patch` held: its other `configFiles` stay in a `patch` of the same
        document, which sets `configFiles` only, and none at a path the generator writes, the
-       template's among them. Any other key of the `router` document version 1 already passed over;
-       of the `nftables` document the generator now writes the rest itself, and the key has no place
-       in the files.
+       template's among them. Version 1 already refused any other key in a `patch` of the `router`
+       document; of the `nftables` document the generator now writes the rest itself, and the key has no place in
+       the files.
    13. Give every remaining `patch` its `platform`, drop the `exclude` that kept it from the nodes of
        other platforms, take a node of another platform out of its `include`, and delete the
        `mikrotik` document.
@@ -185,7 +195,10 @@ was not meant to.
    - in the patch file of every `talos` node, the `awg` config holds no pool interfaces,
      `router.yaml` holds no `bypass`, and its `announce` holds no label, so the node's routing
      configuration loses the comment the label made;
-   - a node given `announce: []` in step 4.8 no longer announces the service range;
+   - a node given `learn: []` in step 4.8 no longer announces what it held inside the pod range,
+     and one given `announce: []` no longer announces the service range;
+   - where a node's endpoint had a port, its annotation `slipmesh.net/endpoint` no longer carries
+     it;
    - unless step 4.4 wrote `persistent_keepalive: 25`, the keepalive of every link of type
      `amneziawg` is `20-30` where it was 25;
    - where a node was renamed in step 4.6, the interfaces named after it, and what refers to them.

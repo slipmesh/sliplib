@@ -3,13 +3,14 @@
 `slipmesh.yaml` describes one slipmesh network: its nodes, the links between them and the routing
 over those links. It is the single source: every tool that configures a node reads it itself, and
 none reads what another tool produced. What runs over the mesh - access for clients from outside,
-its rules, which traffic leaves through which node - is described where it runs;
-[What leaves the file](slipmesh-yaml-v1-to-v2.md#what-leaves-the-file) says where the two such parts of version 1 go.
+its rules, which traffic leaves through which node - is described where it runs; [What leaves the
+file](slipmesh-yaml-v1-to-v2.md#what-leaves-the-file) says where the two such parts of version 1 go.
 
 This is the specification of the format. A part no tool serves yet is marked **Planned** where it
 will stand, as [Planned](#planned) explains. No released tool reads version 2 yet: the releases so
-far read version 1, which [Differences from version 1](slipmesh-yaml-v1-to-v2.md#differences-from-version-1) starts from.
-What this document says a tool does, the first release that reads version 2 does.
+far read version 1, which [Differences from version
+1](slipmesh-yaml-v1-to-v2.md#differences-from-version-1) starts from. What this document says a tool
+does, the first release that reads version 2 does.
 
 ## The files
 
@@ -99,11 +100,19 @@ other.
 It is used in three places:
 
 - **Between documents:** the `network` documents in order over an empty tree, and the `groups`
-  documents likewise, so a `null` in any of them, the first included, means the key is absent.
+  documents likewise, so a `null` in any of them, the first included, means the key is absent,
+  but for the two cases below.
 - **For a node:** `nodes.<name>.routing` over [`routing`](#routing), by
-  [the same path](#a-nodes-routing).
+  [the same path](#a-nodes-routing). A `null` at one of its keys takes the network's value away
+  for that node, whichever document it is written in.
 - **For a link:** `mesh.links.<name>.<type>` over `mesh.<type>`, the defaults of the type: today
-  the [keepalive](#keepalive) of both types and the [obfuscation](#obfuscation) of `amneziawg`.
+  the [keepalive](#keepalive) of both types and the [obfuscation](#obfuscation) of `amneziawg`. A
+  `null` at one of its keys takes the network's value away for that link, whichever document it
+  is written in: it is how a link drops one field of `mesh.amneziawg.obfuscation`.
+
+A mapping keeps the order of its keys: a key stands where it first appears as the documents are
+laid over each other. The order reaches the node as written: a node's iBGP peers follow the order
+of `nodes`, and its interfaces that of `mesh.links`.
 
 A key with nothing after it is `null` in YAML: `node-a:` alone under a link's `ends` removes that
 end, so an end with no keys is written `node-a: {}`.
@@ -121,7 +130,8 @@ slipmesh:
 
 `version` is the syntax of the format as a whole, 2 in this document. It changes only when the
 syntax is replaced, which means converting every file. A `network` document without `version` is
-version 1, which [Converting a file by hand](slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand) turns into version 2.
+version 1, which [Converting a file by hand](slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand)
+turns into version 2.
 
 `revision` is the generation of the rules that turn the files into configs. It grows when the same
 data has to give a different result, for instance when what a document configures on a node passes
@@ -146,7 +156,8 @@ Nodes, groups, links, a node's underlay entries and route classes are named by t
 mappings that hold them, under one rule: ASCII letters, digits, `-`, `_` and `.`, with a letter or
 a digit first and last. Names become parts of interface names, of names in a node's routing
 configuration and of annotation keys, which take no more. A class name is at most 48 characters,
-since it ends the key of a node annotation, which takes 63.
+since it ends the key of a node annotation, which takes 63, and a node's name is bounded by the
+[interface names](#nodes) it becomes part of. No other name has a limit.
 
 Nodes and groups share one namespace, so a group named like a node is an error. `all` and `none`
 are reserved: no node or group takes either. Every other kind of name is unique within its own
@@ -183,8 +194,10 @@ particular, and there the keys are an error.
 
 A document written in the terms of one platform names it with `platform`, one value: a
 [platform of the nodes](#who-serves-a-document). It reaches that platform's nodes alone. With an
-`include` other than `all`, every node it is left reaching once `exclude` is taken out has to be of
-that platform: a node of another is an error, not something passed over.
+`include` other than `all`, written as the word or as a list of it alone, every node it is left
+reaching once `exclude` is taken out has to be of that platform: a node of another is an error, not
+something passed over. Inside a group, `all` is every node of every platform, so a document of one
+platform aimed at such a group reaches the nodes of the others too, and is refused for them.
 
 ### Strict parsing
 
@@ -242,11 +255,14 @@ any tool: a node's platform, the number of a route class. Left out, it is an err
 key. A key whose absence means a feature is off may be left out: no metrics port, no listener; no
 `routing.bfd`, no BFD.
 
-These keys alone default to a value, each with one consumer chain and nothing to agree with:
+These keys default to a value, each with one consumer chain and nothing to agree with:
 
 | key | default | |
 | --- | --- | --- |
+| `order` of a `slipmesh:` block | `1000` | the place of every document that does not set one |
+| `addressing.tunnel.link_local` | `fe80::/64` | the link-local prefix of every interface |
 | `nodes.<name>.underlay.<entry>.mtu` | `1500` | the MTU of Ethernet |
+| `mesh.<type>.persistent_keepalive` and a link's own | `25` on `wireguard`, `20-30` on `amneziawg` | [Keepalive](#keepalive) |
 | `routing.bfd.min_rx_ms`, `min_tx_ms`, `multiplier` | `300`, `300`, `5` | a link is a tunnel, some of them long: detection in about 1.5 s, where a tighter timer would flap |
 
 For an absent required key `slipmesh mint` may write a *reference value*: the value a network takes
@@ -270,10 +286,11 @@ serves, on its own nodes, the documents that reach them.
 
 A setting that the tools of more than one platform need stands in the network: `announce` is one,
 since every platform builds a node's announcements from it. A key only one platform understands
-stands in that platform's documents. A document may reach nodes of several platforms, and each tool
-takes the nodes that are its own. The tools do not know of each other: what a platform's tool does
-not implement reaches no device of that platform, and nothing reports it, unless the description
-of the key says otherwise. [Who serves what](#who-serves-what) says what each tool serves.
+stands in that platform's documents. A document without `platform`, such as the network or the
+groups, reaches nodes of every platform, and each tool takes the nodes that are its own. The tools
+do not know of each other: what a platform's tool does not implement reaches no device of that
+platform, and nothing reports it, unless the description of the key says otherwise. [Who serves
+what](#who-serves-what) says what each tool serves.
 
 A new platform is a new value of `platform` and a tool that serves it. The loader learns the value,
 so it arrives with a release of every tool, and refuses a link of a type the platform does not
@@ -349,7 +366,7 @@ The routing over the mesh. A node holds its own value for some of these keys und
 | `direct_interfaces` | list of strings | no | empty | The interfaces whose connected IPv4 networks a node announces. |
 | `learn` | list of strings | no | empty | IPv4 prefixes: a node announces the routes its kernel holds inside them. |
 | `announce` | list of strings | no | empty | IPv4 prefixes a node announces as its own. |
-| `classes` | mapping | no | none | [Classes of routes](#routingclasses) that the mesh carries and something other than the router installs. |
+| `classes` | mapping | no | none | [Classes of routes](#routingclasses): named protocol numbers of routes that something other than the router installs. |
 
 Besides its own loopback, a node comes to announce an IPv4 prefix in three ways:
 
@@ -400,9 +417,9 @@ of a link are always configured alike.
 
 #### `routing.classes`
 
-A class is a set of routes that something other than the router installs in a node's kernel and
-the mesh carries to the other nodes, such as the routes that lead out through a node. A node's
-router tells them from its other kernel routes by their protocol number, `proto` in `ip route`.
+A class is a named protocol number, `proto` in `ip route`, for a set of routes that something
+other than the router installs in a node's kernel, such as the routes that lead out through a node.
+The router does not read it today.
 
 ```yaml
 routing:
@@ -421,10 +438,11 @@ class there is no such annotation. Refused, over all classes together: two class
 number; `0` to `4`, the kernel's own; `200`, which the routes to the clients of roadwarriors pools
 carry.
 
-**Planned:** a class's own `table`, the kernel routing table its routes go into on the receiving
-nodes; its `families`; and `rules`, a mapping of named routing rules, each with a priority, a mark,
-which is a string of `0x` and hexadecimal digits, and where it sends. A class without a table puts
-its routes in `main`.
+**Planned:** the router carrying a class's routes over the mesh to the other nodes, telling them
+from its other kernel routes by the number; a class's own `table`, the kernel routing table its
+routes go into on the receiving nodes; its `families`; and `rules`, a mapping of named routing
+rules, each with a priority, a mark, which is a string of `0x` and hexadecimal digits, and where it
+sends. A class without a table puts its routes in `main`.
 
 ### `nodes`
 
@@ -490,8 +508,8 @@ at its [end](#meshlinks); and both families in one `endpoint`.
 `nodes.<name>.routing` holds the node's own values of [`routing`](#routing) by the same path,
 [laid over](#laying-one-value-over-another) the network's. Today it takes `direct_interfaces`,
 `learn` and `announce`. Each is a list, so the node's list replaces the network's rather than
-extending it: the node gets exactly what it wrote, nothing with `[]`, and nothing with `null`, which
-removes the key.
+extending it: the node gets exactly what it wrote, nothing with `[]`, and nothing with `null`, in
+whichever document it stands.
 
 ### `mesh`
 
@@ -506,9 +524,9 @@ themselves.
 | `amneziawg` | mapping | no | none | The defaults of links of type `amneziawg`: [`persistent_keepalive`](#keepalive), and `obfuscation`, [the obfuscation](#obfuscation) every such link starts from. |
 | `links` | mapping | no | none | [The links](#meshlinks), by name. |
 
-`interface_prefix` is not empty and takes ASCII letters, digits, `-`, `_` and `.`. With `*` after it,
-it is the pattern by which routing and `direct_interfaces` find the links' interfaces. On `talos`
-the node is told it as the annotation `slipmesh.net/interface_prefix.mesh`.
+`interface_prefix` is not empty and takes ASCII letters, digits, `-`, `_` and `.`. With `*` after
+it, it is the pattern by which routing and `direct_interfaces` find the links' interfaces. On
+`talos` the node is told it as the annotation `slipmesh.net/interface_prefix.mesh`.
 
 #### `mesh.links`
 
@@ -546,7 +564,7 @@ the interface prefix and the name of the other end. Both take each end's key fro
 
 | type | its block | what it is |
 | --- | --- | --- |
-| `wireguard` | `port`, an integer, required: the UDP port both ends listen on. `persistent_keepalive`, optional: the link's [keepalive](#keepalive), over `mesh.wireguard.persistent_keepalive`. | Plain WireGuard. |
+| `wireguard` | `port`, an integer from 1 to 65535, required: the UDP port both ends listen on. `persistent_keepalive`, optional: the link's [keepalive](#keepalive), over `mesh.wireguard.persistent_keepalive`. | Plain WireGuard. |
 | `amneziawg` | `port` and `persistent_keepalive`, as for `wireguard`, the keepalive over `mesh.amneziawg.persistent_keepalive`; `obfuscation`, a mapping, optional: the [obfuscation](#obfuscation) fields of this link, laid over `mesh.amneziawg.obfuscation`. | WireGuard whose packets AmneziaWG keeps from looking like WireGuard. |
 
 What stands outside the blocks holds for every type: the `ends` of a link; the `underlay` of a node,
@@ -643,7 +661,7 @@ optional, and one left out leaves that part of the tunnel as WireGuard has it.
 | `s1`, `s2`, `s3`, `s4` | integer, 0 to 65535 | Bytes of junk added to a packet of each type: handshake initiation, handshake response, cookie reply, data. `s4` is on every data packet and lowers [the MTU of the mesh](#the-mtu-of-the-mesh). |
 | `h1`, `h2`, `h3`, `h4` | number or range, up to 4294967295 | The value that stands in place of the WireGuard message type of the same four packet types. No two of the four may share a value, one left out counting as its WireGuard type, 1 to 4. |
 | `i1` to `i5` | string | Decoys: packets sent ahead of a handshake, each described in tags under this table. |
-| `header_protection_key` | string | A secret: base64 of 32 bytes that encrypts the type and reserved fields of the packet header, for every peer of the interface. Each of `s1` to `s4` has to be at least 12, the room its nonce takes. |
+| `header_protection_key` | string | A secret: base64 of 32 bytes that encrypts every handshake and cookie message whole, and the 16-byte header of a data packet - its type, key index and counter - for every peer of the interface. Each of `s1` to `s4` has to be at least 12, the room its nonce takes. |
 | `content_padding_addition` | number or range, up to 65535 | Bytes added to a data packet in place of the padding it would otherwise get: WireGuard's own, or the random trailer when `random_trailers` is on. `0` or the key left out leaves the packet that padding. |
 | `rekey_after_time`, `rekey_timeout`, `reject_after_time`, `keepalive_timeout`, `max_handshake_attempts` | number or range, up to 65535 | The timing values: four timers and a count that WireGuard fixes, each described under this table. `0` or the key left out leaves one to the module's constant. |
 | `random_trailers` | boolean | A trailer of random length on outgoing packets. Both ends of a tunnel set it, or neither. |
@@ -737,16 +755,22 @@ decides is the `random_trailers` of the receiving end, whatever the packet carri
 `content_padding_addition` does not change it. A handshake response can be taken for another
 message the same way, which delays the link by one `rekey_timeout`.
 
-The share of data packets dropped is at most the number of values in `h1`, `h2` and `h3` together,
-divided by 2³², 4294967296; `h4` does not count. It is less for short packets: a packet shorter than
-the message of an offset, that message with its `s` bytes ahead of it, cannot be taken for it. A
-single value in each of the three costs 3 in 2³²; ranges some 58, 340 and 337 million values wide
-cost about 16%.
+Where the four bytes at each offset are random, the share of data packets dropped is at most the
+number of values in `h1`, `h2` and `h3` together, divided by 2³², 4294967296; `h4` does not count.
+It is less for short packets: a packet shorter than the message of an offset, that message with its
+`s` bytes ahead of it, cannot be taken for it. A single value in each of the three costs 3 in 2³²;
+ranges some 58, 340 and 337 million values wide cost about 16%.
+
+The bytes are random with a `header_protection_key`. Without one, a data packet is `s4` random
+bytes and then its type, key index and counter in the clear, so an `s1`, `s2` or `s3` 1 to 15 above
+`s4` reads those fields, and packets are dropped by their counter, not by chance: with the offset 8
+above `s4`, every packet whose counter is a value of that header.
 
 The tools accept the combination. `slipmesh check` and each generator warn for every link where
 `random_trailers` is on and one of `h1` to `h3` is a range, once `mesh.amneziawg.obfuscation` is
 laid under the link's own, and the warning names the link and the share. With `random_trailers`
-on, keep `h1` to `h3` single values or narrow ranges, or put the range in `h4`.
+on, keep `h1` to `h3` single values or narrow ranges, or put the range in `h4`; and set a
+`header_protection_key`, or keep each of `s1` to `s3` from being 1 to 15 above `s4`.
 
 ### What a node gets
 
@@ -810,10 +834,10 @@ U - 32 - 8 - IP - S4
 where `U` is the smaller underlay `mtu` of its two ends, 32 WireGuard's header and tag, 8 the UDP
 header, `IP` 20 or 40 by the family the link is dialed over, and `S4` the `s4` of an `amneziawg`
 link once the defaults are laid under its own, 0 for a `wireguard` one. Two nodes on Ethernet,
-dialed over IPv6 and with no `s4`, give 1420. The MTU of the mesh is the least of the limits of
-all links, whatever their type. `mesh.mtu` lowers it and cannot raise it. A result below 1280, the
-least IPv6 allows a link, is an error, and so is a `mesh.mtu` with no links, which has no interface
-to give it to.
+dialed over IPv6 and with no `s4`, give 1420. The MTU of the mesh is the least of the limits of all
+links, whatever their type. `mesh.mtu` lowers it, and one above it is refused. A result below 1280,
+the least IPv6 allows a link, is an error, and so is a `mesh.mtu` with no links, which has no
+interface to give it to.
 
 ## `groups`
 
@@ -850,7 +874,8 @@ way to remove. A link's `ends` name nodes, never a group.
 The documents of a platform are written in its terms and name it in their `slipmesh:` block. They
 may stand in the files of the network or in files of their own. Today the one such platform is
 `talos`: `routeros` has no settings, templates or documents of its own and needs no `platform`
-document, and a `template` or a `patch` that names it is refused.
+document. One is taken, and any key in its body is refused; a `template` or a `patch` that names
+`routeros` is refused.
 
 ### `platform`
 
@@ -1008,8 +1033,9 @@ changes, is in its own documentation.
 | `patch` | | Merged, and carried into the node's machine configuration. | Refused. |
 
 On `talos` the generator tells a node these values as annotations under `slipmesh.net/`:
-`interface_prefix.mesh`; `route_proto_id.<name>` for each route class; `endpoint`, the value of the
-node's `endpoint`; and `mesh_mtu`, the MTU of the mesh as computed.
+`interface_prefix.mesh`; `route_proto_id.<name>` for each route class; `endpoint`, the address or
+host name under the node's `endpoint`, none for a node without one; and `mesh_mtu`, the MTU of the
+mesh as computed.
 
 ## Example
 
@@ -1020,13 +1046,13 @@ node's `endpoint`; and `mesh_mtu`, the MTU of the mesh as computed.
 - [`secrets.yaml`](example/secrets.yaml), laid over it: the nodes' keys and what `slipmesh mint`
   wrote into the links' obfuscation, with a header protection key written by hand;
 - [`talos.yaml`](example/talos.yaml), the documents of `talos`: its settings, two templates, two
-  patches, and the two groups the patches are aimed with.
+  patches, and two groups: `workers`, which one patch is aimed with, and `core`, which `workers` is
+  made of.
 
 They lie in one directory and sort in that order, so `secrets.yaml` is laid over `mesh.yaml`; the
 same documents in one file would give the same configs. They hold no Planned part, since a file
-with one is refused. Of the keys there are, they hold all but four of the six padding and timing
-values of [the obfuscation](#obfuscation), which are written as the two they hold are. One link has
-a header, a timer and its [keepalive](#keepalive) written as ranges.
+with one is refused. One link has a header, a timer and its [keepalive](#keepalive) written as
+ranges.
 
 Their networks and addresses are from the ranges reserved for documentation, but for the
 link-local `fe80::` of the links; a `node_id` is an identity, not an address. Their AS number is
@@ -1046,7 +1072,8 @@ repeated.
 A command that writes takes one file with `--edit` and writes what it creates there. It reads the
 file too, among the files of `--in`, so it sees what was already written in it; the file may stand
 in `--in` as well, and is [one file](#several-files), read once, either way. An `--edit` file that
-does not exist yet is created.
+does not exist yet is created, holding one `network` document with the `version` and `revision`
+of the ones read.
 
 ```bash
 slipmesh mint --in mesh.yaml --edit secrets.yaml
