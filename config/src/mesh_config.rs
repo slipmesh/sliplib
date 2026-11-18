@@ -840,6 +840,9 @@ listen-port: 1
             ],
         });
         assert!(validate(&cfg).is_err());
+
+        cfg.roadwarriors[0].clients[1].public_key = "another".to_string();
+        validate(&cfg).unwrap();
     }
 
     #[test]

@@ -326,6 +326,15 @@ interfaces:
     }
 
     #[test]
+    fn accepts_a_name_that_fills_ifnamsiz() {
+        let cfg = AwgConfig {
+            interfaces: vec![iface("fifteen-bytes-1")],
+            ..Default::default()
+        };
+        validate(&cfg).unwrap();
+    }
+
+    #[test]
     fn rejects_a_malformed_address_cidr() {
         let mut a = iface("a");
         a.addresses.push("not-a-cidr".to_string());

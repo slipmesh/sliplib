@@ -403,6 +403,20 @@ bgp_as: 64512
         assert!(err.contains("wildcard"), "unexpected error: {err}");
     }
 
+    #[test]
+    fn validate_rejects_each_bfd_setting_of_zero_alone() {
+        for (setting, refusal) in [
+            ("min_rx_ms", "min_rx_ms"),
+            ("min_tx_ms", "min_tx_ms"),
+            ("multiplier", "multiplier"),
+        ] {
+            let yaml = format!("{}bfd:\n  {setting}: 0\n", minimal_yaml());
+            let cfg: RouterConfig = sliplib_yaml::from_str(&yaml).unwrap();
+            let err = validate(&cfg).unwrap_err().to_string();
+            assert!(err.contains(refusal), "{setting}: {err}");
+        }
+    }
+
     /// A zero interval renders a bird.conf BIRD refuses, and the daemon would only find out
     /// when `birdc configure` fails on the node.
     #[test]
