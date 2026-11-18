@@ -1,0 +1,71 @@
+# The documents of the Talos platform for the example network of mesh.yaml, and the groups they
+# are aimed with.
+
+slipmesh:
+  kind: groups
+core: [node-a, node-b, node-c]
+# node-b and node-c.
+workers:
+  include: [core]
+  exclude: [node-a]
+---
+slipmesh:
+  kind: platform
+  platform: talos
+metrics:
+  mesh:
+    port: 9586
+  router:
+    port: 9324
+---
+# A stub. A real template starts from the reference one `slipmesh-taloscfg template` prints,
+# and its `base` is the one printed with it.
+slipmesh:
+  kind: template
+  platform: talos
+daemon: router
+base: sha256:0000000000000000000000000000000000000000000000000000000000000000
+content: |
+  router id {{ loopback }};
+  protocol device {
+  }
+---
+slipmesh:
+  kind: template
+  platform: talos
+daemon: firewall
+base: sha256:0000000000000000000000000000000000000000000000000000000000000000
+content: |
+  table ip example_nat {
+      chain postrouting {
+          type nat hook postrouting priority srcnat; policy accept;
+          oifname "{{ defaultroute_interface_ipv4 }}" ip saddr 203.0.113.0/26 masquerade
+      }
+  }
+---
+# For every node of the platform.
+slipmesh:
+  kind: patch
+  platform: talos
+apiVersion: v1alpha1
+kind: ExtensionServiceConfig
+name: example
+environment:
+  - EXAMPLE_LEVEL=info
+---
+# The same document for node-b, the workers but node-c: it is merged over the one above.
+slipmesh:
+  kind: patch
+  platform: talos
+  include: [workers]
+  exclude: [node-c]
+apiVersion: v1alpha1
+kind: ExtensionServiceConfig
+name: example
+environment:
+  - EXAMPLE_LEVEL=debug
+configFiles:
+  - mountPath: /usr/local/etc/example/example.yaml
+    # Written as YAML: the node gets its text.
+    content:
+      listen: 198.51.100.2
