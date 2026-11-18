@@ -77,6 +77,11 @@ pub enum NameError {
     Edge(String),
     #[error("the name {name:?} of a route class is longer than {limit} characters")]
     TooLong { name: String, limit: usize },
+    #[error(
+        "the name {0:?} stands twice among the keys of one mapping, written in two ways YAML \
+         reads as one value - give each its own name, or quote both as written"
+    )]
+    Twice(String),
 }
 
 impl Name {
@@ -163,6 +168,12 @@ impl TryFrom<Name> for ClassName {
             });
         }
         Ok(Self(name))
+    }
+}
+
+impl std::borrow::Borrow<str> for ClassName {
+    fn borrow(&self) -> &str {
+        self.0.as_str()
     }
 }
 

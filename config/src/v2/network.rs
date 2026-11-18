@@ -28,7 +28,7 @@ where
 fn names_absent_when_null<'de, D, K, V>(deserializer: D) -> Result<Map<K, V>, D::Error>
 where
     D: Deserializer<'de>,
-    K: Deserialize<'de> + std::hash::Hash + Eq + std::fmt::Debug,
+    K: Deserialize<'de> + std::hash::Hash + Eq + std::borrow::Borrow<str>,
     V: Deserialize<'de>,
 {
     Ok(Option::<UniqueKeys<K, V>>::deserialize(deserializer)?
