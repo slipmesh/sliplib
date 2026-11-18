@@ -1,0 +1,32 @@
+interfaces:
+- name: wg-east
+  listen_port: 51830
+  addresses:
+  - fe80::102/64
+  private_key: EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE=
+  obfuscation:
+    jc: 4
+    jmin: 40
+    jmax: 400
+    s1: 64
+    s2: 48
+    h1: 1101
+    h2: 2202
+    h3: 3303
+    h4: 4404
+  mtu: 1400
+  peers:
+  - public_key: <public key of east>
+    name: east
+    endpoint: '[2001:db8::1]:51830'
+- name: wg-south
+  listen_port: 51831
+  addresses:
+  - fe80::102/64
+  private_key: EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE=
+  obfuscation: {}
+  mtu: 1400
+  peers:
+  - public_key: <public key of south>
+    name: south
+    endpoint: 192.0.2.3:51831

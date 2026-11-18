@@ -6,7 +6,7 @@ interfaces:
   - 198.51.100.135/32
   private_key: YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY=
   obfuscation: {}
-  mtu: 1324
+  mtu: 1320
   peers:
   - public_key: <public key of node-a>
     name: node-a

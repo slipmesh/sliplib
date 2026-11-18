@@ -18,9 +18,13 @@ interfaces:
     h3: 3303
     h4: 4404
     i1: <b 0xabcd><r 16>
+    i3: <t><r 8>
+    i4: <rc 12>
+    i5: <rd 6>
     header_protection_key: ccccccccccccccccccccccccccccccccccccccccccc=
+    keepalive_timeout: 11
     random_trailers: true
-  mtu: 1324
+  mtu: 1320
   peers:
   - public_key: <public key of node-b>
     name: node-b
@@ -47,7 +51,7 @@ interfaces:
     rekey_after_time: 100-140
     keepalive_timeout: 12
     random_trailers: false
-  mtu: 1324
+  mtu: 1320
   peers:
   - public_key: <public key of node-c>
     name: node-c
@@ -69,15 +73,16 @@ interfaces:
     h2: 12
     h3: 13
     h4: 14
-    i1: <b 0xabcd><r 16>
+    i1: <r 8>
     i2: <r 32>
     content_padding_addition: 0-32
     rekey_timeout: 6
     reject_after_time: 170
+    keepalive_timeout: 11
     max_handshake_attempts: 20
     random_trailers: true
     disable_cookies: true
-  mtu: 1324
+  mtu: 1320
   peers:
   - public_key: <public key of node-d>
     name: node-d
@@ -89,7 +94,7 @@ interfaces:
   - 198.51.100.129/32
   private_key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
   obfuscation: {}
-  mtu: 1324
+  mtu: 1320
   peers:
   - public_key: <public key of router1>
     name: router1
@@ -129,6 +134,7 @@ interfaces:
     h3: 43
     h4: 44
     i1: <b 0xabcd><r 16>
+    keepalive_timeout: 11
     random_trailers: true
   handshake_stale_secs: 300
   peers:

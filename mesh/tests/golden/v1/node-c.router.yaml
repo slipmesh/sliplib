@@ -17,8 +17,8 @@ bgp_peers:
 - name: router1
   address: 3fff:0:0:1::7
 bfd:
-  min_rx_ms: 300
-  min_tx_ms: 300
+  min_rx_ms: 250
+  min_tx_ms: 350
   multiplier: 3
 ospf_interfaces:
 - mesh-*
