@@ -57,7 +57,7 @@ pub struct Selection {
 /// The body of a `groups` document: each group by its name.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(transparent)]
-pub struct Groups(pub Map<Name, Group>);
+pub struct Groups(#[serde(deserialize_with = "super::unique_keys")] pub Map<Name, Group>);
 
 /// What is wrong with the groups, or with a list of names read by them.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -460,5 +460,31 @@ mod tests {
                 "{empty}"
             );
         }
+    }
+
+    // Two spellings YAML reads as one value are two entries in the text and would be one key, the
+    // later replacing the earlier.
+    #[test]
+    fn two_keys_that_read_as_one_name_are_refused_naming_it() {
+        for (yaml, name) in [
+            ("{True: [node-a], true: [node-b]}", "\"true\""),
+            ("{1.0: [node-a], 1: [node-b]}", "\"1\""),
+            ("{1e3: [node-a], 1000: [node-b]}", "\"1000\""),
+        ] {
+            let refused = sliplib_yaml::from_str::<Groups>(yaml)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                refused.contains(&format!("the name {name} stands twice")),
+                "{yaml}: {refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_number_written_with_a_leading_zero_is_a_name_of_its_own() {
+        let read = sliplib_yaml::from_str::<Groups>("{07: [node-a], 7: [node-b]}").unwrap();
+        let names: Vec<&str> = read.0.keys().map(Name::as_str).collect();
+        assert_eq!(names, ["07", "7"]);
     }
 }
