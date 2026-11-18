@@ -6,7 +6,9 @@
 //! It refuses nothing: it can hold every file of version 1 that reads. What only one version
 //! refuses is refused where that version is read and lowered.
 
+use crate::render::RenderError;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
+use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_config::v1::mesh_config::{AddressFamily, BypassEntry, RoadwarriorPool, UnknownNode};
 use sliplib_config::v2::Platform;
 use sliplib_config::{Obfuscation, Range};
@@ -123,4 +125,64 @@ pub struct V1Only {
     pub obfuscation: Obfuscation,
     pub bypass: Vec<BypassEntry>,
     pub bypass_refresh_interval_secs: Option<u64>,
+}
+
+/// Why a file that reads gives no network to compute from, as the lowering of its version says
+/// it.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    #[error(transparent)]
+    V1(#[from] RenderError),
+    #[error(transparent)]
+    V2(#[from] crate::v2::Error),
+}
+
+/// `file` as the network its nodes' configs are computed from, whichever version it is of.
+pub fn lower(file: &SlipmeshFile) -> Result<Network, Error> {
+    Ok(match file {
+        SlipmeshFile::V1(file) => crate::v1::lower(file.topology())?,
+        SlipmeshFile::V2(file) => crate::v2::lower(file)?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VERSION_1: &str = "slipmesh: {kind: network}\ncluster:\n  bgp_as: 64500\n  \
+        loopback_networks: {ipv4: 198.51.100.0/25, ipv6: '3fff:0:0:1::/64'}\nnodes:\n  - {name: \
+        node-a, node_id: 0.0.0.1}\n";
+    const VERSION_2: &str = include_str!("../../docs/example/mesh.yaml");
+
+    fn lowered(raw: &str) -> Result<Network, Error> {
+        lower(&SlipmeshFile::parse(raw).unwrap())
+    }
+
+    #[test]
+    fn a_file_of_either_version_is_lowered_by_its_own() {
+        let of_version_1 = lowered(VERSION_1).unwrap();
+        assert_eq!(of_version_1.keys, Keys::V1);
+        assert!(of_version_1.v1.is_some());
+        let of_version_2 = lowered(VERSION_2).unwrap();
+        assert_eq!(of_version_2.keys, Keys::V2);
+        assert!(of_version_2.v1.is_none());
+    }
+
+    #[test]
+    fn a_refusal_reads_as_the_lowering_of_the_version_gives_it() {
+        let of_version_1 =
+            lowered(&VERSION_1.replace("198.51.100.0/25", "198.51.100.0")).unwrap_err();
+        let of_version_1 = format!("{:#}", anyhow::Error::new(of_version_1));
+        assert!(
+            of_version_1.starts_with("cluster.loopback_networks.ipv4: "),
+            "{of_version_1}"
+        );
+        let of_version_2 =
+            lowered(&VERSION_2.replace("  interface_prefix: mesh-\n", "")).unwrap_err();
+        assert_eq!(
+            of_version_2.to_string(),
+            "mesh.interface_prefix is not set - `slipmesh mint` writes it"
+        );
+    }
 }

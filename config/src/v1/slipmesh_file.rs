@@ -6,13 +6,11 @@
 //! of whatever configures a host, aimed at hosts by `include`/`exclude`; what it holds is for that
 //! tool to read. The block is for the file's reader and never reaches a host.
 
+use crate::slipmesh_file::{BlockError, META_KEY, Place};
 use crate::v1::mesh_config::{self, Invalid, MeshConfig, RoadwarriorPool};
 use serde::Deserialize;
 use sliplib_yaml::{MultiDoc, Value};
 use std::fmt;
-
-/// The top-level block of every document: what the document is for and which hosts it reaches.
-pub const META_KEY: &str = "slipmesh";
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -36,39 +34,6 @@ impl Kind {
 }
 
 type Source = Box<dyn std::error::Error + Send + Sync>;
-
-/// Where a document stands in the file: its kind and the line it starts at.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Place {
-    kind: &'static str,
-    line: usize,
-}
-
-impl Place {
-    pub(crate) fn new(kind: &'static str, line: usize) -> Self {
-        Self { kind, line }
-    }
-}
-
-impl fmt::Display for Place {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "the `kind: {}` document at line {}",
-            self.kind, self.line
-        )
-    }
-}
-
-/// What is wrong with a document's `slipmesh:` block.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum BlockError {
-    #[error("no `slipmesh:` block saying what the document is for")]
-    Missing,
-    #[error("its `slipmesh:` block")]
-    Malformed(#[source] Source),
-}
 
 /// Why `slipmesh.yaml` does not read.
 #[derive(Debug, thiserror::Error)]
@@ -164,10 +129,7 @@ impl Document {
     }
 
     fn place(&self) -> Place {
-        Place {
-            kind: self.meta.kind.name(),
-            line: self.line,
-        }
+        Place::new(self.meta.kind.name(), self.line)
     }
 
     fn reaches(&self, host: &str) -> bool {
