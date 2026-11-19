@@ -93,6 +93,12 @@ impl<T: End> Range<T> {
     pub fn is_zero(self) -> bool {
         self.hi.into() == 0
     }
+
+    /// Whether the module could draw 0 from it: a range that starts at 0 and is not 0 alone.
+    /// Where 0 alone means "not set", a draw of 0 means something else.
+    pub fn starts_at_zero(self) -> bool {
+        self.lo.into() == 0 && !self.is_zero()
+    }
 }
 
 impl Range<u16> {
@@ -316,5 +322,15 @@ mod tests {
         assert!(Range::<u16>::from(0).is_zero());
         assert!(!Range::<u16>::new(0, 5).unwrap().is_zero());
         assert!(!Range::<u16>::from(5).is_zero());
+    }
+
+    #[test]
+    fn a_range_starts_at_zero_when_it_holds_zero_and_more() {
+        assert!(Range::<u16>::new(0, 5).unwrap().starts_at_zero());
+        assert!(!Range::<u16>::from(0).starts_at_zero());
+        assert!(!Range::<u16>::new(1, 5).unwrap().starts_at_zero());
+        assert!(Range::<u32>::new(0, 5).unwrap().starts_at_zero());
+        assert!(!Range::<u32>::from(0).starts_at_zero());
+        assert!(!Range::<u32>::new(1, 5).unwrap().starts_at_zero());
     }
 }

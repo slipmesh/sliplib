@@ -10,6 +10,7 @@ description = "slipmesh.yaml, and the configs the slipmesh tools write from it f
 
 [dependencies]
 anyhow.workspace = true
+indexmap.workspace = true
 serde.workspace = true
 sliplib-net.workspace = true
 sliplib-secrets.workspace = true
