@@ -12,7 +12,7 @@ cargo-fuzz = true
 members = ["."]
 
 [dependencies]
-libfuzzer-sys = "0.4"
+libfuzzer-sys = "0.4.13"
 
 [dependencies.sliplib-config]
 path = "../config"
