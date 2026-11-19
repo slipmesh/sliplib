@@ -1,9 +1,9 @@
 //! A test binary of its own: a signal goes to the whole process.
 
-use nix::sys::signal::{Signal, kill};
-use nix::unistd::Pid;
 use std::time::Duration;
 
+use nix::sys::signal::{Signal, kill};
+use nix::unistd::Pid;
 use tokio::time::timeout;
 
 #[tokio::test(flavor = "multi_thread")]

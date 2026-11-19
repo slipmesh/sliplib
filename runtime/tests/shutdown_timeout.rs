@@ -1,8 +1,9 @@
 //! A test binary of its own: a signal goes to the whole process.
 
+use std::time::Duration;
+
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
-use std::time::Duration;
 
 #[tokio::test]
 async fn work_that_outlasts_the_shutdown_timeout_fails_serve() {
