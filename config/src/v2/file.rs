@@ -397,12 +397,12 @@ pub struct PatchDocument {
     body: Document,
 }
 
+// The aim alone: a patch is in its platform's format, whose secrets this one cannot tell apart.
 impl fmt::Debug for PatchDocument {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PatchDocument")
             .field("aim", &self.aim)
-            .field("value", &self.body.value)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -970,22 +970,29 @@ mod tests {
     }
 
     #[test]
-    fn files_print_with_no_private_key() {
+    fn files_print_with_no_private_key_and_no_patch_body() {
         let key = sliplib_secrets::wireguard::PrivateKey::generate();
         let text = network_edited(BLOCK, |tree| {
             tree["nodes"]["node-a"]["wireguard"] =
                 yaml(&format!("{{private_key: {}}}", key.expose()));
         });
+        let token = sliplib_secrets::wireguard::PrivateKey::generate();
         let file = file(&[
             &text,
             "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n",
             &template("platform: talos"),
-            &patch("platform: talos", "one"),
+            &format!(
+                "{}token: {}\n",
+                patch("platform: talos", "one"),
+                token.expose()
+            ),
         ])
         .unwrap();
         let printed = format!("{file:?}");
-        assert!(!printed.contains(key.expose()), "{printed}");
-        for value in ["\"metrics\"", "\"text\"", "\"one\""] {
+        for secret in [key.expose(), token.expose()] {
+            assert!(!printed.contains(secret), "{printed}");
+        }
+        for value in ["\"metrics\"", "\"text\"", "\"patch\""] {
             assert!(printed.contains(value), "{value}: {printed}");
         }
     }
