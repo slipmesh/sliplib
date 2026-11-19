@@ -1,7 +1,7 @@
 //! A test binary of its own: a signal goes to the whole process.
 
-mod common;
-
+use nix::sys::signal::{Signal, kill};
+use nix::unistd::Pid;
 use std::time::Duration;
 
 #[tokio::test]
@@ -9,7 +9,7 @@ async fn work_that_outlasts_the_shutdown_timeout_fails_serve() {
     let served = tokio::time::timeout(
         Duration::from_secs(5),
         sliplib_runtime::serve("test", Duration::from_millis(100), async |_| {
-            common::send_sigterm_to_this_process()?;
+            kill(Pid::this(), Signal::SIGTERM)?;
             std::future::pending().await
         }),
     )
