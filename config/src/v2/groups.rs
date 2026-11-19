@@ -3,7 +3,7 @@
 //! document alike.
 
 use super::Map;
-use super::{ALL, Exclude, Include, NONE, Name};
+use super::{ALL, Exclude, Include, Name};
 use serde::de::value::{MapAccessDeserializer, SeqAccessDeserializer};
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -93,7 +93,7 @@ impl Groups {
     /// given one, a selection here reads the name as the word.
     pub fn resolve(&self, nodes: &[Name]) -> Result<Resolved, GroupsError> {
         for name in self.0.keys() {
-            if [ALL, NONE].contains(&name.as_str()) {
+            if name.is_reserved() {
                 return Err(GroupsError::Reserved(name.clone()));
             }
             if nodes.contains(name) {
