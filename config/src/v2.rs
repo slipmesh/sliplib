@@ -31,10 +31,16 @@ macro_rules! from_a_mapping {
 }
 
 mod block;
+mod check;
 pub mod groups;
 mod name;
+pub mod network;
+pub mod platform;
+#[cfg(test)]
+mod testing;
 
 pub use block::{ALL, Block, Exclude, Include, NONE, Order, Platform, Rank};
+pub use check::Invalid;
 pub use name::{ClassName, Name, NameError};
 
 use serde::de::{self, MapAccess, Visitor};
@@ -83,6 +89,19 @@ where
     }
 
     deserializer.deserialize_map(Entries(PhantomData))
+}
+
+/// A [`Map`] read by [`unique_keys`], for a field that also takes `null` as the map left out.
+pub(crate) struct UniqueKeys<K, V>(pub Map<K, V>);
+
+impl<'de, K, V> Deserialize<'de> for UniqueKeys<K, V>
+where
+    K: Deserialize<'de> + Hash + Eq + Borrow<str>,
+    V: Deserialize<'de>,
+{
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        unique_keys(deserializer).map(Self)
+    }
 }
 
 #[cfg(test)]
