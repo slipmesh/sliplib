@@ -406,16 +406,22 @@ UPDATE_EXPECT=1 cargo test -p sliplib-mesh --test golden
 
 [`fuzz/`](fuzz) holds a target for [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz.html),
 which needs a nightly toolchain: `read_slipmesh` gives a text to the loader of format version 2
-and to everything a tool reads of what it gave, and expects a refusal or a result and never a
-panic. It is run before a pull request that changes how a file is read, from the specification's
-example as its first inputs:
+and to everything a tool reads of what it gave. It expects a refusal, or a result that holds what
+the loader promises - a valid network, documents that reach nodes of their own platform, and each
+node given what reaches it in rank order - and never a panic. It is run before a pull request
+that changes how a file is read. Its first input is the specification's example, the network and
+the Talos documents joined into one text:
 
 ```bash
 mkdir -p fuzz/corpus/read_slipmesh
 ```
 
 ```bash
-cargo +nightly fuzz run read_slipmesh fuzz/corpus/read_slipmesh docs/example -- -max_total_time=180
+for file in docs/example/mesh.yaml docs/example/talos.yaml; do echo ---; cat "$file"; done > fuzz/corpus/read_slipmesh/example.yaml
+```
+
+```bash
+cargo +nightly fuzz run read_slipmesh fuzz/corpus/read_slipmesh -- -max_total_time=180
 ```
 
 ## Releasing
