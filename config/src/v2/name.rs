@@ -93,6 +93,16 @@ impl Name {
     pub(crate) fn all() -> Self {
         Self(super::ALL.to_owned())
     }
+
+    /// Whether the name is one of the words a selection takes, which no node or group is named.
+    pub fn is_reserved(&self) -> bool {
+        [super::ALL, super::NONE].contains(&self.as_str())
+    }
+}
+
+/// Whether `c` may stand in a name: an ASCII letter or digit, `-`, `_` or `.`.
+pub(super) fn is_name_character(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')
 }
 
 impl TryFrom<String> for Name {
@@ -102,10 +112,7 @@ impl TryFrom<String> for Name {
         if name.is_empty() {
             return Err(NameError::Empty);
         }
-        if let Some(character) = name
-            .chars()
-            .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
-        {
+        if let Some(character) = name.chars().find(|&c| !is_name_character(c)) {
             return Err(NameError::Character { name, character });
         }
         let at_an_edge = |c: Option<char>| c.is_some_and(|c| !c.is_ascii_alphanumeric());

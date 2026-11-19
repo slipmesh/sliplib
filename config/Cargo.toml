@@ -12,6 +12,7 @@ description = "slipmesh.yaml, and the configs the slipmesh tools write from it f
 anyhow.workspace = true
 indexmap.workspace = true
 serde.workspace = true
+serde_ignored.workspace = true
 sliplib-net.workspace = true
 sliplib-secrets.workspace = true
 sliplib-yaml.workspace = true
