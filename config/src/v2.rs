@@ -55,9 +55,9 @@ use std::marker::PhantomData;
 /// What is named, by its name, in the order written: the order reaches the nodes' configs.
 pub type Map<K, V> = indexmap::IndexMap<K, V>;
 
-/// Reads a mapping into a [`Map`], refusing a key that stands twice. YAML reads `1.0` and `1`, or
-/// `True` and `true`, as one value: a mapping can hold one name under two spellings, and the
-/// later entry would replace the earlier.
+/// Reads a mapping into a [`Map`], an entry written `null` read as the entry left out, and refusing
+/// a key that stands twice. YAML reads `1.0` and `1`, or `True` and `true`, as one value: a mapping
+/// can hold one name under two spellings, and the later entry would replace the earlier.
 pub(crate) fn unique_keys<'de, D, K, V>(deserializer: D) -> Result<Map<K, V>, D::Error>
 where
     D: Deserializer<'de>,
@@ -78,19 +78,31 @@ where
         }
 
         fn visit_map<A: MapAccess<'de>>(self, mut entries: A) -> Result<Map<K, V>, A::Error> {
-            let mut map = Map::new();
-            while let Some((key, value)) = entries.next_entry::<K, V>()? {
+            let mut map: Map<K, Option<V>> = Map::new();
+            while let Some((key, value)) = entries.next_entry::<K, Option<V>>()? {
                 if map.contains_key(&key) {
                     let name: &str = key.borrow();
                     return Err(de::Error::custom(NameError::Twice(name.to_owned())));
                 }
                 map.insert(key, value);
             }
-            Ok(map)
+            Ok(map
+                .into_iter()
+                .filter_map(|(key, value)| Some((key, value?)))
+                .collect())
         }
     }
 
     deserializer.deserialize_map(Entries(PhantomData))
+}
+
+/// A key written with `null` reads as the key left out.
+pub(crate) fn absent_when_null<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// A [`Map`] read by [`unique_keys`], for a field that also takes `null` as the map left out.

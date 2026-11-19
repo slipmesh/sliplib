@@ -248,7 +248,9 @@ message, each part once.
   its rank among those that reach one node (`templates_for`, `patches_for`). The settings of a
   platform (`talos_settings`, `routeros_settings`) and the keys of a `template`
   (`TemplateDocument::read`) are read when asked for, so a tool reads only its own platform's.
-  The text of a template and the body of a `patch` are their platform's tool's to read.
+  The text of a template and the body of a `patch` are their platform's tool's to read. This
+  release reads one `network` and one `groups` document, and refuses a second, which the format
+  lays over the first, until the tools read several files.
 - `nftables::TEMPLATE_PATH`, where the `nftables` service reads its ruleset template.
 - `awg`: `AwgConfig` with its interfaces and peers, and `validate`. A peer's `persistent_keepalive`
   is a number of seconds or a range of them. `InterfaceEntry::keepalive_of` gives what a peer ends
@@ -407,8 +409,9 @@ UPDATE_EXPECT=1 cargo test -p sliplib-mesh --test golden
 [`fuzz/`](fuzz) holds a target for [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz.html),
 which needs a nightly toolchain: `read_slipmesh` gives a text to the loader of format version 2
 and to everything a tool reads of what it gave. It expects a refusal, or a result that holds what
-the loader promises - a valid network, documents that reach nodes of their own platform, and each
-node given what reaches it in rank order - and never a panic. It is run before a pull request
+the loader promises - each node's and each link's values in force as the format lays them,
+documents that reach nodes of their own platform, and each node given what reaches it, by rank and
+then as read - and never a panic. It is run before a pull request
 that changes how a file is read. Its first input is the specification's example, the network and
 the Talos documents joined into one text:
 
