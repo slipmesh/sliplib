@@ -359,14 +359,7 @@ roadwarriors:
     /// The example of the specification as it is before anything is minted, with `overlay` laid
     /// over it.
     fn unminted(overlay: &str) -> Network {
-        let layers = [include_str!("../../docs/example/mesh.yaml"), overlay];
-        let tree = layers
-            .iter()
-            .fold(sliplib_yaml::Value::Null, |tree, layer| {
-                sliplib_yaml::merge(tree, &sliplib_yaml::from_str(layer).unwrap())
-            });
-        let files =
-            sliplib_config::v2::File::parse(&sliplib_yaml::to_string(&tree).unwrap()).unwrap();
+        let files = crate::test_support::laid(&[crate::test_support::EXAMPLE_MESH, overlay]);
         crate::v2::lower(&files).unwrap()
     }
 

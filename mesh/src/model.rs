@@ -86,9 +86,10 @@ impl Format {
 
     /// Where the files hold the key of `node`, as a message names it.
     pub fn node_key(&self, node: &str) -> String {
+        let key = self.private_key();
         match self {
-            Self::V1(_) => format!("nodes[{node}].mesh_private_key"),
-            Self::V2 => format!("nodes.{node}.wireguard.private_key"),
+            Self::V1(_) => format!("nodes[{node}].{key}"),
+            Self::V2 => format!("nodes.{node}.{key}"),
         }
     }
 

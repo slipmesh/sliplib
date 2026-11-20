@@ -235,21 +235,13 @@ mod tests {
     use crate::model::{Family, Format};
     use crate::render::node_configs;
     use crate::secrets;
+    use crate::test_support::{EXAMPLE_MESH, EXAMPLE_SECRETS};
     use sliplib_config::v2::Platform;
-    use sliplib_yaml::{Value, merge};
 
     /// The example of the specification, its secrets laid over its mesh as the two files are
     /// read, and `overlay` over both.
     fn files(overlay: &str) -> File {
-        let layers = [
-            include_str!("../../docs/example/mesh.yaml"),
-            include_str!("../../docs/example/secrets.yaml"),
-            overlay,
-        ];
-        let tree = layers.iter().fold(Value::Null, |tree, layer| {
-            merge(tree, &sliplib_yaml::from_str::<Value>(layer).unwrap())
-        });
-        File::parse(&sliplib_yaml::to_string(&tree).unwrap()).unwrap()
+        crate::test_support::laid(&[EXAMPLE_MESH, EXAMPLE_SECRETS, overlay])
     }
 
     fn lowered(overlay: &str) -> Network {

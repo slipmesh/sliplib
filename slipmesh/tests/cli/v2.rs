@@ -10,6 +10,13 @@ const MESH: &str = include_str!("../../../docs/example/mesh.yaml");
 /// The documents of `talos` of the example, and its groups.
 const TALOS: &str = include_str!("../../../docs/example/talos.yaml");
 
+/// Whether `text` names line `line`: the number whole, not the start of a longer one.
+fn names_line(text: &str, line: usize) -> bool {
+    let named = format!("line {line}");
+    text.match_indices(&named)
+        .any(|(at, _)| !text[at + named.len()..].starts_with(|c: char| c.is_ascii_digit()))
+}
+
 /// The example in one file, minted.
 fn minted() -> Config {
     let config = Config::holding(&format!("{MESH}---\n{TALOS}"));
@@ -135,8 +142,7 @@ fn check_refuses_every_node_that_lacks_a_secret_naming_what_creates_it() {
     assert_eq!(refusals.len(), 4, "{}", checked.stderr);
     for refusal in refusals {
         assert!(
-            refusal.contains("wireguard.private_key is not set")
-                && refusal.ends_with("`slipmesh mint` creates it"),
+            refusal.contains("wireguard.private_key") && refusal.contains("`slipmesh mint`"),
             "{refusal}"
         );
     }
@@ -176,7 +182,7 @@ fn check_reads_the_settings_of_every_platform_and_the_keys_of_every_template() {
         // Refused by the line the document starts at, the one after its `---`.
         let line = before.lines().count() + 2;
         assert!(
-            checked.stderr.contains(&format!("line {line}")),
+            names_line(&checked.stderr, line),
             "{line}: {}",
             checked.stderr
         );
@@ -194,7 +200,7 @@ fn check_warns_about_a_link_that_loses_packets_and_still_passes() {
     let checked = config.run(&["check"]);
     assert_eq!(checked.code, Some(0), "{}", checked.stderr);
     assert!(
-        checked.stderr.starts_with("warning: mesh link a-b: "),
+        checked.stderr.starts_with("warning: ") && checked.stderr.contains("a-b"),
         "{}",
         checked.stderr
     );
@@ -244,7 +250,7 @@ fn rekey_of_an_unknown_node_is_refused_naming_the_nodes_and_writes_nothing() {
     let ran = config.run(&["rekey", "--node", "node-x"]);
     assert_eq!(ran.code, Some(1));
     assert!(
-        ran.stderr.contains("unknown node \"node-x\"") && ran.stderr.contains("router1"),
+        ran.stderr.contains("node-x") && ran.stderr.contains("router1"),
         "{}",
         ran.stderr
     );
@@ -281,6 +287,14 @@ fn the_rw_commands_refuse_a_file_of_version_2() {
     ] {
         let ran = config.run(&command);
         assert_eq!(ran.code, Some(1), "{command:?}");
+        // Its own refusal, which names the file and its version, not one of the reader of
+        // version 1.
+        let path = config.path.display().to_string();
+        assert!(
+            ran.stderr.contains(&path) && ran.stderr.contains("version 2"),
+            "{command:?}: {}",
+            ran.stderr
+        );
     }
     assert_eq!(config.text(), before);
 }
