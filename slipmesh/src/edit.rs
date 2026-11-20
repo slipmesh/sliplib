@@ -129,8 +129,8 @@ pub fn unset(file: &SlipmeshFile) -> Vec<(&'static str, Value)> {
 }
 
 /// Writes each of `unset`, a key and its value, in the network document of `yaml`, the
-/// `slipmesh.yaml` `file` was read from. Indexing inserts each missing step, and panics on none: every step that
-/// is there is a mapping, or the file would not have parsed.
+/// `slipmesh.yaml` `file` was read from. Indexing inserts each missing step, and panics on none:
+/// every step that is there is a mapping, or the file would not have parsed.
 pub fn write_unset(
     yaml: &mut MultiDoc,
     file: &SlipmeshFile,
@@ -195,8 +195,6 @@ fn client_entry(client: &RoadwarriorClient) -> Value {
     Value::Mapping(entry)
 }
 
-/// Writes the fields of `generated` into the `obfuscation` mapping of `owner`, starting one when
-/// it has none.
 /// Writes the minted fields into `owner`'s `obfuscation`. Where it is written `null`, which takes
 /// away every field laid under it, each of `laid_under` not minted is written `null` too, so that
 /// minting brings back none of them.
@@ -362,7 +360,8 @@ plain: true
             "{}  7: {{platform: talos, node_id: 0.0.0.7, underlay: {{wan: {{}}}}}}\n",
             include_str!("../../docs/example/mesh.yaml").replace(
                 "  links:\n",
-                "  links:\n    9: {type: amneziawg, ends: {node-a: {}, 7: {}}, amneziawg: {port: 51840}}\n",
+                "  links:\n    9: {type: amneziawg, ends: {node-a: {}, 7: {}}, \
+                 amneziawg: {port: 51840}}\n",
             )
         )
     }
