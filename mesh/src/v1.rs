@@ -243,6 +243,25 @@ mod tests {
     const LINKED: &str = "[{pair: [a, b], port: 51820, plain: true}]";
 
     #[test]
+    fn every_node_of_version_1_needs_a_key_on_a_link_or_not() {
+        let network = lower(&topology("", "", "[]")).unwrap();
+        let resolved = crate::secrets::read(&network);
+        for node in ["a", "b"] {
+            let refusal = crate::render::node_configs(&network, node, &resolved).unwrap_err();
+            assert!(refusal.missing_secret().is_some(), "{node}: {refusal:?}");
+        }
+    }
+
+    #[cfg(feature = "mint")]
+    #[test]
+    fn mint_creates_a_key_for_every_node_of_version_1() {
+        let network = lower(&topology("", "", "[]")).unwrap();
+        let minted = crate::mint::create(&network).unwrap();
+        let keyed: Vec<usize> = minted.node_keys.iter().map(|(node, _)| *node).collect();
+        assert_eq!(keyed, [0, 1]);
+    }
+
+    #[test]
     fn a_metrics_port_of_zero_is_refused_by_its_field() {
         for field in ["awg_metrics_port", "router_metrics_port"] {
             let refusal = lower(&topology(&format!("  {field}: 0\n"), "", LINKED)).unwrap_err();
