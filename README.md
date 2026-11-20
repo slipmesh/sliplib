@@ -247,7 +247,8 @@ chain gives the whole message, each part once.
   roadwarriors pools and bypass entries - and `validate`, the checks across them.
   `missing_defaults` lists the network settings the topology leaves to a default that a node is
   told, each with that default.
-- `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md), which no tool reads yet.
+- `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md), which `sliplib-mesh`
+  computes configs from and no tool reads yet.
   `v2::File` reads the files as a whole (`parse`, `read`) and refuses whatever its specification
   has the loader refuse, as `v2::Error`. It gives the `network` with what is in force for each
   node and each link written where they hold their own: a node's `routing`, a link's block of its
@@ -302,23 +303,24 @@ compute from is refused as a `model::Error`.
   when nothing is set or it is `plain`. `secrets::read_pools` takes those of the pools from a
   topology of version 1 itself, for a client's config.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
-  node checks it. It needs the node's own key always; for each of its links, the peer's key and
-  the link's obfuscation; for each pool on it, the pool's key and obfuscation. It refuses what of
-  these is missing, or an obfuscation not `plain` without one of `jc`, `jmin`, `jmax`, `s1`, `s2`
-  and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes, links and
-  pools the node is not on. Such a refusal gives its `secrets::MissingSecret` through
-  `render::Error::missing_secret`, so a tool can add how its user creates the secret. A peer the
-  node dials is given the keepalive of its link where that differs from what
-  `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes of
-  `talos`, and to every node of a file of version 1, which names no platform.
-- The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks,
-  created, each by the entry it belongs to, or `NoHeaderLeft` when an entry's magic headers leave
-  no room for the ones it lacks. `slipmesh` builds with it; a tool that only reads the file leaves
-  it off, and that function is not in its build.
+  node checks it. It needs the node's own key, but on a node of version 2 that is on no link; for
+  each of its links, the peer's key and the link's obfuscation; for each pool on it, the pool's key
+  and obfuscation. It refuses what of these is missing, or an obfuscation not `plain` without one of
+  `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for
+  the secrets of nodes, links and pools the node is not on. Such a refusal gives its
+  `secrets::MissingSecret` through `render::Error::missing_secret`, so a tool can add how its user
+  creates the secret. A peer the node dials is given the keepalive of its link where that differs
+  from what `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes
+  of `talos`, and to every node of a file of version 1, which names no platform.
+- The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
+  each by the entry it belongs to, and no key for a node of version 2 on no link, or `NoHeaderLeft`
+  when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a
+  tool that only reads the file leaves it off, and that function is not in its build.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
-  crosses every link's underlay unfragmented, or the one the file sets for the mesh when it fits.
-  It reads every link's obfuscation through its `s4`, links the node is not on included; a missing
-  entry counts as no junk.
+  crosses every link's underlay unfragmented, or the one the file sets for the mesh when it fits. It
+  reads every link's obfuscation through its `s4`, links the node is not on included; a missing
+  entry counts as no junk. It refuses an underlay MTU below the least the family a link is dialed
+  over allows, 68 for IPv4 and 1280 for IPv6, and one that leaves no room for what the link adds.
 - `addressing` gives a node's IPv4 loopback from its `node_id`, the link-local of a loopback, and
   an endpoint to dial.
 - `warnings::warnings` lists what the tools accept and tell about: for every link, in order, each
