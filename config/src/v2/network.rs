@@ -5,7 +5,7 @@
 //! force there: the node's and the link's own values laid over the network's.
 
 use super::name::is_name_character;
-use super::{ClassName, Map, Name, Platform, UniqueKeys, unique_keys};
+use super::{ClassName, Map, Name, Platform, UniqueKeys, absent_when_null, unique_keys};
 use crate::router::{BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER};
 use crate::{Obfuscation, Range};
 use serde::{Deserialize, Deserializer, de};
@@ -13,15 +13,6 @@ use sliplib_net::{Ipv4Net, Ipv6Net};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32};
-
-/// A key written with `null` reads as the key left out.
-fn absent_when_null<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de> + Default,
-{
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
-}
 
 /// A mapping whose keys are names, `null` read as the mapping left out, a key that stands twice
 /// refused.

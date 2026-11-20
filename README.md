@@ -240,6 +240,17 @@ message, each part once.
   roadwarriors pools and bypass entries - and `validate`, the checks across them.
   `missing_defaults` lists the network settings the topology leaves to a default that a node is
   told, each with that default.
+- `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md), which no tool reads yet.
+  `v2::File` reads the files as a whole (`parse`, `read`) and refuses whatever its specification
+  has the loader refuse, as `v2::Error`. It gives the `network` with what is in force for each
+  node and each link written where they hold their own: a node's `routing`, a link's block of its
+  type. The `template` and `patch` documents come with their `Aim`: the nodes each reaches, and
+  its rank among those that reach one node (`templates_for`, `patches_for`). The settings of a
+  platform (`talos_settings`, `routeros_settings`) and the keys of a `template`
+  (`TemplateDocument::read`) are read when asked for, so a tool reads only its own platform's.
+  The text of a template and the body of a `patch` are their platform's tool's to read. This
+  release reads one `network` and one `groups` document, and refuses a second, which the format
+  lays over the first, until the tools read several files.
 - `nftables::TEMPLATE_PATH`, where the `nftables` service reads its ruleset template.
 - `awg`: `AwgConfig` with its interfaces and peers, and `validate`. A peer's `persistent_keepalive`
   is a number of seconds or a range of them. `InterfaceEntry::keepalive_of` gives what a peer ends
@@ -393,6 +404,27 @@ reviewed with the rest of the pull request; the test refuses to record in CI:
 
 ```bash
 UPDATE_EXPECT=1 cargo test -p sliplib-mesh --test golden
+```
+
+[`fuzz/`](fuzz) holds a target for [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz.html),
+which needs a nightly toolchain: `read_slipmesh` gives a text to the loader of format version 2
+and to everything a tool reads of what it gave. It expects a refusal, or a result that holds what
+the loader promises - each node's and each link's values in force as the format lays them,
+documents that reach nodes of their own platform, and each node given what reaches it, by rank and
+then as read - and never a panic. It is run before a pull request
+that changes how a file is read. Its first input is the specification's example, the network and
+the Talos documents joined into one text:
+
+```bash
+mkdir -p fuzz/corpus/read_slipmesh
+```
+
+```bash
+for file in docs/example/mesh.yaml docs/example/talos.yaml; do echo ---; cat "$file"; done > fuzz/corpus/read_slipmesh/example.yaml
+```
+
+```bash
+cargo +nightly fuzz run read_slipmesh fuzz/corpus/read_slipmesh -- -max_total_time=180
 ```
 
 ## Releasing
