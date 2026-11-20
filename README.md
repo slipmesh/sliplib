@@ -175,7 +175,9 @@ file given with `--config`:
   `obfuscation` of every link of type `amneziawg`, once `mesh.amneziawg.obfuscation` is laid under
   its own. It names what it wrote as `nodes.node-a.wireguard.private_key` and
   `mesh.links.a-b.amneziawg.obfuscation`.
-- `rekey` replaces a node's `wireguard.private_key`.
+- `rekey` replaces a node's `wireguard.private_key`, writing its `wireguard` block where the node
+  has none. It refuses a node on no link, which nothing dials, and checks, as `mint` does, that the
+  file with the new key still gives a network before it writes it.
 - `fmt` rewrites the file as it does one of version 1.
 - The `rw` commands refuse the file: version 2 holds no pools.
 
@@ -322,9 +324,9 @@ version says it.
   version 1 refuses a network or a `node_id` that does not read, a metrics port of 0, and an
   `address_family` that contradicts the endpoint of a node on a link. That of version 2 refuses
   files without `mesh.interface_prefix`, two nodes that get one address and a link-local no
-  interface takes. The
-  metrics ports of a file of version 2 are the `talos` platform's settings, which the lowering
-  does not read: the Talos generator sets them on the network.
+  interface takes. The metrics ports of a file of version 2 are the `talos` platform's settings,
+  which the lowering does not read: the Talos generator and `slipmesh check` set them on the
+  network.
 - `secrets::read` takes the secrets the network holds: each node's private key, each pool's
   private key, and each link's and pool's obfuscation. It never creates one: a key the file lacks
   is absent from `ResolvedSecrets`, while every link and pool gets an obfuscation entry, empty

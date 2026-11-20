@@ -1,6 +1,6 @@
-//! `mint`: writes whatever secrets the topology lacks into the fields of `slipmesh.yaml` they
-//! belong to, and the defaults of the network settings it leaves out - once every node's config
-//! passes with them. A run with nothing to write leaves the file as it is.
+//! `mint`: writes whatever secrets the network lacks into the fields of `slipmesh.yaml` they
+//! belong to, and the values of the keys it leaves out that `mint` writes (version 1's defaults,
+//! version 2's reference values) - once every node's config passes with them. A run with nothing to write leaves the file as it is.
 
 use crate::file::{read_slipmesh, write_edits};
 use crate::{check, edit};
@@ -13,7 +13,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     // Before anything is minted: a file of version 2 gives no network without its reference
     // value, and one of version 1 gives the same network with its defaults written or not.
     let unset = edit::unset(&file);
-    edit::write_defaults(&mut yaml, &file, &unset)?;
+    edit::write_unset(&mut yaml, &file, &unset)?;
     if !unset.is_empty() {
         file = SlipmeshFile::read(&yaml)
             .context("slipmesh.yaml with what it lacked does not read back - not written")?;

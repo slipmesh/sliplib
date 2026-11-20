@@ -1,6 +1,6 @@
 //! Every edit made to `slipmesh.yaml`: minted secrets and a node's new key written into the
-//! fields they belong to, the defaults of the network settings the file leaves out, and
-//! roadwarrior clients added and removed.
+//! fields they belong to, the values `mint` writes where the file leaves a key out (version 1's
+//! defaults, version 2's reference values), and roadwarrior clients added and removed.
 //!
 //! Written, a minted value is the operator's like any other: the next run mints nothing, and
 //! deleting it mints a new identity for that node, link or pool, and for every peer that refers to
@@ -128,16 +128,16 @@ pub fn unset(file: &SlipmeshFile) -> Vec<(&'static str, Value)> {
     }
 }
 
-/// Writes each of `defaults` at its key in the network document of `yaml`, the `slipmesh.yaml`
-/// `file` was read from. Indexing inserts each missing step, and panics on none: every step that
+/// Writes each of `unset`, a key and its value, in the network document of `yaml`, the
+/// `slipmesh.yaml` `file` was read from. Indexing inserts each missing step, and panics on none: every step that
 /// is there is a mapping, or the file would not have parsed.
-pub fn write_defaults(
+pub fn write_unset(
     yaml: &mut MultiDoc,
     file: &SlipmeshFile,
-    defaults: &[(&str, Value)],
+    unset: &[(&str, Value)],
 ) -> Result<()> {
     let network = document(yaml, network_document(file))?;
-    for (key, value) in defaults {
+    for (key, value) in unset {
         *key.split('.')
             .fold(&mut *network, |value, step| &mut value[step]) = value.clone();
     }
