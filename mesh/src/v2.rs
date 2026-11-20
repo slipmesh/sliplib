@@ -547,6 +547,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_mesh_mtu_of_the_example_is_below_the_least_limit_of_its_links_as_its_comment_says() {
+        let mtu = |overlay: &str| {
+            let network = lowered(overlay);
+            crate::mtu::mesh_mtu(&network, &secrets::read(&network)).unwrap()
+        };
+        assert_eq!(mtu("{}"), Some(1320));
+        assert_eq!(mtu("{mesh: {mtu: null}}"), Some(1344));
+    }
+
     fn mtu_refusal(overlay: &str) -> crate::mtu::MtuError {
         let network = lowered(overlay);
         crate::mtu::mesh_mtu(&network, &secrets::read(&network)).unwrap_err()
