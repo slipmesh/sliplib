@@ -23,7 +23,7 @@ clap = { version = "4.6.8", features = ["derive"] }
 indexmap = { version = "2.14.2", features = ["serde"] }
 ipnet = "2.12.2"
 # The terminal renderer alone: the default features bring an image encoder nothing here uses.
-qrcode = { version = "0.14.1", default-features = false }
+qrcode = { version = "0.15.0", default-features = false }
 rand = "0.10.4"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
