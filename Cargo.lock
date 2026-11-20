@@ -628,6 +628,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_ignored"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798"
+dependencies = [
+ "serde",
+ "serde_core",
+]
+
+[[package]]
 name = "sha2"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -664,6 +674,7 @@ dependencies = [
  "anyhow",
  "indexmap",
  "serde",
+ "serde_ignored",
  "sliplib-net",
  "sliplib-secrets",
  "sliplib-yaml",
@@ -697,6 +708,7 @@ name = "sliplib-runtime"
 version = "0.19.0"
 dependencies = [
  "anyhow",
+ "nix",
  "tokio",
  "tokio-graceful-shutdown",
  "tokio-util",

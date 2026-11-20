@@ -79,10 +79,9 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
     let mut written = secrets::read(network);
     let mut minted = Minted::default();
 
-    let format = network.format();
+    let format = network.format;
     for (index, node) in network.nodes.iter().enumerate() {
-        let keyed = format.keys_every_node() || network.is_on_a_link(&node.name);
-        if !keyed || written.mesh_private_keys.contains_key(&node.name) {
+        if written.mesh_private_keys.contains_key(&node.name) || !network.needs_a_key(&node.name) {
             continue;
         }
         minted.node_keys.push((index, PrivateKey::generate()));

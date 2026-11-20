@@ -7,16 +7,18 @@
 //! never past the MTU, so a full-size packet carries no padding. A fragmented outer packet takes
 //! TCP in the tunnel down to a few Mbit/s, which is what this guards against.
 
-use crate::model::{Link, Network, Node};
+use crate::model::{Family, Link, Network, Node};
 use crate::secrets::{ResolvedSecrets, link_key};
-use sliplib_config::v1::mesh_config::{AddressFamily, UnknownNode};
-use std::net::IpAddr;
+use sliplib_config::v1::mesh_config::UnknownNode;
 
-/// An uplink's MTU when `nodes[].uplink_mtu` does not say.
+/// A node's underlay MTU when the files set none: that of Ethernet.
 pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
 
 /// The least MTU IPv6 allows a link (RFC 8200); the mesh carries OSPFv3 over IPv6 link-locals.
 pub(crate) const MIN_MESH_MTU: u32 = 1280;
+
+/// The least MTU IPv4 allows a link (RFC 791).
+const MIN_IPV4_MTU: u32 = 68;
 
 /// Why the mesh has no MTU: every node's interfaces take the same one, so this stops them all.
 #[derive(Debug, thiserror::Error)]
@@ -57,18 +59,32 @@ pub enum LinkError {
     FamiliesDiffer(String, String),
     #[error("neither {0:?} nor {1:?} has an endpoint, so neither can dial the other")]
     NoEndpoint(String, String),
-    #[error("node {node:?}: address_family {said:?} contradicts its endpoint {endpoint}")]
-    FamilyContradicts {
+    #[error(
+        "node {node:?}: {key} {mtu} is below {minimum}, the least {family} allows a link, and the link is dialed over {family} - set the MTU the path has"
+    )]
+    UnderlayBelowMinimum {
         node: String,
-        said: AddressFamily,
-        endpoint: String,
+        key: String,
+        mtu: u32,
+        family: &'static str,
+        minimum: u32,
+    },
+    #[error(
+        "node {node:?}: {key} {underlay} leaves no room for the {overhead} bytes the link adds to a packet - lower `s4`, or raise the MTU where the path allows it"
+    )]
+    NoRoom {
+        node: String,
+        key: String,
+        underlay: u32,
+        overhead: u32,
     },
 }
 
-/// The MTU of every mesh interface: `cluster.mesh_mtu` when it fits every link, else the least
-/// link limit. None for a mesh without links, which has no mesh interface to give it to.
+/// The MTU of every mesh interface: the one the files set for the mesh when it fits every link,
+/// else the least link limit. None for a mesh without links, which has no mesh interface to give
+/// it to.
 pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32>, MtuError> {
-    let key = mesh.format().mtu();
+    let key = mesh.format.mtu();
     let mut least: Option<(u32, &Link)> = None;
     for link in &mesh.links {
         let limit = link_limit(mesh, link, resolved).map_err(|source| MtuError::Link {
@@ -117,49 +133,51 @@ pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32
 fn link_limit(mesh: &Network, link: &Link, resolved: &ResolvedSecrets) -> Result<u32, LinkError> {
     let [a, b] = &link.ends;
     let (a, b) = (mesh.node(a)?, mesh.node(b)?);
-    let ip_header = match link_family(a, b)? {
-        AddressFamily::Ipv4 => 20,
-        AddressFamily::Ipv6 => 40,
+    let (ip_header, family, minimum) = match link_family(a, b)? {
+        Family::Ipv4 => (20, "IPv4", MIN_IPV4_MTU),
+        Family::Ipv6 => (40, "IPv6", MIN_MESH_MTU),
     };
-    let uplink = a.underlay_mtu.min(b.underlay_mtu);
+    if let Some(node) = [a, b].into_iter().find(|node| node.underlay_mtu < minimum) {
+        return Err(LinkError::UnderlayBelowMinimum {
+            node: node.name.clone(),
+            key: node.underlay_mtu_key.clone(),
+            mtu: node.underlay_mtu,
+            family,
+            minimum,
+        });
+    }
+    let narrower = if b.underlay_mtu < a.underlay_mtu {
+        b
+    } else {
+        a
+    };
+    let uplink = narrower.underlay_mtu;
     let junk = resolved
         .mesh_link_obfuscation
         .get(&link_key(&link.ends))
         .and_then(|o| o.s4)
         .map_or(0, u32::from);
-    Ok(uplink.saturating_sub(32 + 8 + ip_header + junk))
+    let overhead = 32 + 8 + ip_header + junk;
+    match uplink.checked_sub(overhead) {
+        Some(limit) if limit > 0 => Ok(limit),
+        _ => Err(LinkError::NoRoom {
+            node: narrower.name.clone(),
+            key: narrower.underlay_mtu_key.clone(),
+            underlay: uplink,
+            overhead,
+        }),
+    }
 }
 
 /// The family of the endpoint a link is dialed at: either side's, and the same when both have one.
-fn link_family(a: &Node, b: &Node) -> Result<AddressFamily, LinkError> {
-    match (endpoint_family(a)?, endpoint_family(b)?) {
+fn link_family(a: &Node, b: &Node) -> Result<Family, LinkError> {
+    let family = |node: &Node| node.endpoint.as_ref().map(|endpoint| endpoint.family);
+    match (family(a), family(b)) {
         (Some(x), Some(y)) if x != y => {
             Err(LinkError::FamiliesDiffer(a.name.clone(), b.name.clone()))
         }
         (Some(family), _) | (None, Some(family)) => Ok(family),
         (None, None) => Err(LinkError::NoEndpoint(a.name.clone(), b.name.clone())),
-    }
-}
-
-fn endpoint_family(node: &Node) -> Result<Option<AddressFamily>, LinkError> {
-    let Some(endpoint) = &node.endpoint else {
-        return Ok(None);
-    };
-    let Ok(literal) = endpoint.written.parse::<IpAddr>() else {
-        return Ok(Some(endpoint.stated_family.unwrap_or(AddressFamily::Ipv6)));
-    };
-    let family = if literal.is_ipv4() {
-        AddressFamily::Ipv4
-    } else {
-        AddressFamily::Ipv6
-    };
-    match endpoint.stated_family {
-        Some(said) if said != family => Err(LinkError::FamilyContradicts {
-            node: node.name.clone(),
-            said,
-            endpoint: endpoint.written.clone(),
-        }),
-        _ => Ok(Some(family)),
     }
 }
 
@@ -248,9 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn an_address_family_that_contradicts_a_literal_endpoint_is_an_error() {
-        let err = error(&format!("{V4}, address_family: ipv6"), "", PLAIN, "");
-        assert!(err.contains(r#"node "a": address_family"#), "{err}");
+    fn an_address_family_that_agrees_with_a_literal_endpoint_is_taken() {
         assert_eq!(
             mtu(&format!("{V4}, address_family: ipv4"), "", PLAIN, ""),
             1440
@@ -330,6 +346,50 @@ mod tests {
             err.contains("cluster.mesh_mtu is set, but the mesh has no link"),
             "{err}"
         );
+    }
+
+    fn link_refusal(a: &str, b: &str, link: &str) -> LinkError {
+        match computed(&mesh(a, b, link, "")) {
+            Err(MtuError::Link { link, source }) if link == "a-b" => source,
+            other => panic!("refused for its link: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_underlay_below_the_least_its_family_allows_is_refused_naming_its_node() {
+        for (a, b, mtu, family, minimum) in [
+            (V6, ", uplink_mtu: 1279", 1279, "IPv6", 1280),
+            (V4, ", uplink_mtu: 67", 67, "IPv4", 68),
+            (V4, ", uplink_mtu: 0", 0, "IPv4", 68),
+        ] {
+            let refusal = link_refusal(a, b, PLAIN);
+            assert!(
+                matches!(&refusal, LinkError::UnderlayBelowMinimum { node, key, mtu: m, family: f, minimum: least }
+                    if node == "b" && key == "uplink_mtu" && *m == mtu && *f == family && *least == minimum),
+                "{b}: {refusal:?}"
+            );
+        }
+        // At the least IPv4 allows, the link is counted, and its limit is what is refused.
+        let at_the_least = computed(&mesh(V4, ", uplink_mtu: 68", PLAIN, ""));
+        assert!(
+            matches!(
+                at_the_least,
+                Err(MtuError::LimitBelowMinimum { limit: 8, .. })
+            ),
+            "{at_the_least:?}"
+        );
+    }
+
+    #[test]
+    fn an_underlay_that_leaves_no_room_for_what_the_link_adds_is_refused() {
+        for (s4, overhead) in [(1420, 1500), (1500, 1580)] {
+            let refusal = link_refusal(V6, "", &format!(", obfuscation: {{s4: {s4}}}"));
+            assert!(
+                matches!(&refusal, LinkError::NoRoom { node, key, underlay: 1500, overhead: o }
+                    if node == "a" && key == "uplink_mtu" && *o == overhead),
+                "{s4}: {refusal:?}"
+            );
+        }
     }
 
     /// The outer packet as it leaves the node: the inner packet padded to 16 but never past the

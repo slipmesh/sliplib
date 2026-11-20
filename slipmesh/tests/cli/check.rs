@@ -293,8 +293,9 @@ fn a_refusal_for_a_secret_the_file_lacks_names_it_and_the_command_that_creates_i
 
 #[test]
 fn a_refusal_that_no_secret_cures_names_no_command() {
+    // A port of 0 refuses the file, before any node.
     let (checked, _) = check(&network("  awg_metrics_port: 0\n", &[]));
     assert_eq!(checked.code, Some(1));
-    assert_eq!(checked.stderr.lines().count(), 4, "{}", checked.stderr);
+    assert_eq!(checked.stderr.lines().count(), 1, "{}", checked.stderr);
     assert!(!checked.stderr.contains("slipmesh"), "{}", checked.stderr);
 }

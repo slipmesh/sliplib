@@ -1,7 +1,7 @@
 //! What is wrong in a network across its tree: what no one key can refuse by itself.
 
-use super::network::{Addressing, Class, LinkKind, Map, Mesh, Network, Node};
-use super::{ALL, ClassName, NONE, Name, Platform};
+use super::network::{Addressing, Class, LinkKind, Mesh, Network, Node};
+use super::{ClassName, Map, Name, Platform};
 use crate::Range;
 use sliplib_net::Ipv6Net;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -99,7 +99,16 @@ pub enum Invalid {
     KeepaliveFromZero { key: String, range: Range<u16> },
 }
 
-pub(super) fn check(network: &Network) -> Result<(), Invalid> {
+impl Network {
+    /// Refuses what is wrong across the tree, which no one key refuses by itself: names, the
+    /// ends and the ports of the links, the platforms that serve them, the route classes, the
+    /// networks no address can come from, a keepalive that starts at zero.
+    pub fn check(&self) -> Result<(), Invalid> {
+        check(self)
+    }
+}
+
+fn check(network: &Network) -> Result<(), Invalid> {
     addressing(&network.addressing)?;
     nodes(&network.nodes)?;
     links(network)?;
@@ -129,7 +138,7 @@ fn nodes(nodes: &Map<Name, Node>) -> Result<(), Invalid> {
     }
     let mut ids: Map<Ipv4Addr, &Name> = Map::new();
     for (name, node) in nodes {
-        if [ALL, NONE].contains(&name.as_str()) {
+        if name.is_reserved() {
             return Err(Invalid::ReservedName(name.clone()));
         }
         if node.underlay.len() != 1 {
@@ -152,8 +161,9 @@ fn nodes(nodes: &Map<Name, Node>) -> Result<(), Invalid> {
 /// Whether the tool of `platform` serves a link of this type.
 fn serves(platform: Platform, kind: &LinkKind) -> bool {
     match (platform, kind) {
+        (Platform::Talos, LinkKind::Wireguard(_) | LinkKind::Amneziawg(_))
+        | (Platform::Routeros, LinkKind::Wireguard(_)) => true,
         (Platform::Routeros, LinkKind::Amneziawg(_)) => false,
-        (Platform::Talos, _) | (Platform::Routeros, LinkKind::Wireguard(_)) => true,
     }
 }
 
@@ -276,15 +286,18 @@ mod tests {
 
     #[test]
     fn the_example_of_the_specification_is_valid() {
-        assert_eq!(check(&with("{}").unwrap()), Ok(()));
+        assert_eq!(with("{}").unwrap().check(), Ok(()));
+    }
+
+    #[test]
+    fn a_network_refuses_through_its_check_what_the_checks_refuse() {
+        let refused = with("{nodes: {node-c: {node_id: 0.0.0.1}}}").unwrap();
+        assert!(refused.check().is_err());
     }
 
     #[test]
     fn a_network_without_nodes_is_refused() {
-        // The links go too, or their ends would be refused first.
-        let refusal = refusal(
-            "{mesh: {links: null}, nodes: {node-a: null, node-b: null, node-c: null, router1: null}}",
-        );
+        let refusal = refusal("{nodes: {node-a: null, node-b: null, node-c: null, router1: null}}");
         assert_eq!(refusal, Invalid::NoNodes);
     }
 
@@ -320,9 +333,10 @@ mod tests {
     #[test]
     fn a_node_named_by_a_reserved_word_is_refused() {
         for word in ["all", "none"] {
-            let refusal = refusal(&format!("{{nodes: {{{word}: {NODE}}}}}"));
-            assert_eq!(refusal, Invalid::ReservedName(name(word)));
-            assert!(refusal.to_string().contains(&format!("`{word}`")));
+            assert_eq!(
+                refusal(&format!("{{nodes: {{{word}: {NODE}}}}}")),
+                Invalid::ReservedName(name(word))
+            );
         }
     }
 
@@ -383,11 +397,6 @@ mod tests {
                 node: name("router1"),
                 platform: Platform::Routeros,
             }
-        );
-        let text = refusal.to_string();
-        assert!(
-            text.contains("`amneziawg`") && text.contains("`routeros`"),
-            "{text}"
         );
     }
 

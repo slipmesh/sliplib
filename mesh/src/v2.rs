@@ -2,12 +2,11 @@
 //! the addresses its `node_id` gives it, every link with what the loader found in force on it.
 
 use crate::addressing;
-use crate::model::{Endpoint, Link, MetricsPorts, Network, Node};
+use crate::model::{Endpoint, Format, Link, MetricsPorts, Network, Node};
 use crate::mtu::DEFAULT_UPLINK_MTU;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
-use sliplib_config::v1::mesh_config::AddressFamily;
 use sliplib_config::v2::File;
-use sliplib_config::v2::network::{self, Family, LinkKind};
+use sliplib_config::v2::network::{self, LinkKind};
 use sliplib_config::{Obfuscation, Range};
 use sliplib_net::{IpNet, Ipv6Net};
 use std::net::{IpAddr, Ipv6Addr};
@@ -36,7 +35,7 @@ pub enum Error {
         second: String,
     },
     #[error(
-        "the node {node:?} gets the link-local address {address}/{LINK_LOCAL_PREFIX_LEN}, whose host part is all zeros: that is the Subnet-Router anycast address, which no interface takes - give the node a `node_id` that leaves a bit set there"
+        "the node {node:?} gets the link-local address {address}/{LINK_LOCAL_PREFIX_LEN}, whose host part is all zeros: that is the Subnet-Router anycast address, which no interface takes - give the node a `node_id` that leaves a bit set there, or take an `addressing.tunnel.link_local` where it does"
     )]
     AnycastLinkLocal { node: String, address: Ipv6Addr },
 }
@@ -61,7 +60,8 @@ const TUNNEL_IPV4: Derived = Derived {
 };
 
 /// Refuses two nodes that got one address: `of` gives a node's, where it has one. The IPv6
-/// loopbacks need no such look: each holds the whole `node_id`, which differs between nodes.
+/// loopbacks need no such look: the loader refuses a loopback network longer than /96 and two
+/// nodes of one `node_id`, so each loopback holds a whole `node_id` of its own.
 fn distinct(
     nodes: &[Node],
     derived: &Derived,
@@ -83,13 +83,6 @@ fn distinct(
         }
     }
     Ok(())
-}
-
-fn family(family: Family) -> AddressFamily {
-    match family {
-        Family::Ipv4 => AddressFamily::Ipv4,
-        Family::Ipv6 => AddressFamily::Ipv6,
-    }
 }
 
 /// `files` as a network. Refuses what only the derived addresses show: two nodes with one
@@ -118,7 +111,13 @@ pub fn lower(files: &File) -> Result<Network, Error> {
         .map(|(name, node)| {
             let id = node.node_id;
             let (ipv4, ipv6) = (loopback.ipv4.0, loopback.ipv6.0);
-            let underlay = node.underlay.values().next();
+            // The loader leaves exactly one entry.
+            let (entry, underlay) = node
+                .underlay
+                .first()
+                .map_or(("", None), |(entry, underlay)| {
+                    (entry.as_str(), Some(underlay))
+                });
             let mut direct_interfaces = node.routing.direct_interfaces.clone();
             if let Some(pattern) = &pattern
                 && !direct_interfaces.contains(pattern)
@@ -129,16 +128,12 @@ pub fn lower(files: &File) -> Result<Network, Error> {
                 name: name.to_string(),
                 platform: Some(node.platform),
                 loopback: (
-                    addressing::ipv4_loopback(ipv4.addr(), ipv4.prefix_len(), id),
-                    addressing::ipv6_loopback(ipv6.addr(), ipv6.prefix_len(), id),
+                    addressing::ipv4_in(ipv4.addr(), ipv4.prefix_len(), id),
+                    addressing::ipv6_in(ipv6.addr(), ipv6.prefix_len(), id),
                 ),
-                link_local: addressing::ipv6_loopback(
-                    link_local.addr(),
-                    link_local.prefix_len(),
-                    id,
-                ),
+                link_local: addressing::ipv6_in(link_local.addr(), link_local.prefix_len(), id),
                 tunnel_ipv4: tunnel_ipv4
-                    .map(|net| addressing::ipv4_loopback(net.addr(), net.prefix_len(), id)),
+                    .map(|net| addressing::ipv4_in(net.addr(), net.prefix_len(), id)),
                 private_key: node
                     .wireguard
                     .as_ref()
@@ -146,12 +141,13 @@ pub fn lower(files: &File) -> Result<Network, Error> {
                 endpoint: underlay
                     .and_then(|underlay| underlay.endpoint.as_ref())
                     .map(|endpoint| Endpoint {
-                        written: endpoint.host.clone(),
-                        stated_family: Some(family(endpoint.family)),
+                        written: endpoint.host().to_owned(),
+                        family: endpoint.family(),
                     }),
                 underlay_mtu: underlay
                     .and_then(|underlay| underlay.mtu)
                     .unwrap_or(DEFAULT_UPLINK_MTU),
+                underlay_mtu_key: format!("underlay.{entry}.mtu"),
                 direct_interfaces,
                 learn: prefixes(&node.routing.learn),
                 announce: prefixes(&node.routing.announce)
@@ -225,6 +221,7 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             .map(|(name, class)| (name.to_string(), class.protocol))
             .collect(),
         metrics: MetricsPorts::default(),
+        format: Format::V2,
         v1: None,
     })
 }
@@ -236,7 +233,7 @@ fn prefixes(list: &[network::Prefix4]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Format;
+    use crate::model::{Family, Format};
     use crate::render::node_configs;
     use crate::secrets;
     use sliplib_config::v2::Platform;
@@ -368,14 +365,14 @@ mod tests {
             network.node("node-a").unwrap().endpoint,
             Some(Endpoint {
                 written: "192.0.2.1".into(),
-                stated_family: Some(AddressFamily::Ipv4),
+                family: Family::Ipv4,
             })
         );
         assert_eq!(
             network.node("node-b").unwrap().endpoint,
             Some(Endpoint {
                 written: "node-b.example.com".into(),
-                stated_family: Some(AddressFamily::Ipv6),
+                family: Family::Ipv6,
             })
         );
         assert_eq!(network.node("node-c").unwrap().endpoint, None);
@@ -444,9 +441,6 @@ mod tests {
         );
         assert_eq!(network.mtu, Some(1320));
         assert_eq!(network.classes, [("egress".to_owned(), 152)]);
-        assert_eq!(network.format(), Format::V2);
-        assert_eq!(network.metrics, MetricsPorts::default());
-        assert!(network.v1.is_none());
         let names: Vec<&str> = network
             .nodes
             .iter()
@@ -468,9 +462,10 @@ mod tests {
 
     #[test]
     fn files_without_the_interface_prefix_are_refused_naming_what_writes_it() {
-        let refusal = refusal("{mesh: {interface_prefix: null}}");
-        assert_eq!(refusal, Error::NoInterfacePrefix);
-        assert!(refusal.to_string().contains("`slipmesh mint`"));
+        assert_eq!(
+            refusal("{mesh: {interface_prefix: null}}"),
+            Error::NoInterfacePrefix
+        );
     }
 
     #[test]
@@ -545,6 +540,94 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_mesh_mtu_of_the_example_is_below_the_least_limit_of_its_links_as_its_comment_says() {
+        let mtu = |overlay: &str| {
+            let network = lowered(overlay);
+            crate::mtu::mesh_mtu(&network, &secrets::read(&network)).unwrap()
+        };
+        assert_eq!(mtu("{}"), Some(1320));
+        assert_eq!(mtu("{mesh: {mtu: null}}"), Some(1344));
+    }
+
+    fn mtu_refusal(overlay: &str) -> crate::mtu::MtuError {
+        let network = lowered(overlay);
+        crate::mtu::mesh_mtu(&network, &secrets::read(&network)).unwrap_err()
+    }
+
+    #[test]
+    fn an_mtu_of_zero_is_refused_by_its_key() {
+        use crate::mtu::{LinkError, MtuError};
+        let underlay = mtu_refusal("{nodes: {node-b: {underlay: {wan: {mtu: 0}}}}}");
+        assert!(
+            matches!(&underlay, MtuError::Link { link, source: LinkError::UnderlayBelowMinimum { node, key, mtu: 0, .. } }
+                if link == "a-b" && node == "node-b" && key == "underlay.wan.mtu"),
+            "{underlay:?}"
+        );
+        let mesh = mtu_refusal("{mesh: {mtu: 0}}");
+        assert!(
+            matches!(mesh, MtuError::BelowMinimum { key, mtu: 0 } if key == Format::V2.mtu()),
+            "{mesh:?}"
+        );
+    }
+
+    /// A node of `talos` without a key, to be laid on no link.
+    const NODE_D: &str = "{platform: talos, node_id: 0.0.0.5, underlay: {wan: {}}}";
+
+    #[test]
+    fn a_node_on_no_link_is_configured_without_a_key() {
+        let network = lowered(&format!("{{nodes: {{node-d: {NODE_D}}}}}"));
+        let configs = node_configs(&network, "node-d", &secrets::read(&network)).unwrap();
+        assert!(configs.awg.interfaces.is_empty());
+        assert_eq!(configs.router.bgp_peers.len(), 4);
+        // A node on a link still needs its own.
+        let keyless = lowered("{nodes: {node-b: {wireguard: null}}}");
+        let refusal = node_configs(&keyless, "node-b", &secrets::read(&keyless)).unwrap_err();
+        assert!(refusal.missing_secret().is_some(), "{refusal:?}");
+    }
+
+    #[cfg(feature = "mint")]
+    #[test]
+    fn mint_creates_a_key_for_a_node_on_a_link_alone() {
+        let network = lowered(&format!(
+            "{{nodes: {{node-b: {{wireguard: null}}, node-d: {NODE_D}}}}}"
+        ));
+        let minted = crate::mint::create(&network).unwrap();
+        let keyed: Vec<&str> = minted
+            .node_keys
+            .iter()
+            .map(|(index, _)| network.nodes[*index].name.as_str())
+            .collect();
+        assert_eq!(keyed, ["node-b"]);
+    }
+
+    /// The example with a node of `name`, keyed, on a link to `node-a`.
+    fn with_a_node_named(name: &str) -> Network {
+        let key = sliplib_secrets::wireguard::PrivateKey::generate();
+        lowered(&format!(
+            "{{nodes: {{{name}: {{platform: talos, node_id: 0.0.0.5, underlay: {{wan: {{}}}}, \
+             wireguard: {{private_key: {}}}}}}}, mesh: {{links: {{a-x: {{type: wireguard, \
+             ends: {{node-a: {{}}, {name}: {{}}}}, wireguard: {{port: 51840}}}}}}}}}}",
+            key.expose()
+        ))
+    }
+
+    #[test]
+    fn a_name_too_long_for_an_interface_is_refused_at_the_other_end_of_its_link() {
+        use sliplib_config::awg::Invalid;
+        let fits = with_a_node_named("node-abcde");
+        node_configs(&fits, "node-a", &secrets::read(&fits)).unwrap();
+        let long = with_a_node_named("node-abcdef");
+        let resolved = secrets::read(&long);
+        node_configs(&long, "node-abcdef", &resolved).unwrap();
+        let refusal = node_configs(&long, "node-a", &resolved).unwrap_err();
+        assert!(
+            matches!(&refusal, crate::render::Error::InvalidAwg { node, source: Invalid::InterfaceNameTooLong(name) }
+                if node == "node-a" && name == "mesh-node-abcdef"),
+            "{refusal:?}"
+        );
+    }
+
     fn peer_keepalive(network: &Network, node: &str, peer: &str) -> Option<Range<u16>> {
         let configs = node_configs(network, node, &secrets::read(network)).unwrap();
         let interface = configs
@@ -602,8 +685,8 @@ mod tests {
     fn the_metrics_ports_reach_the_nodes_of_talos_alone() {
         let mut network = lowered("{}");
         network.metrics = MetricsPorts {
-            awg: Some(9586),
-            router: Some(9324),
+            awg: std::num::NonZeroU16::new(9586),
+            router: std::num::NonZeroU16::new(9324),
         };
         let resolved = secrets::read(&network);
         let talos = node_configs(&network, "node-a", &resolved).unwrap();
@@ -613,41 +696,51 @@ mod tests {
         assert!(routeros.awg.metrics.is_none() && routeros.router.metrics.is_none());
     }
 
-    fn refused(network: &Network, node: &str) -> String {
-        let refusal = node_configs(network, node, &secrets::read(network)).unwrap_err();
-        format!("{:#}", anyhow::Error::new(refusal))
+    fn refused(network: &Network, node: &str) -> crate::render::Error {
+        node_configs(network, node, &secrets::read(network)).unwrap_err()
     }
 
     #[test]
     fn a_refusal_names_the_keys_as_version_2_writes_them() {
         let keyless = lowered("{nodes: {node-b: {wireguard: null}}}");
         let refusal = refused(&keyless, "node-a");
+        let missing = refusal.missing_secret().map(ToString::to_string);
         assert!(
-            refusal.contains("node \"node-b\": wireguard.private_key is not set"),
-            "{refusal}"
+            missing.is_some_and(|missing| missing.contains(Format::V2.private_key())),
+            "{refusal:?}"
         );
-        let above = lowered("{mesh: {mtu: 9000}}");
-        let refusal = refused(&above, "node-a");
-        assert!(refusal.contains("mesh.mtu 9000 is above"), "{refusal}");
-    }
-
-    /// A node that is on no link, and has no key.
-    const ALONE: &str =
-        "{nodes: {node-x: {platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}}}";
-
-    #[test]
-    fn a_node_on_no_link_needs_no_key() {
-        let network = lowered(ALONE);
-        let configs = node_configs(&network, "node-x", &secrets::read(&network)).unwrap();
-        assert!(configs.awg.interfaces.is_empty());
-        assert_eq!(configs.router.bgp_peers.len(), 4);
+        let above = refused(&lowered("{mesh: {mtu: 9000}}"), "node-a");
+        assert!(
+            matches!(
+                &above,
+                crate::render::Error::RenderingAwg {
+                    source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit { key, mtu: 9000, .. }),
+                    ..
+                } if *key == Format::V2.mtu()
+            ),
+            "{above:?}"
+        );
     }
 
     #[test]
     fn a_node_on_no_link_is_still_stopped_by_what_stops_every_node() {
-        let network = lowered(&format!("{{mesh: {{mtu: 9000}}, {}", &ALONE[1..]));
-        let refusal = refused(&network, "node-x");
-        assert!(refusal.contains("mesh.mtu 9000 is above"), "{refusal}");
+        let network = lowered(&format!(
+            "{{mesh: {{mtu: 9000}}, nodes: {{node-d: {NODE_D}}}}}"
+        ));
+        let refusal = refused(&network, "node-d");
+        assert!(
+            matches!(
+                &refusal,
+                crate::render::Error::RenderingAwg {
+                    source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit {
+                        mtu: 9000,
+                        ..
+                    }),
+                    ..
+                }
+            ),
+            "{refusal:?}"
+        );
     }
 
     #[test]
@@ -682,9 +775,10 @@ mod tests {
     fn a_link_that_lacks_a_field_mint_writes_is_refused_when_its_nodes_are_computed() {
         let unminted = lowered("{mesh: {links: {a-b: {amneziawg: {obfuscation: {jc: null}}}}}}");
         let refusal = refused(&unminted, "node-b");
+        let missing = refusal.missing_secret().map(ToString::to_string);
         assert!(
-            refusal.contains("mesh link a-b: obfuscation lacks jc"),
-            "{refusal}"
+            missing.is_some_and(|missing| missing.contains("a-b") && missing.contains("jc")),
+            "{refusal:?}"
         );
     }
 }

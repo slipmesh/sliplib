@@ -6,16 +6,17 @@
 //! It refuses nothing: it can hold every file of version 1 that reads. What only one version
 //! refuses is refused where that version is read and lowered.
 
-use crate::render::RenderError;
 use crate::secrets::link_key;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::slipmesh_file::SlipmeshFile;
-use sliplib_config::v1::mesh_config::{AddressFamily, BypassEntry, RoadwarriorPool, UnknownNode};
+use sliplib_config::v1::mesh_config::{BypassEntry, RoadwarriorPool, UnknownNode};
 use sliplib_config::v2::Platform;
-use sliplib_config::v2::platform::{Listener, TalosSettings};
+pub use sliplib_config::v2::network::Family;
+use sliplib_config::v2::platform::TalosSettings;
 use sliplib_config::{Obfuscation, Range};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::num::NonZeroU16;
 
 #[derive(Debug)]
 pub struct Network {
@@ -33,12 +34,13 @@ pub struct Network {
     /// The classes of routes by name, each with its protocol number.
     pub classes: Vec<(String, u8)>,
     pub metrics: MetricsPorts,
+    pub format: Format,
     /// What only a file of version 1 holds.
     pub v1: Option<V1Only>,
 }
 
 /// The version of the format a network was read from, where what is computed or said of it
-/// depends on that.
+/// depends on that: how a message names a key, and which nodes have one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     V1,
@@ -62,7 +64,15 @@ impl Format {
         }
     }
 
-    /// Whether every node has a key. A file of version 2 holds one only for a node on a link.
+    /// How the files name the network the links' IPv4 addresses come from.
+    pub fn tunnel_ipv4(self) -> &'static str {
+        match self {
+            Self::V1 => "cluster.tunnel_networks",
+            Self::V2 => "addressing.tunnel.ipv4",
+        }
+    }
+
+    /// Whether every node has a key: version 2 has one created only for a node on a link.
     pub fn keys_every_node(self) -> bool {
         self == Self::V1
     }
@@ -86,13 +96,6 @@ impl Format {
 }
 
 impl Network {
-    pub fn format(&self) -> Format {
-        match self.v1 {
-            Some(_) => Format::V1,
-            None => Format::V2,
-        }
-    }
-
     pub fn node(&self, name: &str) -> Result<&Node, UnknownNode> {
         self.nodes
             .iter()
@@ -100,11 +103,13 @@ impl Network {
             .ok_or_else(|| UnknownNode(name.to_owned()))
     }
 
-    /// Whether `node` is an end of a link.
-    pub fn is_on_a_link(&self, node: &str) -> bool {
-        self.links
-            .iter()
-            .any(|link| link.ends.iter().any(|end| end == node))
+    /// Whether the node needs a private key: it is on a link, or the version says every node does.
+    pub fn needs_a_key(&self, node: &str) -> bool {
+        self.format.keys_every_node()
+            || self
+                .links
+                .iter()
+                .any(|link| link.ends.iter().any(|end| end == node))
     }
 }
 
@@ -112,17 +117,20 @@ impl Network {
 /// listener.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct MetricsPorts {
-    pub awg: Option<u16>,
-    pub router: Option<u16>,
+    pub awg: Option<NonZeroU16>,
+    pub router: Option<NonZeroU16>,
 }
 
 impl From<&TalosSettings> for MetricsPorts {
     fn from(settings: &TalosSettings) -> Self {
-        let port = |listener: &Option<Listener>| listener.as_ref().map(|l| l.port.get());
         let metrics = settings.metrics.as_ref();
         Self {
-            awg: metrics.and_then(|metrics| port(&metrics.mesh)),
-            router: metrics.and_then(|metrics| port(&metrics.router)),
+            awg: metrics
+                .and_then(|metrics| metrics.mesh.as_ref())
+                .map(|listener| listener.port),
+            router: metrics
+                .and_then(|metrics| metrics.router.as_ref())
+                .map(|listener| listener.port),
         }
     }
 }
@@ -141,6 +149,8 @@ pub struct Node {
     /// Where the node's peers dial it. None, it is never dialed.
     pub endpoint: Option<Endpoint>,
     pub underlay_mtu: u32,
+    /// How a message names the key of `underlay_mtu`, under the node.
+    pub underlay_mtu_key: String,
     pub direct_interfaces: Vec<String>,
     pub learn: Vec<String>,
     pub announce: Vec<AnnounceEntry>,
@@ -150,8 +160,8 @@ pub struct Node {
 pub struct Endpoint {
     /// The address or host name as the files write it, which a peer dials with the link's port.
     pub written: String,
-    /// The family the files say it is dialed over, where they say one.
-    pub stated_family: Option<AddressFamily>,
+    /// The family it is dialed over.
+    pub family: Family,
 }
 
 #[derive(Debug)]
@@ -187,7 +197,7 @@ pub struct V1Only {
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
-    V1(#[from] RenderError),
+    V1(#[from] crate::v1::Error),
     #[error(transparent)]
     V2(#[from] crate::v2::Error),
 }
@@ -216,20 +226,21 @@ mod tests {
     #[test]
     fn the_metrics_ports_are_those_of_the_settings_of_talos() {
         let settings = |yaml: &str| -> TalosSettings { sliplib_yaml::from_str(yaml).unwrap() };
+        let port = NonZeroU16::new;
         assert_eq!(
             MetricsPorts::from(&settings(
                 "metrics: {mesh: {port: 9586}, router: {port: 9324}}"
             )),
             MetricsPorts {
-                awg: Some(9586),
-                router: Some(9324)
+                awg: port(9586),
+                router: port(9324)
             }
         );
         assert_eq!(
             MetricsPorts::from(&settings("metrics: {router: {port: 9324}}")),
             MetricsPorts {
                 awg: None,
-                router: Some(9324)
+                router: port(9324)
             }
         );
         assert_eq!(MetricsPorts::from(&settings("{}")), MetricsPorts::default());
@@ -238,27 +249,32 @@ mod tests {
     #[test]
     fn a_file_of_either_version_is_lowered_by_its_own() {
         let of_version_1 = lowered(VERSION_1).unwrap();
-        assert_eq!(of_version_1.format(), Format::V1);
+        assert_eq!(of_version_1.format, Format::V1);
         assert!(of_version_1.v1.is_some());
         let of_version_2 = lowered(VERSION_2).unwrap();
-        assert_eq!(of_version_2.format(), Format::V2);
+        assert_eq!(of_version_2.format, Format::V2);
         assert!(of_version_2.v1.is_none());
     }
 
     #[test]
-    fn a_refusal_reads_as_the_lowering_of_the_version_gives_it() {
+    fn a_refusal_is_the_one_the_lowering_of_the_version_gives() {
         let of_version_1 =
             lowered(&VERSION_1.replace("198.51.100.0/25", "198.51.100.0")).unwrap_err();
-        let of_version_1 = format!("{:#}", anyhow::Error::new(of_version_1));
         assert!(
-            of_version_1.starts_with("cluster.loopback_networks.ipv4: "),
-            "{of_version_1}"
+            matches!(
+                of_version_1,
+                Error::V1(crate::v1::Error::Network {
+                    field: "cluster.loopback_networks.ipv4",
+                    ..
+                })
+            ),
+            "{of_version_1:?}"
         );
         let of_version_2 =
             lowered(&VERSION_2.replace("  interface_prefix: mesh-\n", "")).unwrap_err();
-        assert_eq!(
-            of_version_2.to_string(),
-            "mesh.interface_prefix is not set - `slipmesh mint` writes it"
+        assert!(
+            matches!(of_version_2, Error::V2(crate::v2::Error::NoInterfacePrefix)),
+            "{of_version_2:?}"
         );
     }
 }
