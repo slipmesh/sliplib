@@ -1,7 +1,7 @@
 //! A topology of format version 1 as the network the configs are computed from.
 
 use crate::addressing;
-use crate::model::{Endpoint, Family, Keys, Link, MetricsPorts, Network, Node, V1Only};
+use crate::model::{Endpoint, Family, Format, Link, MetricsPorts, Network, Node, V1Only};
 use crate::mtu::DEFAULT_UPLINK_MTU;
 use crate::secrets::unless_plain;
 use sliplib_config::router::AnnounceEntry;
@@ -215,14 +215,12 @@ pub fn lower(mesh: &MeshConfig) -> Result<Network, Error> {
             awg: metrics_port(cluster.awg_metrics_port, "awg_metrics_port")?,
             router: metrics_port(cluster.router_metrics_port, "router_metrics_port")?,
         },
-        keys: Keys::V1,
-        key_on_a_link_only: false,
-        v1: Some(V1Only {
+        format: Format::V1(Box::new(V1Only {
             pools: mesh.roadwarriors.clone(),
             obfuscation: mesh.obfuscation.clone(),
             bypass: mesh.bypass.clone(),
             bypass_refresh_interval_secs: cluster.bypass_refresh_interval_secs,
-        }),
+        })),
     })
 }
 
@@ -242,6 +240,25 @@ mod tests {
     }
 
     const LINKED: &str = "[{pair: [a, b], port: 51820, plain: true}]";
+
+    #[test]
+    fn every_node_of_version_1_needs_a_key_on_a_link_or_not() {
+        let network = lower(&topology("", "", "[]")).unwrap();
+        let resolved = crate::secrets::read(&network);
+        for node in ["a", "b"] {
+            let refusal = crate::render::node_configs(&network, node, &resolved).unwrap_err();
+            assert!(refusal.missing_secret().is_some(), "{node}: {refusal:?}");
+        }
+    }
+
+    #[cfg(feature = "mint")]
+    #[test]
+    fn mint_creates_a_key_for_every_node_of_version_1() {
+        let network = lower(&topology("", "", "[]")).unwrap();
+        let minted = crate::mint::create(&network).unwrap();
+        let keyed: Vec<usize> = minted.node_keys.iter().map(|(node, _)| *node).collect();
+        assert_eq!(keyed, [0, 1]);
+    }
 
     #[test]
     fn a_metrics_port_of_zero_is_refused_by_its_field() {

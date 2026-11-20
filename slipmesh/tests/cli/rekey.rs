@@ -1,25 +1,15 @@
 use crate::common::{Config, SLIPMESH, mint};
-use sliplib_yaml::{MultiDoc, Value};
-
-fn documents(config: &Config) -> Vec<Value> {
-    MultiDoc::parse(&config.text())
-        .unwrap()
-        .documents()
-        .iter()
-        .map(|document| document.value.clone())
-        .collect()
-}
 
 #[test]
 fn rekey_gives_the_node_a_new_key_and_changes_no_other_value() {
     let config = Config::holding(SLIPMESH);
     mint(&config);
-    let before = documents(&config);
+    let before = config.documents();
 
     let ran = config.run(&["rekey", "--node", "b"]);
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
 
-    let mut after = documents(&config);
+    let mut after = config.documents();
     let key = after[0]["nodes"][1]["mesh_private_key"].clone();
     let old = &before[0]["nodes"][1]["mesh_private_key"];
     assert_ne!(&key, old);
@@ -43,7 +33,7 @@ fn rekey_gives_a_key_to_a_node_that_had_none_and_to_no_other() {
     let config = Config::holding(SLIPMESH);
     let ran = config.run(&["rekey", "--node", "c"]);
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
-    let keyed: Vec<bool> = documents(&config)[0]["nodes"]
+    let keyed: Vec<bool> = config.documents()[0]["nodes"]
         .as_sequence()
         .unwrap()
         .iter()

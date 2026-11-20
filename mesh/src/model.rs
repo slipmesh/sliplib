@@ -6,11 +6,13 @@
 //! It refuses nothing: it can hold every file of version 1 that reads. What only one version
 //! refuses is refused where that version is read and lowered.
 
+use crate::secrets::link_key;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_config::v1::mesh_config::{BypassEntry, RoadwarriorPool, UnknownNode};
 use sliplib_config::v2::Platform;
 pub use sliplib_config::v2::network::Family;
+use sliplib_config::v2::platform::TalosSettings;
 use sliplib_config::{Obfuscation, Range};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -32,36 +34,73 @@ pub struct Network {
     /// The classes of routes by name, each with its protocol number.
     pub classes: Vec<(String, u8)>,
     pub metrics: MetricsPorts,
-    pub keys: Keys,
-    /// Whether a node on no link goes without a private key: version 2 has one created only for
-    /// a node on a link, version 1 for every node.
-    pub key_on_a_link_only: bool,
+    pub format: Format,
+}
+
+/// The version of the format a network was read from, where what is computed or said of it
+/// depends on that: how a message names a key, which nodes have one, and what only version 1
+/// holds.
+#[derive(Debug)]
+pub enum Format {
+    V1(Box<V1Only>),
+    V2,
+}
+
+impl Format {
     /// What only a file of version 1 holds.
-    pub v1: Option<V1Only>,
-}
+    pub fn v1(&self) -> Option<&V1Only> {
+        match self {
+            Self::V1(v1) => Some(v1),
+            Self::V2 => None,
+        }
+    }
 
-/// How a message names the keys of the files, which differ between the versions of the format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Keys {
-    /// A node's private key, under the node.
-    pub private_key: &'static str,
-    /// The MTU set for the mesh.
-    pub mtu: &'static str,
-    /// The network the links' IPv4 addresses come from.
-    pub tunnel_ipv4: &'static str,
-}
+    /// How the files name a node's private key, under the node.
+    pub fn private_key(&self) -> &'static str {
+        match self {
+            Self::V1(_) => "mesh_private_key",
+            Self::V2 => "wireguard.private_key",
+        }
+    }
 
-impl Keys {
-    pub const V1: Self = Self {
-        private_key: "mesh_private_key",
-        mtu: "cluster.mesh_mtu",
-        tunnel_ipv4: "cluster.tunnel_networks",
-    };
-    pub const V2: Self = Self {
-        private_key: "wireguard.private_key",
-        mtu: "mesh.mtu",
-        tunnel_ipv4: "addressing.tunnel.ipv4",
-    };
+    /// How the files name the MTU set for the mesh.
+    pub fn mtu(&self) -> &'static str {
+        match self {
+            Self::V1(_) => "cluster.mesh_mtu",
+            Self::V2 => "mesh.mtu",
+        }
+    }
+
+    /// How the files name the network the links' IPv4 addresses come from.
+    pub fn tunnel_ipv4(&self) -> &'static str {
+        match self {
+            Self::V1(_) => "cluster.tunnel_networks",
+            Self::V2 => "addressing.tunnel.ipv4",
+        }
+    }
+
+    /// Whether every node has a key: version 2 has one created only for a node on a link.
+    pub fn keys_every_node(&self) -> bool {
+        matches!(self, Self::V1(_))
+    }
+
+    /// Where the files hold the key of `node`, as a message names it.
+    pub fn node_key(&self, node: &str) -> String {
+        let key = self.private_key();
+        match self {
+            Self::V1(_) => format!("nodes[{node}].{key}"),
+            Self::V2 => format!("nodes.{node}.{key}"),
+        }
+    }
+
+    /// Where the files hold the obfuscation of `link`, as a message names it. Version 1 gives a
+    /// link no name, and it is named by its two nodes, sorted.
+    pub fn link_obfuscation(&self, link: &Link) -> String {
+        match self {
+            Self::V1(_) => format!("mesh.links[{}].obfuscation", link_key(&link.ends)),
+            Self::V2 => format!("mesh.links.{}.amneziawg.obfuscation", link.name),
+        }
+    }
 }
 
 impl Network {
@@ -74,7 +113,7 @@ impl Network {
 
     /// Whether the node needs a private key: it is on a link, or the version says every node does.
     pub fn needs_a_key(&self, node: &str) -> bool {
-        !self.key_on_a_link_only
+        self.format.keys_every_node()
             || self
                 .links
                 .iter()
@@ -88,6 +127,20 @@ impl Network {
 pub struct MetricsPorts {
     pub awg: Option<NonZeroU16>,
     pub router: Option<NonZeroU16>,
+}
+
+impl From<&TalosSettings> for MetricsPorts {
+    fn from(settings: &TalosSettings) -> Self {
+        let metrics = settings.metrics.as_ref();
+        Self {
+            awg: metrics
+                .and_then(|metrics| metrics.mesh.as_ref())
+                .map(|listener| listener.port),
+            router: metrics
+                .and_then(|metrics| metrics.router.as_ref())
+                .map(|listener| listener.port),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -179,13 +232,34 @@ mod tests {
     }
 
     #[test]
+    fn the_metrics_ports_are_those_of_the_settings_of_talos() {
+        let settings = |yaml: &str| -> TalosSettings { sliplib_yaml::from_str(yaml).unwrap() };
+        let port = NonZeroU16::new;
+        assert_eq!(
+            MetricsPorts::from(&settings(
+                "metrics: {mesh: {port: 9586}, router: {port: 9324}}"
+            )),
+            MetricsPorts {
+                awg: port(9586),
+                router: port(9324)
+            }
+        );
+        assert_eq!(
+            MetricsPorts::from(&settings("metrics: {router: {port: 9324}}")),
+            MetricsPorts {
+                awg: None,
+                router: port(9324)
+            }
+        );
+        assert_eq!(MetricsPorts::from(&settings("{}")), MetricsPorts::default());
+    }
+
+    #[test]
     fn a_file_of_either_version_is_lowered_by_its_own() {
         let of_version_1 = lowered(VERSION_1).unwrap();
-        assert_eq!(of_version_1.keys, Keys::V1);
-        assert!(of_version_1.v1.is_some());
+        assert!(matches!(of_version_1.format, Format::V1(_)));
         let of_version_2 = lowered(VERSION_2).unwrap();
-        assert_eq!(of_version_2.keys, Keys::V2);
-        assert!(of_version_2.v1.is_none());
+        assert!(matches!(of_version_2.format, Format::V2));
     }
 
     #[test]

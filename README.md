@@ -159,6 +159,28 @@ The config's `Endpoint` is the first of the pool's `node_hostnames`, with the po
 the pool, say - taken as written, with the pool's port when it carries none. Its `DNS` is the
 pool's `dns`, else address 10 of `cluster.service_subnet`, else absent.
 
+### A file of format version 2
+
+The sections above describe a file of version 1, the one whose `network` document says no
+`version`. [Version 2](docs/slipmesh-yaml.md) is read by the same commands, each still on one
+file given with `--config`:
+
+- `check` refuses once for the file what the loader refuses and what leaves no network to compute
+  from: two nodes that get one address, or a file without `mesh.interface_prefix`, naming `mint`.
+  It reads the settings of each platform and the keys of each `template`, refuses those that do
+  not read, and still checks the nodes. The text of a template and the body of a `patch` are for
+  the Talos generator's `--check`.
+- `mint` writes the reference value of `mesh.interface_prefix`, `mesh-`, where the file leaves it
+  out, a `wireguard.private_key` for every node on a link, and the same nine fields into the
+  `obfuscation` of every link of type `amneziawg`, once `mesh.amneziawg.obfuscation` is laid under
+  its own. It names what it wrote as `nodes.node-a.wireguard.private_key` and
+  `mesh.links.a-b.amneziawg.obfuscation`.
+- `rekey` replaces a node's `wireguard.private_key`, writing its `wireguard` block where the node
+  has none. It refuses a node on no link, which nothing dials, and checks, as `mint` does, that the
+  file with the new key still gives a network before it writes it.
+- `fmt` rewrites the file as it does one of version 1.
+- The `rw` commands refuse the file: version 2 holds no pools.
+
 ### Installing
 
 A release carries the tool built for Linux, statically linked, as `slipmesh-linux-amd64` and
@@ -250,10 +272,11 @@ chain gives the whole message, each part once.
   roadwarriors pools and bypass entries - and `validate`, the checks across them.
   `missing_defaults` lists the network settings the topology leaves to a default that a node is
   told, each with that default.
-- `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md), which `sliplib-mesh`
-  computes configs from and no tool reads yet.
+- `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md).
   `v2::File` reads the files as a whole (`parse`, `read`) and refuses whatever its specification
-  has the loader refuse, as `v2::Error`. It gives the `network` with what is in force for each
+  has the loader refuse, as `v2::Error`. `missing_reference_values` lists the required keys the
+  files lack that `slipmesh mint` writes, and `network_document` says where the network stands
+  in the file, for a write. It gives the `network` with what is in force for each
   node and each link written where they hold their own: a node's `routing`, a link's block of its
   type. The `template` and `patch` documents come with their `Aim`: the nodes each reaches, and
   its rank among those that reach one node (`templates_for`, `patches_for`). The settings of a
@@ -301,9 +324,9 @@ version says it.
   version 1 refuses a network or a `node_id` that does not read, a metrics port of 0, and an
   `address_family` that contradicts the endpoint of a node on a link. That of version 2 refuses
   files without `mesh.interface_prefix`, two nodes that get one address and a link-local no
-  interface takes. The
-  metrics ports of a file of version 2 are the `talos` platform's settings, which the lowering
-  does not read: the Talos generator sets them on the network.
+  interface takes. The metrics ports of a file of version 2 are the `talos` platform's settings,
+  which the lowering does not read: the Talos generator and `slipmesh check` set them on the
+  network.
 - `secrets::read` takes the secrets the network holds: each node's private key, each pool's
   private key, and each link's and pool's obfuscation. It never creates one: a key the file lacks
   is absent from `ResolvedSecrets`, while every link and pool gets an obfuscation entry, empty
@@ -434,6 +457,10 @@ reviewed with the rest of the pull request; the test refuses to record in CI:
 ```bash
 UPDATE_EXPECT=1 cargo test -p sliplib-mesh --test golden
 ```
+
+`v2` and `v2-alternate` beside them are the same two networks written in format version 2 by hand.
+The same test shows that every node of such a twin gets the configs the file of version 1 gave
+it, but for what [a conversion changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand).
 
 [`fuzz/`](fuzz) holds a target for [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz.html),
 which needs a nightly toolchain: `read_slipmesh` gives a text to `SlipmeshFile`, which reads either

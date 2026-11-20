@@ -19,6 +19,9 @@ pub const VERSION: u64 = 2;
 /// The generation of the rules that turn the files into configs, for which this code is built.
 pub const REVISION: u64 = 1;
 
+/// The reference value of `mesh.interface_prefix`.
+const REFERENCE_INTERFACE_PREFIX: &str = "mesh-";
+
 const NETWORK: &str = "network";
 const GROUPS: &str = "groups";
 const PLATFORM: &str = "platform";
@@ -430,6 +433,7 @@ fn reaching<'a, T>(documents: &'a [T], aim: impl Fn(&T) -> &Aim, node: &str) -> 
 
 pub struct File {
     network: Network,
+    network_document: usize,
     platforms: Vec<(Platform, Document)>,
     templates: Vec<TemplateDocument>,
     patches: Vec<PatchDocument>,
@@ -519,6 +523,7 @@ impl File {
         }
 
         let written = at_most_one(networks, NETWORK)?.ok_or(Error::NoNetwork)?;
+        let network_document = written.index;
         // Read as written first: from the text, an error names the line.
         body::<Network>(&written, NETWORK)?;
         let network: Network =
@@ -549,6 +554,7 @@ impl File {
         }
         Ok(Self {
             network,
+            network_document,
             platforms,
             templates,
             patches,
@@ -559,6 +565,21 @@ impl File {
     /// the block of its type.
     pub fn network(&self) -> &Network {
         &self.network
+    }
+
+    /// The position of the `network` document in the file, where a value of the network is
+    /// written.
+    pub fn network_document(&self) -> usize {
+        self.network_document
+    }
+
+    /// The required keys the files lack that have a reference value, each with that value:
+    /// what `slipmesh mint` writes, and no tool falls back to.
+    pub fn missing_reference_values(&self) -> Vec<(&'static str, Value)> {
+        match self.network.mesh.interface_prefix {
+            Some(_) => Vec::new(),
+            None => vec![("mesh.interface_prefix", REFERENCE_INTERFACE_PREFIX.into())],
+        }
     }
 
     /// The settings of `platform`: the body of its `platform` document, and what a platform has
@@ -955,6 +976,25 @@ mod tests {
         )])
         .unwrap();
         assert_eq!(wireguard(&file, "a-r1").persistent_keepalive, None);
+    }
+
+    #[test]
+    fn the_interface_prefix_is_the_one_key_with_a_reference_value() {
+        let with_it = file(&[&network("{}")]).unwrap();
+        assert!(with_it.missing_reference_values().is_empty());
+        let without = file(&[&network("{mesh: {interface_prefix: null}}")]).unwrap();
+        assert_eq!(
+            without.missing_reference_values(),
+            [("mesh.interface_prefix", Value::from("mesh-"))]
+        );
+    }
+
+    #[test]
+    fn the_network_document_is_known_by_its_position_in_the_file() {
+        let settings = "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n";
+        // An empty document counts: the position is that of the file, which an edit goes by.
+        let file = file(&[settings, "", &network("{}")]).unwrap();
+        assert_eq!(file.network_document(), 2);
     }
 
     #[test]

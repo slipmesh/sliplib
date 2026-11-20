@@ -114,7 +114,7 @@ pub(crate) fn bgp_peers_for(mesh: &Network, node_name: &str) -> Vec<BgpPeerEntry
 /// The node's bypass rules, every `bypass` entry for it in one `BypassConfig`; `None` when it has
 /// none.
 pub(crate) fn bypass_for(mesh: &Network, node_name: &str) -> Option<BypassConfig> {
-    let v1 = mesh.v1.as_ref()?;
+    let v1 = mesh.format.v1()?;
     let entries: Vec<_> = v1.bypass.iter().filter(|b| b.node == node_name).collect();
     if entries.is_empty() {
         return None;
@@ -155,7 +155,7 @@ pub(crate) fn render_router_config(mesh: &Network, node_name: &str) -> Result<Ro
     if node.tunnel_ipv4.is_some() && !direct_interfaces.contains(&glob) {
         return Err(RenderError::MeshPatternMissing {
             node: node_name.to_owned(),
-            key: mesh.keys.tunnel_ipv4,
+            key: mesh.format.tunnel_ipv4(),
             glob,
         });
     }
@@ -192,7 +192,7 @@ fn mesh_interfaces_for(
     resolved: &ResolvedSecrets,
 ) -> Result<Vec<InterfaceEntry>> {
     let node = mesh.node(node_name)?;
-    let key = mesh.keys.private_key;
+    let key = mesh.format.private_key();
     let own_private_key = resolved.mesh_private_keys.get(node_name);
     if own_private_key.is_none() && mesh.needs_a_key(node_name) {
         return Err(MissingSecret(format!("node {node_name:?}: {key} is not set")).into());
@@ -205,6 +205,7 @@ fn mesh_interfaces_for(
             .map_err(key_of(node_name, key))?;
     }
 
+    // Before the node's links: what refuses the MTU of the mesh stops a node on no link too.
     let mtu = crate::mtu::mesh_mtu(mesh, resolved)?;
     // Only a node that needs no key has none, and it is on no link.
     let Some(own_private_key) = own_private_key else {
@@ -275,8 +276,9 @@ fn roadwarrior_interfaces_for(
     node_name: &str,
     resolved: &ResolvedSecrets,
 ) -> Result<Vec<InterfaceEntry>> {
-    mesh.v1
-        .iter()
+    mesh.format
+        .v1()
+        .into_iter()
         .flat_map(|v1| &v1.pools)
         .filter(|pool| pool.node_hostnames.iter().any(|h| h == node_name))
         .map(|pool| {
