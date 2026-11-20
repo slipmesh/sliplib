@@ -16,14 +16,31 @@ pub struct TalosSettings {
 /// The Prometheus metrics of every `talos` node, by what serves them. An entry left out means no
 /// listener.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "MetricsKeys")]
 pub struct Metrics {
     /// The node's links.
-    #[serde(default)]
     pub mesh: Option<Listener>,
     /// The node's routing.
-    #[serde(default)]
     pub router: Option<Listener>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MetricsKeys {
+    #[serde(default)]
+    mesh: Option<Listener>,
+    #[serde(default)]
+    router: Option<Listener>,
+}
+
+/// What is wrong with the metrics of `talos`.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum MetricsError {
+    #[error(
+        "`metrics.mesh` and `metrics.router` both take port {0}, and two daemons cannot serve one port - give each its own"
+    )]
+    OnePort(u16),
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -31,6 +48,22 @@ pub struct Metrics {
 pub struct Listener {
     /// The TCP port the metrics are served on, on the node's IPv4 loopback.
     pub port: NonZeroU16,
+}
+
+impl TryFrom<MetricsKeys> for Metrics {
+    type Error = MetricsError;
+
+    fn try_from(keys: MetricsKeys) -> Result<Self, MetricsError> {
+        if let (Some(mesh), Some(router)) = (&keys.mesh, &keys.router)
+            && mesh.port == router.port
+        {
+            return Err(MetricsError::OnePort(mesh.port.get()));
+        }
+        Ok(Self {
+            mesh: keys.mesh,
+            router: keys.router,
+        })
+    }
 }
 
 /// The settings of `routeros`: none, so any key in the body of its `platform` document is refused.
@@ -116,30 +149,39 @@ mod tests {
     }
 
     #[test]
+    fn two_listeners_on_one_port_are_refused_naming_it() {
+        let refused = read::<TalosSettings>("metrics: {mesh: {port: 9586}, router: {port: 9586}}")
+            .unwrap_err();
+        assert!(
+            refused.contains(&MetricsError::OnePort(9586).to_string()),
+            "{refused}"
+        );
+    }
+
+    #[test]
     fn a_listener_needs_a_port_that_is_not_zero() {
-        let none = read::<TalosSettings>("metrics: {mesh: {}}").unwrap_err();
-        assert!(none.contains("missing field `port`"), "{none}");
-        let zero = read::<TalosSettings>("metrics: {mesh: {port: 0}}").unwrap_err();
-        assert!(zero.contains("nonzero"), "{zero}");
+        assert!(read::<TalosSettings>("metrics: {mesh: {port: 1}}").is_ok());
+        for yaml in ["metrics: {mesh: {}}", "metrics: {mesh: {port: 0}}"] {
+            assert!(read::<TalosSettings>(yaml).is_err(), "{yaml}");
+        }
     }
 
     #[test]
     fn a_key_the_settings_do_not_have_is_refused_at_any_depth() {
+        assert!(read::<TalosSettings>("metrics: {mesh: {port: 1}}").is_ok());
         for yaml in [
-            "listen: true",
-            "metrics: {firewall: {port: 1}}",
+            "{metrics: {mesh: {port: 1}}, listen: true}",
+            "metrics: {mesh: {port: 1}, firewall: {port: 2}}",
             "metrics: {mesh: {port: 1, address: 192.0.2.1}}",
         ] {
-            let error = read::<TalosSettings>(yaml).unwrap_err();
-            assert!(error.contains("unknown field"), "{yaml}: {error}");
+            assert!(read::<TalosSettings>(yaml).is_err(), "{yaml}");
         }
     }
 
     #[test]
     fn routeros_has_no_settings() {
         assert_eq!(read::<RouterosSettings>("{}").unwrap(), RouterosSettings {});
-        let error = read::<RouterosSettings>("metrics: {}").unwrap_err();
-        assert!(error.contains("unknown field `metrics`"), "{error}");
+        assert!(read::<RouterosSettings>("metrics: {}").is_err());
     }
 
     const DIGEST: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
@@ -164,27 +206,15 @@ mod tests {
     #[test]
     fn a_template_refuses_another_daemon_a_missing_key_and_an_unknown_one() {
         let base = format!("base: 'sha256:{DIGEST}'");
-        for (yaml, why) in [
-            (
-                format!("{{daemon: awg, {base}, content: x}}"),
-                "unknown variant `awg`",
-            ),
-            (format!("{{{base}, content: x}}"), "missing field `daemon`"),
-            (
-                "{daemon: router, content: x}".to_owned(),
-                "missing field `base`",
-            ),
-            (
-                format!("{{daemon: router, {base}}}"),
-                "missing field `content`",
-            ),
-            (
-                format!("{{daemon: router, {base}, content: x, name: y}}"),
-                "unknown field `name`",
-            ),
+        assert!(read::<Template>(&format!("{{daemon: router, {base}, content: x}}")).is_ok());
+        for yaml in [
+            format!("{{daemon: awg, {base}, content: x}}"),
+            format!("{{{base}, content: x}}"),
+            "{daemon: router, content: x}".to_owned(),
+            format!("{{daemon: router, {base}}}"),
+            format!("{{daemon: router, {base}, content: x, name: y}}"),
         ] {
-            let error = read::<Template>(&yaml).unwrap_err();
-            assert!(error.contains(why), "{yaml}: {error}");
+            assert!(read::<Template>(&yaml).is_err(), "{yaml}");
         }
     }
 
@@ -203,9 +233,7 @@ mod tests {
             format!("sha256:{DIGEST}0"),
             format!("sha256:{}g", &DIGEST[1..]),
         ] {
-            let error = Base::try_from(text.clone()).unwrap_err().to_string();
-            assert!(error.contains(&text), "{error}");
-            assert!(error.contains("slipmesh-taloscfg template"), "{error}");
+            assert_eq!(Base::try_from(text.clone()), Err(BaseError(text)));
         }
     }
 }

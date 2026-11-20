@@ -1,0 +1,29 @@
+[package]
+name = "sliplib-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+# A package of its own: the workspace builds without the fuzzing runtime.
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+serde = "1.0.229"
+
+[dependencies.sliplib-config]
+path = "../config"
+
+[dependencies.sliplib-yaml]
+path = "../yaml"
+
+[[bin]]
+name = "read_slipmesh"
+path = "fuzz_targets/read_slipmesh.rs"
+test = false
+doc = false
+bench = false

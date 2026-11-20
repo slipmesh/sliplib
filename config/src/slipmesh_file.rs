@@ -96,9 +96,8 @@ mod tests {
         node-a, node_id: 0.0.0.1}\n";
     const VERSION_2: &str = include_str!("../../docs/example/mesh.yaml");
 
-    fn refusal(raw: &str) -> String {
-        let refusal = SlipmeshFile::parse(raw).err().expect("the file reads");
-        format!("{:#}", anyhow::Error::new(refusal))
+    fn refusal(raw: &str) -> Error {
+        SlipmeshFile::parse(raw).err().expect("the file reads")
     }
 
     #[test]
@@ -122,23 +121,38 @@ mod tests {
         // The block of a version 1 `patch` takes no `version`, and its reader says so.
         let patch = "---\nslipmesh: {kind: patch, version: 2}\nkind: Example\n";
         let refusal = refusal(&format!("{VERSION_1}{patch}"));
-        assert!(refusal.contains("unknown field `version`"), "{refusal}");
+        assert!(
+            matches!(refusal, Error::V1(v1::slipmesh_file::Error::Block { .. })),
+            "{refusal:?}"
+        );
     }
 
     #[test]
-    fn a_refusal_reads_as_the_reader_of_the_version_gives_it() {
+    fn a_refusal_is_the_one_the_reader_of_the_version_gives() {
         let of_version_1 = refusal("slipmesh: {kind: patch}\nkind: Example\n");
-        assert_eq!(
-            of_version_1,
-            "slipmesh.yaml needs exactly one `kind: network` document, found 0"
+        assert!(
+            matches!(
+                of_version_1,
+                Error::V1(v1::slipmesh_file::Error::NetworkDocuments(0))
+            ),
+            "{of_version_1:?}"
         );
         let of_version_2 = refusal("slipmesh: {kind: network, version: 3, revision: 1}\n");
-        assert!(of_version_2.starts_with("`version: 3`"), "{of_version_2}");
+        assert!(
+            matches!(
+                of_version_2,
+                Error::V2(v2::Error::NewerVersion { version: 3, .. })
+            ),
+            "{of_version_2:?}"
+        );
     }
 
     #[test]
     fn a_text_that_is_not_yaml_is_refused() {
         let refusal = refusal("slipmesh: [unclosed\n");
-        assert!(refusal.contains("not valid YAML"), "{refusal}");
+        assert!(
+            matches!(refusal, Error::V1(v1::slipmesh_file::Error::Yaml(_))),
+            "{refusal:?}"
+        );
     }
 }

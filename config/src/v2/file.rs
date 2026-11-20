@@ -3,7 +3,7 @@
 //! with the nodes each reaches.
 
 use super::block::{Block, Exclude, Include, Order, Rank};
-use super::check::{self, Invalid};
+use super::check::Invalid;
 use super::groups::{Groups, GroupsError, Resolved, Selection};
 use super::network::{AMNEZIAWG, Network, WIREGUARD};
 use super::platform::{RouterosSettings, TalosSettings, Template};
@@ -35,17 +35,21 @@ pub enum Error {
     #[error(transparent)]
     Yaml(Source),
     #[error(
-        "`version: {0}`: this tool reads format version {VERSION}, and version 1, whose `network` document has no `version` - a newer format needs a newer tool"
+        "{place} has no `version`, or one below {VERSION}, so it is of format version 1, which the reader of version {VERSION} does not take - convert the files to version {VERSION} as `docs/slipmesh-yaml-v1-to-v2.md` of sliplib says under \"Converting a file by hand\""
     )]
-    Version(u64),
+    VersionOne { place: Place },
     #[error(
-        "the files are of revision {0} and this tool is built for revision {REVISION} - update the tool"
+        "{place} has `version: {version}`, and this tool reads format version {VERSION} - a newer format needs a newer tool"
     )]
-    NewerRevision(u64),
+    NewerVersion { place: Place, version: u64 },
     #[error(
-        "the files are of revision {0} and this tool is built for revision {REVISION} - move the files to revision {REVISION}, together with every other tool"
+        "{place} is of revision {revision}, and this tool is built for revision {REVISION} - update the tool"
     )]
-    OlderRevision(u64),
+    NewerRevision { place: Place, revision: u64 },
+    #[error(
+        "{place} is of revision {revision}, and this tool is built for revision {REVISION} - move the files to revision {REVISION}, together with every other tool"
+    )]
+    OlderRevision { place: Place, revision: u64 },
     #[error("the document starting at line {line}")]
     Block {
         line: usize,
@@ -62,11 +66,20 @@ pub enum Error {
     #[error("there is no `kind: network` document, and without one there is no network")]
     NoNetwork,
     #[error(
-        "{count} `kind: {kind}` documents: this release reads one and lays no two over each other - write them as one document"
+        "{count} `kind: {kind}` documents, the first two at lines {first} and {second}: this release reads one and lays no two over each other - write them as one document"
     )]
-    Several { kind: &'static str, count: usize },
-    #[error("the network, with each node's and each link's own values laid over its own")]
-    InForce(#[source] Source),
+    Several {
+        kind: &'static str,
+        count: usize,
+        first: usize,
+        second: usize,
+    },
+    #[error("{place}, with each node's and each link's own values laid over the network's")]
+    InForce {
+        place: Place,
+        #[source]
+        source: Source,
+    },
     #[error(transparent)]
     Invalid(#[from] Invalid),
     #[error(transparent)]
@@ -124,23 +137,54 @@ fn body<T: DeserializeOwned>(document: &Document, kind: &'static str) -> Result<
 }
 
 /// Refuses files of another version or revision before anything else of them is read, so that a
-/// file of a newer format is not refused for a key this code does not know.
+/// file of a newer format is not refused for a key this code does not know: the version of every
+/// `network` document first, then the revision of each.
 fn generation(yaml: &MultiDoc) -> Result<(), Error> {
-    for document in yaml.documents() {
-        let Some(block) = document.value.get(META_KEY) else {
-            continue;
-        };
-        if block.get("kind").and_then(Value::as_str) != Some(NETWORK) {
-            continue;
+    let networks: Vec<(Place, &Value)> = yaml
+        .documents()
+        .iter()
+        .filter_map(|document| Some((document.line, document.value.get(META_KEY)?)))
+        .filter(|(_, block)| block.get("kind").and_then(Value::as_str) == Some(NETWORK))
+        .map(|(line, block)| (Place::new(NETWORK, line), block))
+        .collect();
+    let written =
+        |block: &Value, key: &str| block.get(key).filter(|value| !value.is_null()).cloned();
+    for (place, block) in &networks {
+        // A number of another type is left to the block, which refuses it.
+        match written(block, "version").map(|version| version.as_u64()) {
+            None => {
+                return Err(Error::VersionOne {
+                    place: place.clone(),
+                });
+            }
+            Some(Some(version)) if version < VERSION => {
+                return Err(Error::VersionOne {
+                    place: place.clone(),
+                });
+            }
+            Some(Some(version)) if version > VERSION => {
+                return Err(Error::NewerVersion {
+                    place: place.clone(),
+                    version,
+                });
+            }
+            Some(_) => {}
         }
-        let number = |key: &str| block.get(key).and_then(Value::as_u64);
-        match number("version") {
-            Some(version) if version != VERSION => return Err(Error::Version(version)),
-            _ => {}
-        }
-        match number("revision") {
-            Some(revision) if revision > REVISION => return Err(Error::NewerRevision(revision)),
-            Some(revision) if revision < REVISION => return Err(Error::OlderRevision(revision)),
+    }
+    for (place, block) in &networks {
+        match written(block, "revision").and_then(|revision| revision.as_u64()) {
+            Some(revision) if revision > REVISION => {
+                return Err(Error::NewerRevision {
+                    place: place.clone(),
+                    revision,
+                });
+            }
+            Some(revision) if revision < REVISION => {
+                return Err(Error::OlderRevision {
+                    place: place.clone(),
+                    revision,
+                });
+            }
             _ => {}
         }
     }
@@ -154,7 +198,16 @@ fn at_most_one(
 ) -> Result<Option<Document>, Error> {
     match documents.len() {
         0 | 1 => Ok(documents.pop()),
-        count => Err(Error::Several { kind, count }),
+        count => {
+            let mut lines: Vec<usize> = documents.iter().map(|document| document.line).collect();
+            lines.sort_unstable();
+            Err(Error::Several {
+                kind,
+                count,
+                first: lines[0],
+                second: lines[1],
+            })
+        }
     }
 }
 
@@ -170,48 +223,56 @@ fn lay(network: &Value, own: Option<&Value>) -> Value {
     }
 }
 
-/// `tree`, the network as written, with what is in force written where each node and each link
-/// holds its own values: `nodes.<name>.routing` over the same keys of `routing`, and
-/// `mesh.links.<name>.<type>` over `mesh.<type>`. A `null` among a node's or a link's own values
-/// takes the network's away there, which reading the two apart could not tell from a key left
-/// out.
-fn in_force(mut tree: Value) -> Value {
-    let without_nulls = |value: Option<&Value>| merge(Value::Null, value.unwrap_or(&Value::Null));
-
+/// The network document laid over the empty tree, so that no `null` is left in it, with what is in
+/// force written where each node and each link holds its own values: `nodes.<name>.routing` over
+/// the same keys of `routing`, and `mesh.links.<name>.<type>` over `mesh.<type>`. Those own values
+/// are taken as written: a `null` among them takes the network's away there, which reading the two
+/// apart could not tell from a key left out.
+fn in_force(written: &Value) -> Value {
+    let mut tree = merge(Value::Null, written);
     let routing = tree.get("routing");
     let lists: Mapping = NODE_LISTS
         .iter()
-        .filter_map(|key| Some((*key, routing?.get(key)?)))
-        .filter(|(_, list)| !list.is_null())
-        .map(|(key, list)| (key.into(), list.clone()))
+        .filter_map(|key| Some(((*key).into(), routing?.get(key)?.clone())))
         .collect();
     let lists = Value::Mapping(lists);
     let mesh = tree.get("mesh");
     let of_types =
-        [WIREGUARD, AMNEZIAWG].map(|kind| (kind, without_nulls(mesh.and_then(|m| m.get(kind)))));
+        [WIREGUARD, AMNEZIAWG].map(|kind| (kind, mesh.and_then(|mesh| mesh.get(kind)).cloned()));
 
+    let written_nodes = written.get("nodes").and_then(Value::as_mapping);
     if let Some(nodes) = tree.get_mut("nodes").and_then(Value::as_mapping_mut) {
-        for node in nodes.values_mut().filter_map(Value::as_mapping_mut) {
-            let routing = lay(&lists, node.get("routing"));
-            node.insert("routing".into(), routing);
+        for (name, node) in nodes.iter_mut() {
+            let own = written_nodes
+                .and_then(|nodes| nodes.get(name))
+                .and_then(|node| node.get("routing"));
+            if let Some(node) = node.as_mapping_mut() {
+                node.insert("routing".into(), lay(&lists, own));
+            }
         }
     }
+    let written_links = written
+        .get("mesh")
+        .and_then(|mesh| mesh.get("links"))
+        .and_then(Value::as_mapping);
     let links = tree
         .get_mut("mesh")
         .and_then(|mesh| mesh.get_mut("links"))
         .and_then(Value::as_mapping_mut);
-    for link in links
-        .into_iter()
-        .flat_map(Mapping::values_mut)
-        .filter_map(Value::as_mapping_mut)
-    {
+    for (name, link) in links.into_iter().flat_map(|links| links.iter_mut()) {
+        let Some(link) = link.as_mapping_mut() else {
+            continue;
+        };
         let kind = link.get("type").and_then(Value::as_str);
         let Some((kind, defaults)) = of_types.iter().find(|(name, _)| Some(*name) == kind) else {
             continue;
         };
         if link.get(*kind).is_some_and(Value::is_mapping) {
-            let block = lay(defaults, link.get(*kind));
-            link.insert((*kind).into(), block);
+            let own = written_links
+                .and_then(|links| links.get(name))
+                .and_then(|link| link.get(*kind));
+            let defaults = defaults.clone().unwrap_or(Value::Null);
+            link.insert((*kind).into(), lay(&defaults, own));
         }
     }
     tree
@@ -268,7 +329,6 @@ impl Aimed {
         if platform == Platform::Routeros {
             return Err(Error::NotTaken { place, platform });
         }
-        let nodes: Vec<Name> = network.nodes.keys().cloned().collect();
         let of_the_platform: Vec<Name> = network
             .nodes
             .iter()
@@ -280,7 +340,7 @@ impl Aimed {
             include: self.include,
             exclude: self.exclude,
         };
-        let reach = groups.reach(&selection, &nodes, &of_the_platform, &place.to_string())?;
+        let reach = groups.reach(&selection, &of_the_platform, &place.to_string())?;
         let of_another = reach
             .iter()
             .map(|node| (node, network.nodes[node].platform))
@@ -309,6 +369,16 @@ pub struct TemplateDocument {
     body: Document,
 }
 
+// By hand: a `Document` holds the text of every file, the private keys among it.
+impl fmt::Debug for TemplateDocument {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TemplateDocument")
+            .field("aim", &self.aim)
+            .field("value", &self.body.value)
+            .finish()
+    }
+}
+
 impl TemplateDocument {
     pub fn aim(&self) -> &Aim {
         &self.aim
@@ -325,6 +395,15 @@ impl TemplateDocument {
 pub struct PatchDocument {
     aim: Aim,
     body: Document,
+}
+
+// The aim alone: a patch is in its platform's format, whose secrets this one cannot tell apart.
+impl fmt::Debug for PatchDocument {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PatchDocument")
+            .field("aim", &self.aim)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PatchDocument {
@@ -356,6 +435,22 @@ pub struct File {
     patches: Vec<PatchDocument>,
 }
 
+impl fmt::Debug for File {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let platforms: Vec<(Platform, &Value)> = self
+            .platforms
+            .iter()
+            .map(|(platform, document)| (*platform, &document.value))
+            .collect();
+        f.debug_struct("File")
+            .field("network", &self.network)
+            .field("platforms", &platforms)
+            .field("templates", &self.templates)
+            .field("patches", &self.patches)
+            .finish()
+    }
+}
+
 impl File {
     pub fn parse(raw: &str) -> Result<Self, Error> {
         Self::read(&MultiDoc::parse(raw).map_err(|source| Error::Yaml(source.into()))?)
@@ -384,8 +479,8 @@ impl File {
                     if let Some((_, first)) = platforms.iter().find(|(of, _)| *of == platform) {
                         return Err(Error::PlatformTwice {
                             platform,
-                            first: first.line,
-                            second: body.line,
+                            first: first.line.min(body.line),
+                            second: first.line.max(body.line),
                         });
                     }
                     platforms.push((platform, body));
@@ -426,15 +521,21 @@ impl File {
         let written = at_most_one(networks, NETWORK)?.ok_or(Error::NoNetwork)?;
         // Read as written first: from the text, an error names the line.
         body::<Network>(&written, NETWORK)?;
-        let network: Network = sliplib_yaml::from_value(in_force(written.value))
-            .map_err(|source| Error::InForce(source.into()))?;
-        check::check(&network)?;
+        let network: Network =
+            sliplib_yaml::from_value(in_force(&written.value)).map_err(|source| {
+                Error::InForce {
+                    place: Place::new(NETWORK, written.line),
+                    source: source.into(),
+                }
+            })?;
+        network.check()?;
 
         let nodes: Vec<Name> = network.nodes.keys().cloned().collect();
         let groups = match at_most_one(groups, GROUPS)? {
-            Some(document) => body::<Groups>(&document, GROUPS)?.resolve(&nodes)?,
-            None => Resolved::default(),
-        };
+            Some(document) => body::<Groups>(&document, GROUPS)?,
+            None => Groups::default(),
+        }
+        .resolve(&nodes)?;
 
         let mut templates = Vec::new();
         let mut patches = Vec::new();
@@ -530,13 +631,29 @@ mod tests {
         network_edited(BLOCK, |tree| *tree = merge(tree.clone(), &yaml(overlay)))
     }
 
-    fn file(documents: &[&str]) -> Result<File, String> {
+    fn file(documents: &[&str]) -> Result<File, Error> {
         File::parse(&documents.join("\n---\n"))
-            .map_err(|error| format!("{:#}", anyhow::Error::new(error)))
     }
 
-    fn refusal(documents: &[&str]) -> String {
-        file(documents).err().expect("the files read")
+    fn refusal(documents: &[&str]) -> Error {
+        file(documents).expect_err("the files read")
+    }
+
+    /// The line the document `index` of `documents` starts at once they are joined into one text.
+    fn line(documents: &[&str], index: usize) -> usize {
+        let before: String = documents[..index]
+            .iter()
+            .map(|document| format!("{document}\n---\n"))
+            .collect();
+        before.matches('\n').count() + 1
+    }
+
+    fn place(kind: &'static str, documents: &[&str], index: usize) -> Place {
+        Place::new(kind, line(documents, index))
+    }
+
+    fn name(text: &str) -> Name {
+        Name::try_from(text.to_owned()).unwrap()
     }
 
     /// A `template` for the router, with `block` as the keys of its block besides the kind.
@@ -634,7 +751,7 @@ mod tests {
             "{twice}"
         );
         let refusal = refusal(&[&twice]);
-        assert!(refusal.contains("duplicate"), "{refusal}");
+        assert!(matches!(refusal, Error::Yaml(_)), "{refusal:?}");
     }
 
     #[test]
@@ -645,6 +762,95 @@ mod tests {
         let file = file(&[&text]).unwrap();
         assert!(file.network().routing.learn.is_empty());
         assert!(file.network().nodes["node-a"].routing.learn.is_empty());
+    }
+
+    #[test]
+    fn an_end_written_null_is_the_end_left_out() {
+        let three = network_edited(BLOCK, |tree| {
+            tree["mesh"]["links"]["a-b"]["ends"]["node-c"] = Value::Null;
+        });
+        let file = file(&[&three]).unwrap();
+        assert_eq!(
+            names(&file.network().mesh.links["a-b"].ends),
+            ["node-a", "node-b"]
+        );
+        let none = network_edited(BLOCK, |tree| {
+            let ends = &mut tree["mesh"]["links"]["a-b"]["ends"];
+            *ends = yaml("{node-a: null, node-b: null}");
+        });
+        let refusal = refusal(&[&none]);
+        assert!(
+            matches!(&refusal, Error::Body { place, .. } if *place == Place::new(NETWORK, 1)),
+            "{refusal:?}"
+        );
+    }
+
+    #[test]
+    fn an_underlay_entry_written_null_is_the_entry_left_out() {
+        let text = network_edited(BLOCK, |tree| {
+            tree["nodes"]["node-b"]["underlay"]["wan"] = Value::Null;
+        });
+        let refusal = refusal(&[&text]);
+        let none = Invalid::Underlay {
+            node: name("node-b"),
+            entries: 0,
+        };
+        assert!(
+            matches!(&refusal, Error::Invalid(invalid) if *invalid == none),
+            "{refusal:?}"
+        );
+    }
+
+    #[test]
+    fn a_node_a_link_or_a_class_written_null_is_the_one_left_out() {
+        let text = network_edited(BLOCK, |tree| {
+            tree["nodes"]["node-x"] = Value::Null;
+            tree["mesh"]["links"]["a-c"] = Value::Null;
+            tree["routing"]["classes"]["egress"] = Value::Null;
+        });
+        let file = file(&[&text]).unwrap();
+        let network = file.network();
+        assert_eq!(
+            names(&network.nodes.keys().cloned().collect::<Vec<_>>()),
+            ["node-a", "node-b", "node-c", "router1"]
+        );
+        assert_eq!(
+            names(&network.mesh.links.keys().cloned().collect::<Vec<_>>()),
+            ["a-b", "a-r1"]
+        );
+        assert!(network.routing.classes.is_empty());
+    }
+
+    #[test]
+    fn a_group_written_null_is_the_group_left_out() {
+        let groups = "slipmesh: {kind: groups}\ncore: [node-a]\nedge: null\n";
+        let documents = [
+            network("{}"),
+            groups.to_owned(),
+            patch("platform: talos, include: [edge]", "one"),
+        ];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let unknown = GroupsError::UnknownName {
+            whose: place(PATCH, &documents, 2).to_string(),
+            name: name("edge"),
+        };
+        let refusal = refusal(&documents);
+        assert!(
+            matches!(&refusal, Error::Groups(groups) if *groups == unknown),
+            "{refusal:?}"
+        );
+    }
+
+    #[test]
+    fn an_exclude_written_null_in_a_group_is_the_exclude_left_out() {
+        let groups = "slipmesh: {kind: groups}\ncore: {include: [node-a, node-b], exclude: null}\n";
+        let file = file(&[
+            &network("{}"),
+            groups,
+            &patch("platform: talos, include: [core]", "one"),
+        ])
+        .unwrap();
+        assert_eq!(names(file.patches()[0].aim().nodes()), ["node-a", "node-b"]);
     }
 
     fn amneziawg<'a>(file: &'a File, link: &str) -> &'a super::super::network::AmneziawgLink {
@@ -753,35 +959,101 @@ mod tests {
 
     #[test]
     fn a_document_without_its_block_is_refused_by_its_line() {
-        let refusal = refusal(&[&network("{}"), "kind: Example\n"]);
+        let documents = [network("{}"), "kind: Example\n".to_owned()];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let line = line(&documents, 1);
+        let refusal = refusal(&documents);
         assert!(
-            refusal.contains("the document starting at line"),
-            "{refusal}"
+            matches!(refusal, Error::Block { line: at, source: BlockError::Missing } if at == line),
+            "{refusal:?}"
         );
-        assert!(refusal.contains("no `slipmesh:` block"), "{refusal}");
     }
 
     #[test]
-    fn a_key_the_block_of_a_kind_does_not_take_is_refused() {
-        let aimed = network_edited(
-            "{kind: network, version: 2, revision: 1, include: [node-a]}",
-            |_| {},
-        );
-        let refusal = refusal(&[&aimed]);
-        assert!(refusal.contains("its `slipmesh:` block"), "{refusal}");
-        assert!(refusal.contains("unknown field `include`"), "{refusal}");
+    fn files_print_with_no_private_key_and_no_patch_body() {
+        let key = sliplib_secrets::wireguard::PrivateKey::generate();
+        let text = network_edited(BLOCK, |tree| {
+            tree["nodes"]["node-a"]["wireguard"] =
+                yaml(&format!("{{private_key: {}}}", key.expose()));
+        });
+        let token = sliplib_secrets::wireguard::PrivateKey::generate();
+        let file = file(&[
+            &text,
+            "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n",
+            &template("platform: talos"),
+            &format!(
+                "{}token: {}\n",
+                patch("platform: talos", "one"),
+                token.expose()
+            ),
+        ])
+        .unwrap();
+        let printed = format!("{file:?}");
+        for secret in [key.expose(), token.expose()] {
+            assert!(!printed.contains(secret), "{printed}");
+        }
+        for value in ["\"metrics\"", "\"text\"", "\"patch\""] {
+            assert!(printed.contains(value), "{value}: {printed}");
+        }
     }
 
     #[test]
-    fn a_kind_of_version_1_is_not_a_kind() {
-        let refusal = refusal(&[
-            &network("{}"),
+    fn a_block_that_does_not_read_is_refused_by_its_line() {
+        for block in [
             "slipmesh: {kind: roadwarriors}\nname: pool\n",
-        ]);
-        assert!(
-            refusal.contains("unknown variant `roadwarriors`"),
-            "{refusal}"
+            "slipmesh: {kind: groups, platform: talos}\ncore: [node-a]\n",
+        ] {
+            let documents = [network("{}").as_str(), block].map(str::to_owned);
+            let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+            let line = line(&documents, 1);
+            let refusal = refusal(&documents);
+            assert!(
+                matches!(refusal, Error::Block { line: at, source: BlockError::Malformed(_) } if at == line),
+                "{block}: {refusal:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_talos_documents_of_the_example_reach_the_nodes_they_say() {
+        let file = file(&[
+            include_str!("../../../docs/example/mesh.yaml"),
+            include_str!("../../../docs/example/talos.yaml"),
+        ])
+        .unwrap();
+        let daemons: Vec<Daemon> = file
+            .templates()
+            .iter()
+            .map(|template| template.read().unwrap().daemon)
+            .collect();
+        assert_eq!(daemons, [Daemon::Router, Daemon::Firewall]);
+        for template in file.templates() {
+            assert_eq!(
+                names(template.aim().nodes()),
+                ["node-a", "node-b", "node-c"]
+            );
+        }
+        let reached: Vec<Vec<&str>> = file
+            .patches()
+            .iter()
+            .map(|patch| names(patch.aim().nodes()))
+            .collect();
+        assert_eq!(
+            reached,
+            [vec!["node-a", "node-b", "node-c"], vec!["node-b"]]
         );
+        let levels = |node: &str| -> Vec<String> {
+            file.patches_for(node)
+                .iter()
+                .map(|patch| patch.value()["environment"][0].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(
+            levels("node-b"),
+            ["EXAMPLE_LEVEL=info", "EXAMPLE_LEVEL=debug"]
+        );
+        assert_eq!(levels("node-c"), ["EXAMPLE_LEVEL=info"]);
+        assert!(file.patches_for("router1").is_empty());
     }
 
     #[test]
@@ -791,60 +1063,117 @@ mod tests {
             |_| {},
         );
         let refusal = refusal(&[&newer]);
-        assert!(refusal.starts_with("`version: 3`"), "{refusal}");
-        assert!(refusal.contains("a newer tool"), "{refusal}");
-    }
-
-    #[test]
-    fn another_revision_is_refused_naming_which_side_to_update() {
-        let newer = network_edited("{kind: network, version: 2, revision: 2}", |_| {});
-        let refusal_of_newer = refusal(&[&newer]);
         assert!(
-            refusal_of_newer.contains("revision 2")
-                && refusal_of_newer.ends_with("update the tool"),
-            "{refusal_of_newer}"
-        );
-        let older = network_edited("{kind: network, version: 2, revision: 0}", |_| {});
-        let refusal_of_older = refusal(&[&older]);
-        assert!(
-            refusal_of_older.contains("revision 0")
-                && refusal_of_older.contains("move the files to revision 1"),
-            "{refusal_of_older}"
+            matches!(&refusal, Error::NewerVersion { place, version: 3 } if *place == Place::new(NETWORK, 1)),
+            "{refusal:?}"
         );
     }
 
     #[test]
-    fn a_network_document_needs_its_version_and_its_revision() {
-        for (block, key) in [
-            ("{kind: network, revision: 1}", "version"),
-            ("{kind: network, version: 2}", "revision"),
+    fn a_network_document_without_a_version_or_below_2_is_of_version_1() {
+        let v1 = include_str!("../../../mesh/tests/golden/v1/slipmesh.yaml");
+        let line = MultiDoc::parse(v1).unwrap().documents()[0].line;
+        let of_v1 = File::parse(v1).expect_err("version 1 reads");
+        assert!(
+            matches!(&of_v1, Error::VersionOne { place } if *place == Place::new(NETWORK, line)),
+            "{of_v1:?}"
+        );
+        for block in [
+            "{kind: network, revision: 1}",
+            "{kind: network, version: null, revision: 1}",
+            "{kind: network, version: 0, revision: 1}",
+            "{kind: network, version: 1, revision: 1}",
         ] {
             let refusal = refusal(&[&network_edited(block, |_| {})]);
             assert!(
-                refusal.contains(&format!("missing field `{key}`")),
-                "{refusal}"
+                matches!(&refusal, Error::VersionOne { place } if *place == Place::new(NETWORK, 1)),
+                "{block}: {refusal:?}"
             );
         }
     }
 
     #[test]
-    fn files_without_a_network_are_refused() {
-        let refusal = refusal(&["slipmesh: {kind: groups}\n"]);
-        assert!(refusal.contains("no `kind: network` document"), "{refusal}");
+    fn the_version_of_every_network_document_is_checked_before_any_revision() {
+        let documents = [
+            network_edited("{kind: network, version: 2, revision: 2}", |_| {}),
+            network_edited("{kind: network, version: 3, revision: 1}", |_| {}),
+        ];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let at = place(NETWORK, &documents, 1);
+        let refusal = refusal(&documents);
+        assert!(
+            matches!(&refusal, Error::NewerVersion { place, version: 3 } if *place == at),
+            "{refusal:?}"
+        );
     }
 
     #[test]
-    fn a_second_network_or_groups_document_is_refused() {
-        let two_networks = refusal(&[&network("{}"), &network("{}")]);
+    fn another_revision_is_refused_naming_which_side_to_update() {
+        let at = Place::new(NETWORK, 1);
+        let newer = network_edited("{kind: network, version: 2, revision: 2}", |_| {});
+        let of_newer = refusal(&[&newer]);
         assert!(
-            two_networks.starts_with("2 `kind: network` documents"),
-            "{two_networks}"
+            matches!(&of_newer, Error::NewerRevision { place, revision: 2 } if *place == at),
+            "{of_newer:?}"
         );
-        let groups = "slipmesh: {kind: groups}\ncore: [node-a]\n";
-        let two_groups = refusal(&[&network("{}"), groups, groups]);
+        let older = network_edited("{kind: network, version: 2, revision: 0}", |_| {});
+        let of_older = refusal(&[&older]);
         assert!(
-            two_groups.starts_with("2 `kind: groups` documents"),
-            "{two_groups}"
+            matches!(&of_older, Error::OlderRevision { place, revision: 0 } if *place == at),
+            "{of_older:?}"
+        );
+    }
+
+    #[test]
+    fn a_network_document_needs_its_revision() {
+        assert!(file(&[&network_edited(BLOCK, |_| {})]).is_ok());
+        let refusal = refusal(&[&network_edited("{kind: network, version: 2}", |_| {})]);
+        assert!(
+            matches!(
+                refusal,
+                Error::Block {
+                    line: 1,
+                    source: BlockError::Malformed(_)
+                }
+            ),
+            "{refusal:?}"
+        );
+    }
+
+    #[test]
+    fn files_without_a_network_are_refused() {
+        let refusal = refusal(&["slipmesh: {kind: groups}\n"]);
+        assert!(matches!(refusal, Error::NoNetwork), "{refusal:?}");
+    }
+
+    #[test]
+    fn a_second_network_or_groups_document_is_refused_by_their_lines_in_the_files() {
+        // The second is set first by its order; the lines come as they stand in the files.
+        let networks = [
+            network("{}"),
+            network_edited(
+                "{kind: network, version: 2, revision: 1, order: 10}",
+                |_| {},
+            ),
+        ];
+        let networks: Vec<&str> = networks.iter().map(String::as_str).collect();
+        let lines = (line(&networks, 0), line(&networks, 1));
+        let two_networks = refusal(&networks);
+        assert!(
+            matches!(two_networks, Error::Several { kind: NETWORK, count: 2, first, second } if (first, second) == lines),
+            "{two_networks:?}"
+        );
+        let groups = [
+            network("{}"),
+            "slipmesh: {kind: groups}\ncore: [node-a]\n".to_owned(),
+            "slipmesh: {kind: groups, order: 10}\ncore: [node-a]\n".to_owned(),
+        ];
+        let groups: Vec<&str> = groups.iter().map(String::as_str).collect();
+        let lines = (line(&groups, 1), line(&groups, 2));
+        let two_groups = refusal(&groups);
+        assert!(
+            matches!(two_groups, Error::Several { kind: GROUPS, count: 2, first, second } if (first, second) == lines),
+            "{two_groups:?}"
         );
     }
 
@@ -852,27 +1181,22 @@ mod tests {
     fn a_key_the_network_does_not_have_is_refused_by_its_line() {
         let refusal = refusal(&[&network("{mesh: {colour: red}}")]);
         assert!(
-            refusal.starts_with("the `kind: network` document at line 1: "),
-            "{refusal}"
+            matches!(&refusal, Error::Body { place, .. } if *place == Place::new(NETWORK, 1)),
+            "{refusal:?}"
         );
-        assert!(refusal.contains("unknown field `colour`"), "{refusal}");
-        assert!(refusal.contains(" at line "), "{refusal}");
     }
 
     #[test]
     fn what_is_wrong_across_the_network_is_refused() {
         let refusal = refusal(&[&network("{nodes: {node-c: {node_id: 0.0.0.1}}}")]);
-        assert!(refusal.contains("both have `node_id` 0.0.0.1"), "{refusal}");
-    }
-
-    #[test]
-    fn a_keepalive_range_from_zero_that_a_link_takes_from_the_network_is_refused() {
-        let refusal = refusal(&[&network(
-            "{mesh: {amneziawg: {persistent_keepalive: 0-30}}}",
-        )]);
+        let twice = Invalid::NodeIdTwice {
+            id: std::net::Ipv4Addr::new(0, 0, 0, 1),
+            first: name("node-a"),
+            second: name("node-c"),
+        };
         assert!(
-            refusal.starts_with("mesh.amneziawg: the range 0-30"),
-            "{refusal}"
+            matches!(&refusal, Error::Invalid(invalid) if *invalid == twice),
+            "{refusal:?}"
         );
     }
 
@@ -906,53 +1230,59 @@ mod tests {
 
     #[test]
     fn a_name_that_is_neither_a_node_nor_a_group_is_refused_naming_the_document() {
-        let refusal = refusal(&[
-            &network("{}"),
-            &patch("platform: talos, include: [node-x]", "one"),
-        ]);
+        let documents = [
+            network("{}"),
+            patch("platform: talos, include: [node-x]", "one"),
+        ];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let unknown = GroupsError::UnknownName {
+            whose: place(PATCH, &documents, 1).to_string(),
+            name: name("node-x"),
+        };
+        let refusal = refusal(&documents);
         assert!(
-            refusal.contains("the `kind: patch` document at line"),
-            "{refusal}"
+            matches!(&refusal, Error::Groups(groups) if *groups == unknown),
+            "{refusal:?}"
         );
-        assert!(refusal.contains("\"node-x\""), "{refusal}");
     }
 
     #[test]
     fn a_document_left_reaching_no_node_is_refused() {
-        let refusal = refusal(&[
-            &network("{}"),
-            &template("platform: talos, include: [node-a], exclude: [node-a]"),
-        ]);
+        let documents = [
+            network("{}"),
+            template("platform: talos, include: [node-a], exclude: [node-a]"),
+        ];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let empty = GroupsError::Empty(place(TEMPLATE, &documents, 1).to_string());
+        let refusal = refusal(&documents);
         assert!(
-            refusal.contains("the `kind: template` document at line")
-                && refusal.contains("is left with no node"),
-            "{refusal}"
+            matches!(&refusal, Error::Groups(groups) if *groups == empty),
+            "{refusal:?}"
         );
     }
 
     #[test]
     fn a_document_that_reaches_a_node_of_another_platform_is_refused() {
-        let by_name = refusal(&[
-            &network("{}"),
-            &patch("platform: talos, include: [node-a, router1]", "one"),
-        ]);
-        assert!(
-            by_name.contains(
-                "is written for `talos` and reaches the node \"router1\", a `routeros` node"
-            ),
-            "{by_name}"
-        );
+        let by_name = [
+            network("{}"),
+            patch("platform: talos, include: [node-a, router1]", "one"),
+        ];
         // Inside a group `all` is every node, whatever the platform of the document that names it.
-        let groups = "slipmesh: {kind: groups}\neveryone: [all]\n";
-        let by_group = refusal(&[
-            &network("{}"),
-            groups,
-            &patch("platform: talos, include: [everyone]", "one"),
-        ]);
-        assert!(
-            by_group.contains("reaches the node \"router1\""),
-            "{by_group}"
-        );
+        let by_group = [
+            network("{}"),
+            "slipmesh: {kind: groups}\neveryone: [all]\n".to_owned(),
+            patch("platform: talos, include: [everyone]", "one"),
+        ];
+        for documents in [&by_name[..], &by_group[..]] {
+            let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+            let at = place(PATCH, &documents, documents.len() - 1);
+            let refusal = refusal(&documents);
+            assert!(
+                matches!(&refusal, Error::OtherPlatform { place, platform: Platform::Talos, node, other: Platform::Routeros }
+                    if *place == at && node.as_str() == "router1"),
+                "{refusal:?}"
+            );
+        }
     }
 
     #[test]
@@ -975,16 +1305,17 @@ mod tests {
 
     #[test]
     fn a_template_or_a_patch_for_routeros_is_refused() {
-        for document in [
-            template("platform: routeros"),
-            patch("platform: routeros", "one"),
+        for (kind, document) in [
+            (TEMPLATE, template("platform: routeros")),
+            (PATCH, patch("platform: routeros", "one")),
         ] {
-            let refusal = refusal(&[&network("{}"), &document]);
+            let documents = [network("{}"), document];
+            let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+            let at = place(kind, &documents, 1);
+            let refusal = refusal(&documents);
             assert!(
-                refusal.contains(
-                    "is written for `routeros`, whose tool takes no document of this kind"
-                ),
-                "{refusal}"
+                matches!(&refusal, Error::NotTaken { place, platform: Platform::Routeros } if *place == at),
+                "{refusal:?}"
             );
         }
     }
@@ -995,20 +1326,26 @@ mod tests {
             &network("{}"),
             "slipmesh: {kind: groups}\nnode-a: [node-b]\n",
         ]);
-        assert!(refusal.contains("is named like a node"), "{refusal}");
+        let like_a_node = GroupsError::NamedLikeANode(name("node-a"));
+        assert!(
+            matches!(&refusal, Error::Groups(groups) if *groups == like_a_node),
+            "{refusal:?}"
+        );
     }
 
     #[test]
     fn a_key_a_group_does_not_take_is_refused_by_its_line() {
-        let refusal = refusal(&[
-            &network("{}"),
-            "slipmesh: {kind: groups}\ncore: {include: [node-a], only: [node-b]}\n",
-        ]);
+        let documents = [
+            network("{}"),
+            "slipmesh: {kind: groups}\ncore: {include: [node-a], only: [node-b]}\n".to_owned(),
+        ];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let at = place(GROUPS, &documents, 1);
+        let refusal = refusal(&documents);
         assert!(
-            refusal.contains("the `kind: groups` document at line"),
-            "{refusal}"
+            matches!(&refusal, Error::Body { place, .. } if *place == at),
+            "{refusal:?}"
         );
-        assert!(refusal.contains("unknown field `only`"), "{refusal}");
     }
 
     #[test]
@@ -1084,26 +1421,28 @@ mod tests {
 
     #[test]
     fn a_template_with_a_key_it_does_not_take_is_refused_when_read() {
-        let document = format!("{}colour: red\n", template("platform: talos"));
-        let file = file(&[&network("{}"), &document]).unwrap();
-        let refusal = format!(
-            "{:#}",
-            anyhow::Error::new(file.templates()[0].read().unwrap_err())
-        );
+        let documents = [
+            network("{}"),
+            format!("{}colour: red\n", template("platform: talos")),
+        ];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let at = place(TEMPLATE, &documents, 1);
+        let file = file(&documents).unwrap();
+        let refusal = file.templates()[0].read().unwrap_err();
         assert!(
-            refusal.starts_with("the `kind: template` document at line"),
-            "{refusal}"
+            matches!(&refusal, Error::Body { place, .. } if *place == at),
+            "{refusal:?}"
         );
-        assert!(refusal.contains("unknown field `colour`"), "{refusal}");
     }
 
     #[test]
     fn an_aim_reads_as_where_its_document_stands() {
-        let file = file(&[&network("{}"), &patch("platform: talos", "one")]).unwrap();
-        let place = file.patches()[0].aim().to_string();
-        assert!(
-            place.starts_with("the `kind: patch` document at line "),
-            "{place}"
+        let documents = [network("{}"), patch("platform: talos", "one")];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let file = file(&documents).unwrap();
+        assert_eq!(
+            file.patches()[0].aim().to_string(),
+            place(PATCH, &documents, 1).to_string()
         );
     }
 
@@ -1129,24 +1468,26 @@ mod tests {
 
     #[test]
     fn a_key_the_settings_of_a_platform_do_not_have_is_refused_when_read() {
-        let of_talos = "slipmesh: {kind: platform, platform: talos}\nlisten: true\n";
-        let of_routeros = "slipmesh: {kind: platform, platform: routeros}\nmetrics: {}\n";
+        let documents = [
+            network("{}"),
+            "slipmesh: {kind: platform, platform: talos}\nlisten: true\n".to_owned(),
+            "slipmesh: {kind: platform, platform: routeros}\nmetrics: {}\n".to_owned(),
+        ];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
         // Both load: the tool of another platform reads the block alone.
-        let file = file(&[&network("{}"), of_talos, of_routeros]).unwrap();
-        let talos = format!(
-            "{:#}",
-            anyhow::Error::new(file.talos_settings().unwrap_err())
-        );
+        let file = file(&documents).unwrap();
+        let of_talos = place(PLATFORM, &documents, 1);
+        let talos = file.talos_settings().unwrap_err();
         assert!(
-            talos.starts_with("the `kind: platform` document at line"),
-            "{talos}"
+            matches!(&talos, Error::Body { place, .. } if *place == of_talos),
+            "{talos:?}"
         );
-        assert!(talos.contains("unknown field `listen`"), "{talos}");
-        let routeros = format!(
-            "{:#}",
-            anyhow::Error::new(file.routeros_settings().unwrap_err())
+        let of_routeros = place(PLATFORM, &documents, 2);
+        let routeros = file.routeros_settings().unwrap_err();
+        assert!(
+            matches!(&routeros, Error::Body { place, .. } if *place == of_routeros),
+            "{routeros:?}"
         );
-        assert!(routeros.contains("unknown field `metrics`"), "{routeros}");
     }
 
     #[test]
@@ -1160,41 +1501,18 @@ mod tests {
     }
 
     #[test]
-    fn a_second_platform_document_for_one_platform_is_refused_by_both_lines() {
-        let settings = "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n";
-        let refusal = refusal(&[&network("{}"), settings, settings]);
-        assert!(
-            refusal.starts_with("two `kind: platform` documents for `talos`, at lines "),
-            "{refusal}"
-        );
-    }
-
-    #[test]
-    fn a_document_set_before_the_others_by_its_order_is_read_first() {
-        // Of two documents of one identity for one platform the first read is the first named.
-        let early = "slipmesh: {kind: platform, platform: talos, order: 10}\nmetrics: {}\n";
+    fn a_second_platform_document_for_one_platform_is_refused_by_both_lines_in_the_files() {
+        // The second is set first by its order; the lines come as they stand in the files.
         let late = "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n";
-        let line_of = |text: &str| -> usize {
-            text.split("at lines ")
-                .nth(1)
-                .unwrap()
-                .split(' ')
-                .next()
-                .unwrap()
-                .parse()
-                .unwrap()
-        };
-        let as_read = refusal(&[&network("{}"), late, early]);
-        let second = as_read
-            .split(" and ")
-            .nth(1)
-            .unwrap()
-            .split(',')
-            .next()
-            .unwrap();
+        let early = "slipmesh: {kind: platform, platform: talos, order: 10}\nmetrics: {}\n";
+        let documents = [network("{}").as_str(), late, early].map(str::to_owned);
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let lines = (line(&documents, 1), line(&documents, 2));
+        let refusal = refusal(&documents);
         assert!(
-            line_of(&as_read) > second.parse::<usize>().unwrap(),
-            "{as_read}"
+            matches!(refusal, Error::PlatformTwice { platform: Platform::Talos, first, second }
+                if (first, second) == lines),
+            "{refusal:?}"
         );
     }
 }

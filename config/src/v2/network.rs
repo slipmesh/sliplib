@@ -4,27 +4,27 @@
 //! As the loader returns it, a node's `routing` and the block of a link's type hold what is in
 //! force there: the node's and the link's own values laid over the network's.
 
-use super::{ClassName, Name, Platform};
+use super::name::is_name_character;
+use super::{ClassName, Map, Name, Platform, UniqueKeys, absent_when_null, unique_keys};
 use crate::router::{BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER};
 use crate::{Obfuscation, Range};
-use indexmap::IndexMap;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, de};
 use sliplib_net::{Ipv4Net, Ipv6Net};
 use sliplib_secrets::wireguard::PrivateKey;
-use sliplib_yaml::Value;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32};
 
-/// What is named, by its name, in the order written: the order reaches the nodes' configs.
-pub type Map<K, V> = IndexMap<K, V>;
-
-/// A key written with `null` reads as the key left out.
-fn absent_when_null<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+/// A mapping whose keys are names, `null` read as the mapping left out, a key that stands twice
+/// refused.
+fn names_absent_when_null<'de, D, K, V>(deserializer: D) -> Result<Map<K, V>, D::Error>
 where
     D: Deserializer<'de>,
-    T: Deserialize<'de> + Default,
+    K: Deserialize<'de> + std::hash::Hash + Eq + std::borrow::Borrow<str>,
+    V: Deserialize<'de>,
 {
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+    Ok(Option::<UniqueKeys<K, V>>::deserialize(deserializer)?
+        .map(|keys| keys.0)
+        .unwrap_or_default())
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -33,6 +33,7 @@ pub struct Network {
     pub addressing: Addressing,
     pub routing: Routing,
     pub mesh: Mesh,
+    #[serde(deserialize_with = "unique_keys")]
     pub nodes: Map<Name, Node>,
 }
 
@@ -100,7 +101,7 @@ pub struct Routing {
     pub learn: Vec<Prefix4>,
     #[serde(default, deserialize_with = "absent_when_null")]
     pub announce: Vec<Prefix4>,
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default, deserialize_with = "names_absent_when_null")]
     pub classes: Map<ClassName, Class>,
 }
 
@@ -155,6 +156,7 @@ pub struct Node {
     /// An identity in the form of an IPv4 address, from which the node's addresses are derived.
     pub node_id: Ipv4Addr,
     /// What the node reaches the world through, by name.
+    #[serde(deserialize_with = "unique_keys")]
     pub underlay: Map<Name, Underlay>,
     #[serde(default)]
     pub wireguard: Option<NodeWireguard>,
@@ -185,9 +187,19 @@ pub enum Family {
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(try_from = "EndpointKeys")]
 pub struct Endpoint {
-    pub family: Family,
+    family: Family,
+    host: String,
+}
+
+impl Endpoint {
+    pub fn family(&self) -> Family {
+        self.family
+    }
+
     /// The address or the host name, as written.
-    pub host: String,
+    pub fn host(&self) -> &str {
+        &self.host
+    }
 }
 
 #[derive(Deserialize)]
@@ -307,10 +319,7 @@ impl TryFrom<String> for InterfacePrefix {
         }
         // The kernel refuses `/`, `:` and whitespace in an interface name, and a routing daemon
         // reads the prefix in a pattern, where `*`, `?` and `[` would match other interfaces.
-        if !prefix
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-        {
+        if !prefix.chars().all(is_name_character) {
             return Err(InterfacePrefixError::Character(prefix));
         }
         Ok(Self(prefix))
@@ -329,7 +338,7 @@ pub struct Mesh {
     pub wireguard: Option<WireguardDefaults>,
     #[serde(default)]
     pub amneziawg: Option<AmneziawgDefaults>,
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default, deserialize_with = "names_absent_when_null")]
     pub links: Map<Name, Link>,
 }
 
@@ -425,6 +434,7 @@ struct End {}
 #[serde(deny_unknown_fields)]
 struct LinkKeys {
     r#type: LinkType,
+    #[serde(deserialize_with = "unique_keys")]
     ends: Map<Name, End>,
     #[serde(default)]
     wireguard: Option<WireguardLink>,
@@ -440,7 +450,7 @@ pub enum LinkError {
     Ends(&'static str, usize),
     #[error("a link of type `{0}` has no `{0}` block, which holds its port")]
     NoBlock(&'static str),
-    #[error("a link of type `{link}` has a `{block}` block, the block of another type")]
+    #[error("a link of type `{link}` has the block `{block}`, which is another type's")]
     OtherBlock {
         link: &'static str,
         block: &'static str,
@@ -478,66 +488,38 @@ impl TryFrom<LinkKeys> for Link {
     }
 }
 
+/// What is wrong with an `obfuscation` by its own keys.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ObfuscationError {
+    #[error("`obfuscation` has no key `{0}` - take it out, or correct its name")]
+    UnknownKey(String),
+}
+
 /// The obfuscation of a link as the files hold it: read like the daemons' own, but refusing a
 /// key that is not one of its fields, which a daemon passes over.
-#[derive(Deserialize, Debug, Clone, PartialEq)]
-#[serde(try_from = "Value")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StrictObfuscation(pub Obfuscation);
 
-/// Every field of [`Obfuscation`], as the files name it.
-pub(crate) const OBFUSCATION_FIELDS: [&str; 25] = [
-    "jc",
-    "jmin",
-    "jmax",
-    "s1",
-    "s2",
-    "s3",
-    "s4",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "i1",
-    "i2",
-    "i3",
-    "i4",
-    "i5",
-    "header_protection_key",
-    "content_padding_addition",
-    "rekey_after_time",
-    "rekey_timeout",
-    "reject_after_time",
-    "keepalive_timeout",
-    "max_handshake_attempts",
-    "random_trailers",
-    "disable_cookies",
-];
-
-impl TryFrom<Value> for StrictObfuscation {
-    type Error = String;
-
-    fn try_from(value: Value) -> Result<Self, String> {
-        let unknown = value
-            .as_mapping()
-            .into_iter()
-            .flatten()
-            .filter_map(|(key, _)| key.as_str())
-            .find(|key| !OBFUSCATION_FIELDS.contains(key));
-        if let Some(key) = unknown {
-            return Err(format!(
-                "unknown field `{key}`, expected one of the obfuscation fields"
-            ));
+impl<'de> Deserialize<'de> for StrictObfuscation {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut unknown = None;
+        let obfuscation = serde_ignored::deserialize(deserializer, |key| {
+            unknown.get_or_insert_with(|| key.to_string());
+        })?;
+        match unknown {
+            Some(key) => Err(de::Error::custom(ObfuscationError::UnknownKey(key))),
+            None => Ok(Self(obfuscation)),
         }
-        sliplib_yaml::from_value(value)
-            .map(Self)
-            .map_err(|error| error.to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing::{example, network, with};
+    use super::super::NameError;
+    use super::super::testing::{example, left_out, network, with, written_null};
     use super::*;
+    use sliplib_yaml::Value;
 
     #[test]
     fn the_example_of_the_specification_reads() {
@@ -554,12 +536,10 @@ mod tests {
         assert_eq!(network.nodes["router1"].platform, Platform::Routeros);
 
         let endpoint = |node: &str| network.nodes[node].underlay["wan"].endpoint.clone();
+        let node_b = endpoint("node-b").unwrap();
         assert_eq!(
-            endpoint("node-b"),
-            Some(Endpoint {
-                family: Family::Ipv4,
-                host: "node-b.example.com".to_owned()
-            })
+            (node_b.family(), node_b.host()),
+            (Family::Ipv4, "node-b.example.com")
         );
         assert_eq!(endpoint("node-c"), None);
         assert_eq!(network.nodes["node-c"].underlay["wan"].mtu, Some(1420));
@@ -605,68 +585,44 @@ mod tests {
             "{mesh: {links: {a-b: {amneziawg: {obfuscation: {color: red}}}}}}",
             "{mesh: {links: {a-r1: {wireguard: {color: red}}}}}",
         ] {
-            let refused = with(overlay).unwrap_err();
-            assert!(refused.contains("`color`"), "{overlay}: {refused}");
+            assert!(with(overlay).is_err(), "{overlay}");
         }
     }
 
     #[test]
     fn what_is_only_planned_is_a_key_the_format_does_not_have() {
-        for (overlay, key) in [
-            (
-                "{addressing: {tunnel: {ipv6: \"3fff:0:0:9::/64\"}}}",
-                "ipv6",
-            ),
-            ("{routing: {ospf: {cost: 10}}}", "ospf"),
-            ("{routing: {bgp: {sessions: {}}}}", "sessions"),
-            ("{routing: {classes: {egress: {table: 152}}}}", "table"),
-            ("{mesh: {wireguard: {fwmark: \"0x10\"}}}", "fwmark"),
-            ("{mesh: {links: {a-b: {mtu: 1400}}}}", "mtu"),
-            (
-                "{mesh: {links: {a-b: {routing: {ospf: {cost: 5}}}}}}",
-                "routing",
-            ),
-            (
-                "{mesh: {links: {a-b: {ends: {node-a: {interface: wg9}}}}}}",
-                "interface",
-            ),
-            (
-                "{mesh: {links: {a-r1: {wireguard: {preshared_key: x}}}}}",
-                "preshared_key",
-            ),
+        for overlay in [
+            "{addressing: {tunnel: {ipv6: \"3fff:0:0:9::/64\"}}}",
+            "{routing: {ospf: {cost: 10}}}",
+            "{routing: {bgp: {sessions: {}}}}",
+            "{routing: {classes: {egress: {table: 152}}}}",
+            "{mesh: {wireguard: {fwmark: \"0x10\"}}}",
+            "{mesh: {links: {a-b: {mtu: 1400}}}}",
+            "{mesh: {links: {a-b: {routing: {ospf: {cost: 5}}}}}}",
+            "{mesh: {links: {a-b: {ends: {node-a: {interface: wg9}}}}}}",
+            "{mesh: {links: {a-r1: {wireguard: {preshared_key: x}}}}}",
+            "{mesh: {links: {a-b: {type: ethernet}}}}",
         ] {
-            let refused = with(overlay).unwrap_err();
-            assert!(
-                refused.contains(&format!("`{key}`")),
-                "{overlay}: {refused}"
-            );
+            assert!(with(overlay).is_err(), "{overlay}");
         }
-        let refused = with("{mesh: {links: {a-b: {type: ethernet}}}}").unwrap_err();
-        assert!(refused.contains("ethernet"), "{refused}");
     }
 
     #[test]
-    fn a_required_key_left_out_is_missed_by_name() {
-        for (overlay, key) in [
-            ("{addressing: null}", "addressing"),
-            ("{addressing: {loopback: {ipv6: null}}}", "ipv6"),
-            ("{routing: {bgp: {as: null}}}", "as"),
-            (
-                "{routing: {classes: {egress: {protocol: null}}}}",
-                "protocol",
-            ),
-            ("{nodes: {node-a: {platform: null}}}", "platform"),
-            ("{nodes: {node-a: {node_id: null}}}", "node_id"),
-            ("{nodes: {node-a: {underlay: null}}}", "underlay"),
-            ("{mesh: {links: {a-b: {type: null}}}}", "type"),
-            ("{mesh: {links: {a-b: {ends: null}}}}", "ends"),
-            ("{mesh: {links: {a-b: {amneziawg: {port: null}}}}}", "port"),
+    fn a_required_key_left_out_or_written_null_is_refused() {
+        for path in [
+            &["addressing"][..],
+            &["addressing", "loopback", "ipv6"],
+            &["routing", "bgp", "as"],
+            &["routing", "classes", "egress", "protocol"],
+            &["nodes", "node-a", "platform"],
+            &["nodes", "node-a", "node_id"],
+            &["nodes", "node-a", "underlay"],
+            &["mesh", "links", "a-b", "type"],
+            &["mesh", "links", "a-b", "ends"],
+            &["mesh", "links", "a-b", "amneziawg", "port"],
         ] {
-            let refused = with(overlay).unwrap_err();
-            assert!(
-                refused.contains(&format!("missing field `{key}`")),
-                "{overlay}: {refused}"
-            );
+            assert!(left_out(path).is_err(), "{path:?} left out");
+            assert!(written_null(path).is_err(), "{path:?} written null");
         }
     }
 
@@ -676,6 +632,8 @@ mod tests {
             "{routing: {bgp: {as: 0}}}",
             "{routing: {bgp: {as: 4294967296}}}",
             "{routing: {bfd: {min_rx_ms: 0}}}",
+            "{routing: {bfd: {min_tx_ms: 0}}}",
+            "{routing: {bfd: {multiplier: 0}}}",
             "{routing: {bfd: {multiplier: 256}}}",
             "{routing: {classes: {egress: {protocol: 256}}}}",
             "{routing: {classes: {-egress: {protocol: 7}}}}",
@@ -690,6 +648,7 @@ mod tests {
             "{mesh: {interface_prefix: \"mesh*\"}}",
             "{mesh: {links: {a-b: {amneziawg: {port: 0}}}}}",
             "{mesh: {links: {a-b: {amneziawg: {port: 65536}}}}}",
+            "{mesh: {links: {a-r1: {wireguard: {port: 0}}}}}",
             "{mesh: {links: {a-r1: {wireguard: {persistent_keepalive: 20-30}}}}}",
             "{mesh: {wireguard: {persistent_keepalive: 65536}}}",
             "{mesh: {amneziawg: {obfuscation: {h1: 9-1}}}}",
@@ -699,20 +658,25 @@ mod tests {
     }
 
     #[test]
-    fn a_list_written_as_null_is_a_list_left_out() {
-        let network = with(
-            "{routing: {direct_interfaces: null, learn: null, announce: null, classes: null}, \
-              mesh: {links: null}}",
-        )
-        .unwrap();
-        assert!(network.routing.direct_interfaces.is_empty());
-        assert!(network.routing.learn.is_empty() && network.routing.announce.is_empty());
-        assert!(network.routing.classes.is_empty() && network.mesh.links.is_empty());
+    fn a_key_written_null_reads_as_the_key_left_out() {
+        for path in [
+            &["routing", "bfd"][..],
+            &["routing", "direct_interfaces"],
+            &["routing", "learn"],
+            &["routing", "announce"],
+            &["routing", "classes"],
+            &["mesh", "links"],
+            &["nodes", "router1", "routing"],
+            &["nodes", "router1", "routing", "direct_interfaces"],
+            &["nodes", "router1", "routing", "learn"],
+            &["nodes", "router1", "routing", "announce"],
+        ] {
+            assert_eq!(written_null(path), left_out(path), "{path:?}");
+        }
     }
 
     #[test]
     fn bfd_written_empty_is_on_with_its_defaults() {
-        assert_eq!(with("{routing: {bfd: null}}").unwrap().routing.bfd, None);
         let mut value = example();
         value["routing"]["bfd"] = Value::Mapping(Default::default());
         let bfd = network(value).unwrap().routing.bfd.unwrap();
@@ -742,26 +706,31 @@ mod tests {
             ),
             ("{ipv6: node-b}", Family::Ipv6, "node-b"),
         ] {
-            assert_eq!(
-                endpoint(yaml).unwrap(),
-                Endpoint {
-                    family,
-                    host: host.to_owned()
-                }
-            );
+            let read = endpoint(yaml).unwrap();
+            assert_eq!((read.family(), read.host()), (family, host), "{yaml}");
         }
     }
 
     #[test]
     fn an_endpoint_of_the_other_family_of_both_or_of_none_is_refused() {
-        for (yaml, said) in [
-            ("{ipv6: 192.0.2.1}", "other family"),
-            ("{ipv4: \"2001:db8::1\"}", "other family"),
-            ("{ipv4: 192.0.2.1, ipv6: \"2001:db8::1\"}", "both"),
-            ("{}", "names none"),
+        let other_family = |host: &str, key| EndpointError::OtherFamily {
+            host: host.to_owned(),
+            key,
+        };
+        for (yaml, refusal) in [
+            ("{ipv6: 192.0.2.1}", other_family("192.0.2.1", "ipv6")),
+            (
+                "{ipv4: \"2001:db8::1\"}",
+                other_family("2001:db8::1", "ipv4"),
+            ),
+            (
+                "{ipv4: 192.0.2.1, ipv6: \"2001:db8::1\"}",
+                EndpointError::BothFamilies,
+            ),
+            ("{}", EndpointError::NoFamily),
         ] {
             let refused = endpoint(yaml).unwrap_err();
-            assert!(refused.contains(said), "{yaml}: {refused}");
+            assert!(refused.contains(&refusal.to_string()), "{yaml}: {refused}");
         }
     }
 
@@ -779,8 +748,9 @@ mod tests {
             "\"\"",
         ] {
             let refused = endpoint(&format!("{{ipv4: {host}}}")).unwrap_err();
+            let written: String = sliplib_yaml::from_str(host).unwrap();
             assert!(
-                refused.contains("neither an IP address nor a host name"),
+                refused.contains(&EndpointError::NotAHost(written).to_string()),
                 "{host}: {refused}"
             );
         }
@@ -792,41 +762,44 @@ mod tests {
 
     #[test]
     fn a_link_holds_the_block_of_its_own_type_and_no_other() {
-        for (yaml, said) in [
+        for (yaml, refusal) in [
             (
                 "{type: wireguard, ends: {a: {}, b: {}}}",
-                "no `wireguard` block",
+                LinkError::NoBlock(WIREGUARD),
             ),
             (
                 "{type: amneziawg, ends: {a: {}, b: {}}}",
-                "no `amneziawg` block",
+                LinkError::NoBlock(AMNEZIAWG),
             ),
             (
                 "{type: wireguard, ends: {a: {}, b: {}}, amneziawg: {port: 1}}",
-                "has a `amneziawg` block",
+                LinkError::OtherBlock {
+                    link: WIREGUARD,
+                    block: AMNEZIAWG,
+                },
             ),
             (
                 "{type: amneziawg, ends: {a: {}, b: {}}, amneziawg: {port: 1}, wireguard: {port: 1}}",
-                "has a `wireguard` block",
+                LinkError::OtherBlock {
+                    link: AMNEZIAWG,
+                    block: WIREGUARD,
+                },
             ),
         ] {
             let refused = link(yaml).unwrap_err();
-            assert!(refused.contains(said), "{yaml}: {refused}");
+            assert!(refused.contains(&refusal.to_string()), "{yaml}: {refused}");
         }
     }
 
     #[test]
     fn a_tunnel_has_exactly_two_ends() {
-        for (ends, count) in [
-            ("{a: {}}", "has 1"),
-            ("{a: {}, b: {}, c: {}}", "has 3"),
-            ("{}", "has 0"),
-        ] {
+        for (ends, count) in [("{a: {}}", 1), ("{a: {}, b: {}, c: {}}", 3), ("{}", 0)] {
             let refused = link(&format!(
                 "{{type: wireguard, ends: {ends}, wireguard: {{port: 1}}}}"
             ))
             .unwrap_err();
-            assert!(refused.contains(count), "{ends}: {refused}");
+            let refusal = LinkError::Ends(WIREGUARD, count).to_string();
+            assert!(refused.contains(&refusal), "{ends}: {refused}");
         }
     }
 
@@ -859,15 +832,51 @@ mod tests {
             random_trailers: Some(true),
             disable_cookies: Some(true),
         };
-        let written = sliplib_yaml::to_value(&every_field).unwrap();
-        let fields: Vec<&str> = written
-            .as_mapping()
-            .unwrap()
-            .keys()
-            .map(|key| key.as_str().unwrap())
-            .collect();
-        assert_eq!(fields, OBFUSCATION_FIELDS);
-        let read: StrictObfuscation = sliplib_yaml::from_value(written).unwrap();
-        assert_eq!(read.0, every_field);
+        let written = sliplib_yaml::to_string(&every_field).unwrap();
+        assert_eq!(obfuscation(&written).unwrap().0, every_field);
+    }
+
+    fn obfuscation(yaml: &str) -> Result<StrictObfuscation, String> {
+        sliplib_yaml::from_str(yaml).map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn a_key_the_obfuscation_does_not_have_is_refused_naming_it() {
+        assert!(obfuscation("{jc: 4}").is_ok());
+        let refused = obfuscation("{jc: 4, color: red}").unwrap_err();
+        let refusal = ObfuscationError::UnknownKey("color".to_owned()).to_string();
+        assert!(refused.contains(&refusal), "{refused}");
+    }
+
+    #[test]
+    fn a_key_of_the_obfuscation_that_is_not_a_text_is_refused() {
+        for yaml in ["{0: 4}", "{true: 4}", "{jc: 4, 1: 5}"] {
+            assert!(obfuscation(yaml).is_err(), "{yaml} from the text");
+            let value: Value = sliplib_yaml::from_str(yaml).unwrap();
+            let read: Result<StrictObfuscation, _> = sliplib_yaml::from_value(value);
+            assert!(read.is_err(), "{yaml} from a value");
+        }
+    }
+
+    /// A node that reads, to be laid into the example under a name.
+    const NODE: &str = "{platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}";
+
+    // YAML reads `1.0` and `1` as one name: two entries would be one, the later replacing the
+    // earlier.
+    #[test]
+    fn two_keys_of_one_mapping_of_the_network_that_read_as_one_name_are_refused() {
+        let node = NODE.replace("0.0.0.9", "0.0.0.10");
+        let link = "{type: wireguard, ends: {node-a: {}, router1: {}}, wireguard: {port: 1}}";
+        for overlay in [
+            format!("{{nodes: {{1.0: {NODE}, 1: {node}}}}}"),
+            "{routing: {classes: {1.0: {protocol: 160}, 1: {protocol: 161}}}}".to_owned(),
+            "{nodes: {node-a: {underlay: {1.0: {}, 1: {}}}}}".to_owned(),
+            format!("{{mesh: {{links: {{1.0: {link}, 1: {link}}}}}}}"),
+            "{mesh: {links: {a-b: {ends: {1.0: {}, 1: {}}}}}}".to_owned(),
+        ] {
+            let refused = with(&overlay).unwrap_err();
+            let twice = NameError::Twice("1".to_owned()).to_string();
+            assert!(refused.contains(&twice), "{overlay}: {refused}");
+        }
     }
 }

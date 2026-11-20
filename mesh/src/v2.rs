@@ -146,8 +146,8 @@ pub fn lower(files: &File) -> Result<Network, Error> {
                 endpoint: underlay
                     .and_then(|underlay| underlay.endpoint.as_ref())
                     .map(|endpoint| Endpoint {
-                        written: endpoint.host.clone(),
-                        stated_family: Some(family(endpoint.family)),
+                        written: endpoint.host().to_owned(),
+                        stated_family: Some(family(endpoint.family())),
                     }),
                 underlay_mtu: underlay
                     .and_then(|underlay| underlay.mtu)
