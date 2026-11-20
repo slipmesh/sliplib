@@ -79,7 +79,7 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
     let mut written = secrets::read(network);
     let mut minted = Minted::default();
 
-    let format = network.format;
+    let format = &network.format;
     for (index, node) in network.nodes.iter().enumerate() {
         if written.mesh_private_keys.contains_key(&node.name) || !network.needs_a_key(&node.name) {
             continue;
@@ -104,7 +104,7 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
         }
     }
 
-    for pool in network.v1.iter().flat_map(|v1| &v1.pools) {
+    for pool in network.format.v1().into_iter().flat_map(|v1| &v1.pools) {
         let private_key =
             (!written.roadwarrior_private_keys.contains_key(&pool.name)).then(PrivateKey::generate);
         if private_key.is_some() {

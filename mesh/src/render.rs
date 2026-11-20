@@ -114,7 +114,7 @@ pub(crate) fn bgp_peers_for(mesh: &Network, node_name: &str) -> Vec<BgpPeerEntry
 /// The node's bypass rules, every `bypass` entry for it in one `BypassConfig`; `None` when it has
 /// none.
 pub(crate) fn bypass_for(mesh: &Network, node_name: &str) -> Option<BypassConfig> {
-    let v1 = mesh.v1.as_ref()?;
+    let v1 = mesh.format.v1()?;
     let entries: Vec<_> = v1.bypass.iter().filter(|b| b.node == node_name).collect();
     if entries.is_empty() {
         return None;
@@ -276,8 +276,9 @@ fn roadwarrior_interfaces_for(
     node_name: &str,
     resolved: &ResolvedSecrets,
 ) -> Result<Vec<InterfaceEntry>> {
-    mesh.v1
-        .iter()
+    mesh.format
+        .v1()
+        .into_iter()
         .flat_map(|v1| &v1.pools)
         .filter(|pool| pool.node_hostnames.iter().any(|h| h == node_name))
         .map(|pool| {

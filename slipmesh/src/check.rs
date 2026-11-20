@@ -4,6 +4,8 @@
 use anyhow::{Context, Result};
 use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_config::v1::mesh_config::missing_defaults;
+use sliplib_config::v2;
+use sliplib_config::v2::platform::TalosSettings;
 use sliplib_mesh::model::{MetricsPorts, Network};
 use sliplib_mesh::render::node_configs;
 use sliplib_mesh::secrets::ResolvedSecrets;
@@ -16,32 +18,49 @@ fn read(config_path: &Path) -> Result<SlipmeshFile> {
         .with_context(|| format!("reading {}", config_path.display()))
 }
 
-/// What is wrong with the file as a whole and stops no node by itself. In version 1, the network
-/// settings left to a default that `mint` writes. In version 2, a document of a platform whose
-/// keys do not read: the settings of `talos` and of `routeros`, and the keys of a `template`.
-fn whole_file(config_path: &Path, file: &SlipmeshFile) -> Result<()> {
+/// What is wrong with the file as a whole and stops no node by itself, each on its own: one says
+/// nothing about the next. In version 1, the network settings left to a default that `mint`
+/// writes. In version 2, a document of a platform whose keys do not read: the settings of `talos`
+/// and of `routeros`, and the keys of each `template`. With them, the settings of `talos` where
+/// they read, which the metrics ports of its nodes come from.
+fn whole_file(
+    config_path: &Path,
+    file: &SlipmeshFile,
+) -> (Vec<anyhow::Error>, Option<TalosSettings>) {
+    let in_the_file =
+        |refusal: v2::Error| anyhow::Error::new(refusal).context(config_path.display().to_string());
     match file {
         SlipmeshFile::V1(file) => {
             let unset: Vec<&str> = missing_defaults(file.topology())
                 .into_iter()
                 .map(|(key, _)| key)
                 .collect();
-            anyhow::ensure!(
-                unset.is_empty(),
-                "{} lacks {} - `slipmesh mint` writes their defaults",
-                config_path.display(),
-                unset.join(", ")
-            );
+            let refusals = (!unset.is_empty()).then(|| {
+                anyhow::anyhow!(
+                    "{} lacks {} - `slipmesh mint` writes their defaults",
+                    config_path.display(),
+                    unset.join(", ")
+                )
+            });
+            (refusals.into_iter().collect(), None)
         }
         SlipmeshFile::V2(files) => {
-            files.talos_settings()?;
-            files.routeros_settings()?;
-            for template in files.templates() {
-                template.read()?;
+            let mut refusals = Vec::new();
+            let talos = files
+                .talos_settings()
+                .map_err(|refusal| refusals.push(in_the_file(refusal)))
+                .ok();
+            if let Err(refusal) = files.routeros_settings() {
+                refusals.push(in_the_file(refusal));
             }
+            for template in files.templates() {
+                if let Err(refusal) = template.read() {
+                    refusals.push(in_the_file(refusal));
+                }
+            }
+            (refusals, talos)
         }
     }
-    Ok(())
 }
 
 fn node(network: &Network, host: &str, resolved: &ResolvedSecrets) -> Result<()> {
@@ -68,17 +87,22 @@ pub fn nodes<'n>(network: &'n Network, resolved: &ResolvedSecrets) -> Vec<(&'n s
 }
 
 /// The network of `file`, which every node's configs are computed from: what refuses it refuses
-/// them all.
-pub fn network(file: &SlipmeshFile) -> Result<Network> {
+/// them all. The metrics ports of a file of version 2 are those of `talos`, its settings.
+pub fn network(file: &SlipmeshFile, talos: Option<&TalosSettings>) -> Result<Network> {
     let mut network = sliplib_mesh::model::lower(file)?;
-    // The listeners are settings of `talos`. Settings that do not read are refused with the
-    // rest of the file, and leave the nodes to be checked without them.
-    if let SlipmeshFile::V2(files) = file
-        && let Ok(settings) = files.talos_settings()
-    {
-        network.metrics = MetricsPorts::from(&settings);
+    if let Some(settings) = talos {
+        network.metrics = MetricsPorts::from(settings);
     }
     Ok(network)
+}
+
+/// The settings of `talos` of a file of version 2, where they read. Whether they do is
+/// `check`'s to say.
+pub fn talos(file: &SlipmeshFile) -> Option<TalosSettings> {
+    match file {
+        SlipmeshFile::V1(_) => None,
+        SlipmeshFile::V2(files) => files.talos_settings().ok(),
+    }
 }
 
 /// Prints `<node>: ok` for each node that passes and every refusal on a line of its own. Where
@@ -93,10 +117,11 @@ pub fn run(config_path: &Path) -> ExitCode {
     match read(config_path) {
         Err(refusal) => refuse(refusal),
         Ok(file) => {
-            if let Err(refusal) = whole_file(config_path, &file) {
+            let (refusals, talos) = whole_file(config_path, &file);
+            for refusal in refusals {
                 refuse(refusal);
             }
-            match network(&file) {
+            match network(&file, talos.as_ref()) {
                 Err(refusal) => refuse(refusal),
                 Ok(network) => {
                     let resolved = sliplib_mesh::secrets::read(&network);

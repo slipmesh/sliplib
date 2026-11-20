@@ -35,61 +35,68 @@ pub struct Network {
     pub classes: Vec<(String, u8)>,
     pub metrics: MetricsPorts,
     pub format: Format,
-    /// What only a file of version 1 holds.
-    pub v1: Option<V1Only>,
 }
 
 /// The version of the format a network was read from, where what is computed or said of it
-/// depends on that: how a message names a key, and which nodes have one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// depends on that: how a message names a key, which nodes have one, and what only version 1
+/// holds.
+#[derive(Debug)]
 pub enum Format {
-    V1,
+    V1(Box<V1Only>),
     V2,
 }
 
 impl Format {
-    /// How the files name a node's private key, under the node.
-    pub fn private_key(self) -> &'static str {
+    /// What only a file of version 1 holds.
+    pub fn v1(&self) -> Option<&V1Only> {
         match self {
-            Self::V1 => "mesh_private_key",
+            Self::V1(v1) => Some(v1),
+            Self::V2 => None,
+        }
+    }
+
+    /// How the files name a node's private key, under the node.
+    pub fn private_key(&self) -> &'static str {
+        match self {
+            Self::V1(_) => "mesh_private_key",
             Self::V2 => "wireguard.private_key",
         }
     }
 
     /// How the files name the MTU set for the mesh.
-    pub fn mtu(self) -> &'static str {
+    pub fn mtu(&self) -> &'static str {
         match self {
-            Self::V1 => "cluster.mesh_mtu",
+            Self::V1(_) => "cluster.mesh_mtu",
             Self::V2 => "mesh.mtu",
         }
     }
 
     /// How the files name the network the links' IPv4 addresses come from.
-    pub fn tunnel_ipv4(self) -> &'static str {
+    pub fn tunnel_ipv4(&self) -> &'static str {
         match self {
-            Self::V1 => "cluster.tunnel_networks",
+            Self::V1(_) => "cluster.tunnel_networks",
             Self::V2 => "addressing.tunnel.ipv4",
         }
     }
 
     /// Whether every node has a key: version 2 has one created only for a node on a link.
-    pub fn keys_every_node(self) -> bool {
-        self == Self::V1
+    pub fn keys_every_node(&self) -> bool {
+        matches!(self, Self::V1(_))
     }
 
     /// Where the files hold the key of `node`, as a message names it.
-    pub fn node_key(self, node: &str) -> String {
+    pub fn node_key(&self, node: &str) -> String {
         match self {
-            Self::V1 => format!("nodes[{node}].mesh_private_key"),
+            Self::V1(_) => format!("nodes[{node}].mesh_private_key"),
             Self::V2 => format!("nodes.{node}.wireguard.private_key"),
         }
     }
 
     /// Where the files hold the obfuscation of `link`, as a message names it. Version 1 gives a
     /// link no name, and it is named by its two nodes, sorted.
-    pub fn link_obfuscation(self, link: &Link) -> String {
+    pub fn link_obfuscation(&self, link: &Link) -> String {
         match self {
-            Self::V1 => format!("mesh.links[{}].obfuscation", link_key(&link.ends)),
+            Self::V1(_) => format!("mesh.links[{}].obfuscation", link_key(&link.ends)),
             Self::V2 => format!("mesh.links.{}.amneziawg.obfuscation", link.name),
         }
     }
@@ -249,11 +256,9 @@ mod tests {
     #[test]
     fn a_file_of_either_version_is_lowered_by_its_own() {
         let of_version_1 = lowered(VERSION_1).unwrap();
-        assert_eq!(of_version_1.format, Format::V1);
-        assert!(of_version_1.v1.is_some());
+        assert!(matches!(of_version_1.format, Format::V1(_)));
         let of_version_2 = lowered(VERSION_2).unwrap();
-        assert_eq!(of_version_2.format, Format::V2);
-        assert!(of_version_2.v1.is_none());
+        assert!(matches!(of_version_2.format, Format::V2));
     }
 
     #[test]

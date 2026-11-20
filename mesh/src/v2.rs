@@ -222,7 +222,6 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             .collect(),
         metrics: MetricsPorts::default(),
         format: Format::V2,
-        v1: None,
     })
 }
 

@@ -40,25 +40,41 @@ pub fn record(
     for (node, key) in &minted.node_keys {
         set_node_key(yaml, file, &network.nodes[*node].name, key)?;
     }
-    let mut links = document(yaml, network_document(file))?
-        .get_mut("mesh")
-        .and_then(|mesh| mesh.get_mut("links"));
+    let mesh = document(yaml, network_document(file))?.get_mut("mesh");
+    // The fields of the type's own obfuscation, which a link that writes `null` there goes
+    // without; version 1 lays nothing under a link's own.
+    let of_the_type: Vec<Value> = match file {
+        SlipmeshFile::V1(_) => Vec::new(),
+        SlipmeshFile::V2(_) => mesh
+            .as_deref()
+            .and_then(|mesh| mesh.get("amneziawg"))
+            .and_then(|block| block.get("obfuscation"))
+            .and_then(Value::as_mapping)
+            .into_iter()
+            .flatten()
+            .filter(|(_, value)| !value.is_null())
+            .map(|(key, _)| key.clone())
+            .collect(),
+    };
+    let mut links = mesh.and_then(|mesh| mesh.get_mut("links"));
     for (link, generated) in &minted.link_obfuscation {
+        let name = &network.links[*link].name;
         // A list by position in version 1; in version 2 a mapping by name, each link with the
         // block of its type, and only a link of type `amneziawg` is minted for.
         let entry = match file {
             SlipmeshFile::V1(_) => links.as_deref_mut().and_then(|links| links.get_mut(*link)),
-            SlipmeshFile::V2(_) => named(links.as_deref_mut(), &network.links[*link].name)
-                .and_then(|link| link.get_mut("amneziawg")),
+            SlipmeshFile::V2(_) => {
+                named(links.as_deref_mut(), name).and_then(|link| link.get_mut("amneziawg"))
+            }
         }
-        .context("a link the network document does not have")?;
-        write_obfuscation(entry, generated)?;
+        .with_context(|| format!("the link {name} is not in the network document"))?;
+        write_obfuscation(entry, generated, &of_the_type)?;
     }
 
+    let SlipmeshFile::V1(file) = file else {
+        return Ok(());
+    };
     for pool_minted in &minted.pools {
-        let SlipmeshFile::V1(file) = file else {
-            anyhow::bail!("a pool minted for a file that holds none");
-        };
         let name = &pool_minted.name;
         let index = file
             .pool_document(name)
@@ -68,7 +84,7 @@ pub fn record(
             set(pool, "private_key", key.expose().into())?;
         }
         if let Some(generated) = &pool_minted.obfuscation {
-            write_obfuscation(pool, generated)?;
+            write_obfuscation(pool, generated, &[])?;
         }
     }
     Ok(())
@@ -83,18 +99,18 @@ pub fn set_node_key(
     key: &PrivateKey,
 ) -> Result<()> {
     let nodes = document(yaml, network_document(file))?.get_mut("nodes");
-    let missing = "a node the network document does not have";
+    let missing = || format!("the node {node} is not in the network document");
     match file {
         SlipmeshFile::V1(file) => {
             let position = file.hosts().iter().position(|host| *host == node);
             let entry = nodes
                 .zip(position)
                 .and_then(|(nodes, position)| nodes.get_mut(position))
-                .context(missing)?;
+                .with_context(missing)?;
             set(entry, "mesh_private_key", key.expose().into())
         }
         SlipmeshFile::V2(_) => {
-            let entry = named(nodes, node).context(missing)?;
+            let entry = named(nodes, node).with_context(missing)?;
             if entry.get("wireguard").is_none_or(Value::is_null) {
                 set(entry, "wireguard", Value::Mapping(Mapping::new()))?;
             }
@@ -181,17 +197,32 @@ fn client_entry(client: &RoadwarriorClient) -> Value {
 
 /// Writes the fields of `generated` into the `obfuscation` mapping of `owner`, starting one when
 /// it has none.
-fn write_obfuscation(owner: &mut Value, generated: &Obfuscation) -> Result<()> {
+/// Writes the minted fields into `owner`'s `obfuscation`. Where it is written `null`, which takes
+/// away every field laid under it, each of `laid_under` not minted is written `null` too, so that
+/// minting brings back none of them.
+fn write_obfuscation(
+    owner: &mut Value,
+    generated: &Obfuscation,
+    laid_under: &[Value],
+) -> Result<()> {
     let fields = sliplib_yaml::to_value(generated).context("serializing generated obfuscation")?;
-    let fields = fields
+    let fields: Mapping = fields
         .as_mapping()
         .into_iter()
         .flatten()
         .filter(|(_, value)| !value.is_null())
-        .map(|(key, value)| (key.clone(), value.clone()));
-    match owner.get_mut("obfuscation").and_then(Value::as_mapping_mut) {
-        Some(obfuscation) => obfuscation.extend(fields),
-        None => set(owner, "obfuscation", Value::Mapping(fields.collect()))?,
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    match owner.get_mut("obfuscation") {
+        Some(Value::Mapping(obfuscation)) => obfuscation.extend(fields),
+        Some(Value::Null) => {
+            let mut dropped = fields;
+            for key in laid_under {
+                dropped.entry(key.clone()).or_insert(Value::Null);
+            }
+            set(owner, "obfuscation", Value::Mapping(dropped))?;
+        }
+        _ => set(owner, "obfuscation", Value::Mapping(fields))?,
     }
     Ok(())
 }

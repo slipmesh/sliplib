@@ -215,13 +215,12 @@ pub fn lower(mesh: &MeshConfig) -> Result<Network, Error> {
             awg: metrics_port(cluster.awg_metrics_port, "awg_metrics_port")?,
             router: metrics_port(cluster.router_metrics_port, "router_metrics_port")?,
         },
-        format: Format::V1,
-        v1: Some(V1Only {
+        format: Format::V1(Box::new(V1Only {
             pools: mesh.roadwarriors.clone(),
             obfuscation: mesh.obfuscation.clone(),
             bypass: mesh.bypass.clone(),
             bypass_refresh_interval_secs: cluster.bypass_refresh_interval_secs,
-        }),
+        })),
     })
 }
 
