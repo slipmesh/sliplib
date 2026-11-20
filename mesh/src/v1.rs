@@ -141,6 +141,7 @@ pub fn lower(mesh: &MeshConfig) -> Result<Network, RenderError> {
             router: cluster.router_metrics_port,
         },
         keys: Keys::V1,
+        key_on_a_link_only: false,
         v1: Some(V1Only {
             pools: mesh.roadwarriors.clone(),
             obfuscation: mesh.obfuscation.clone(),

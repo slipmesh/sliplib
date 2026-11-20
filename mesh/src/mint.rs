@@ -80,7 +80,7 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
     let mut minted = Minted::default();
 
     for (index, node) in network.nodes.iter().enumerate() {
-        if written.mesh_private_keys.contains_key(&node.name) {
+        if written.mesh_private_keys.contains_key(&node.name) || !network.needs_a_key(&node.name) {
             continue;
         }
         minted.node_keys.push((index, PrivateKey::generate()));

@@ -226,6 +226,7 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             .collect(),
         metrics: MetricsPorts::default(),
         keys: Keys::V2,
+        key_on_a_link_only: true,
         v1: None,
     })
 }
@@ -563,6 +564,62 @@ mod tests {
         assert!(
             matches!(mesh, MtuError::BelowMinimum { key, mtu: 0 } if key == Keys::V2.mtu),
             "{mesh:?}"
+        );
+    }
+
+    /// A node of `talos` without a key, to be laid on no link.
+    const NODE_D: &str = "{platform: talos, node_id: 0.0.0.5, underlay: {wan: {}}}";
+
+    #[test]
+    fn a_node_on_no_link_is_configured_without_a_key() {
+        let network = lowered(&format!("{{nodes: {{node-d: {NODE_D}}}}}"));
+        let configs = node_configs(&network, "node-d", &secrets::read(&network)).unwrap();
+        assert!(configs.awg.interfaces.is_empty());
+        // A node on a link still needs its own.
+        let keyless = lowered("{nodes: {node-b: {wireguard: null}}}");
+        let refusal = node_configs(&keyless, "node-b", &secrets::read(&keyless)).unwrap_err();
+        assert!(refusal.missing_secret().is_some(), "{refusal:?}");
+    }
+
+    #[cfg(feature = "mint")]
+    #[test]
+    fn mint_creates_a_key_for_a_node_on_a_link_alone() {
+        let network = lowered(&format!(
+            "{{nodes: {{node-b: {{wireguard: null}}, node-d: {NODE_D}}}}}"
+        ));
+        let minted = crate::mint::create(&network).unwrap();
+        let keyed: Vec<&str> = minted
+            .node_keys
+            .iter()
+            .map(|(index, _)| network.nodes[*index].name.as_str())
+            .collect();
+        assert_eq!(keyed, ["node-b"]);
+    }
+
+    /// The example with a node of `name`, keyed, on a link to `node-a`.
+    fn with_a_node_named(name: &str) -> Network {
+        let key = sliplib_secrets::wireguard::PrivateKey::generate();
+        lowered(&format!(
+            "{{nodes: {{{name}: {{platform: talos, node_id: 0.0.0.5, underlay: {{wan: {{}}}}, \
+             wireguard: {{private_key: {}}}}}}}, mesh: {{links: {{a-x: {{type: wireguard, \
+             ends: {{node-a: {{}}, {name}: {{}}}}, wireguard: {{port: 51840}}}}}}}}}}",
+            key.expose()
+        ))
+    }
+
+    #[test]
+    fn a_name_too_long_for_an_interface_is_refused_at_the_other_end_of_its_link() {
+        use sliplib_config::awg::Invalid;
+        let fits = with_a_node_named("node-abcde");
+        node_configs(&fits, "node-a", &secrets::read(&fits)).unwrap();
+        let long = with_a_node_named("node-abcdef");
+        let resolved = secrets::read(&long);
+        node_configs(&long, "node-abcdef", &resolved).unwrap();
+        let refusal = node_configs(&long, "node-a", &resolved).unwrap_err();
+        assert!(
+            matches!(&refusal, crate::render::Error::InvalidAwg { node, source: Invalid::InterfaceNameTooLong(name) }
+                if node == "node-a" && name == "mesh-node-abcdef"),
+            "{refusal:?}"
         );
     }
 

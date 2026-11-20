@@ -32,6 +32,9 @@ pub struct Network {
     pub classes: Vec<(String, u8)>,
     pub metrics: MetricsPorts,
     pub keys: Keys,
+    /// Whether a node on no link goes without a private key: version 2 has one created only for
+    /// a node on a link, version 1 for every node.
+    pub key_on_a_link_only: bool,
     /// What only a file of version 1 holds.
     pub v1: Option<V1Only>,
 }
@@ -66,6 +69,15 @@ impl Network {
             .iter()
             .find(|node| node.name == name)
             .ok_or_else(|| UnknownNode(name.to_owned()))
+    }
+
+    /// Whether the node needs a private key: it is on a link, or the version says every node does.
+    pub fn needs_a_key(&self, node: &str) -> bool {
+        !self.key_on_a_link_only
+            || self
+                .links
+                .iter()
+                .any(|link| link.ends.iter().any(|end| end == node))
     }
 }
 

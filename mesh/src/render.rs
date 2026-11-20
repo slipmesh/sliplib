@@ -201,17 +201,23 @@ fn mesh_interfaces_for(
 ) -> Result<Vec<InterfaceEntry>> {
     let node = mesh.node(node_name)?;
     let key = mesh.keys.private_key;
-    let own_private_key = resolved
-        .mesh_private_keys
-        .get(node_name)
-        .ok_or_else(|| MissingSecret(format!("node {node_name:?}: {key} is not set")))?;
+    let own_private_key = resolved.mesh_private_keys.get(node_name);
+    if own_private_key.is_none() && mesh.needs_a_key(node_name) {
+        return Err(MissingSecret(format!("node {node_name:?}: {key} is not set")).into());
+    }
     // Decoded for every node, whether or not a link uses its key: where one does, the daemon
     // would otherwise be the first to decode it, and refuse a config it is already running on.
-    own_private_key
-        .public_key()
-        .map_err(key_of(node_name, key))?;
+    if let Some(own_private_key) = own_private_key {
+        own_private_key
+            .public_key()
+            .map_err(key_of(node_name, key))?;
+    }
 
     let mtu = crate::mtu::mesh_mtu(mesh, resolved)?;
+    // Only a node that needs no key has none, and it is on no link.
+    let Some(own_private_key) = own_private_key else {
+        return Ok(Vec::new());
+    };
     let mut out = Vec::new();
     for link in &mesh.links {
         let peer_name = if link.ends[0] == node_name {
