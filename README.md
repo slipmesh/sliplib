@@ -436,13 +436,14 @@ UPDATE_EXPECT=1 cargo test -p sliplib-mesh --test golden
 ```
 
 [`fuzz/`](fuzz) holds a target for [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz.html),
-which needs a nightly toolchain: `read_slipmesh` gives a text to the loader of format version 2
-and to everything a tool reads of what it gave. It expects a refusal, or a result that holds what
-the loader promises - each node's and each link's values in force as the format lays them,
-documents that reach nodes of their own platform, and each node given what reaches it, by rank and
-then as read - and never a panic. It is run before a pull request
-that changes how a file is read. Its first input is the specification's example, the network and
-the Talos documents joined into one text:
+which needs a nightly toolchain: `read_slipmesh` gives a text to `SlipmeshFile`, which reads either
+version, lowers what reads into the network, and computes the configs of every node. It expects a
+refusal at any step, or a result that holds what each step promises - for version 2, each node's
+and each link's values in force as the format lays them, documents that reach nodes of their own
+platform, and each node given what reaches it, by rank and then as read; for either, every derived
+address in the network it is derived in - and never a panic. It is run before a pull request that
+changes how a file is read or lowered. Its first inputs are the specification's example, the
+network and the Talos documents joined into one text, and the golden fixture of version 1:
 
 ```bash
 mkdir -p fuzz/corpus/read_slipmesh
@@ -450,6 +451,10 @@ mkdir -p fuzz/corpus/read_slipmesh
 
 ```bash
 for file in docs/example/mesh.yaml docs/example/talos.yaml; do echo ---; cat "$file"; done > fuzz/corpus/read_slipmesh/example.yaml
+```
+
+```bash
+cp mesh/tests/golden/v1/slipmesh.yaml fuzz/corpus/read_slipmesh/v1.yaml
 ```
 
 ```bash
