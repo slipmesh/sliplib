@@ -1,7 +1,7 @@
-//! Format version 1, pinned: what every node of the fixtures under `golden/` gets, compared byte
-//! for byte with the files beside each fixture, with derived public keys named by their owner. A
-//! change that moves one of them changes what the nodes of a working network are configured
-//! with. `UPDATE_EXPECT=1` rewrites the files; the difference is then reviewed like any other.
+//! What every node of the fixtures under `golden/` gets: each fixture of format version 1 compared
+//! byte for byte with the files beside it, derived public keys named by their owner, and its twin
+//! of version 2 with what version 1 gives. A change that moves one of them changes what the nodes
+//! of a working network are configured with. `UPDATE_EXPECT=1` rewrites the files; the difference is then reviewed like any other.
 
 use expect_test::expect_file;
 use sha2::{Digest, Sha256};

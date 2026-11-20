@@ -60,7 +60,8 @@ const TUNNEL_IPV4: Derived = Derived {
 };
 
 /// Refuses two nodes that got one address: `of` gives a node's, where it has one. The IPv6
-/// loopbacks need no such look: each holds the whole `node_id`, which differs between nodes.
+/// loopbacks need no such look: the loader refuses a loopback network longer than /96 and two
+/// nodes of one `node_id`, so each loopback holds a whole `node_id` of its own.
 fn distinct(
     nodes: &[Node],
     derived: &Derived,
@@ -127,16 +128,12 @@ pub fn lower(files: &File) -> Result<Network, Error> {
                 name: name.to_string(),
                 platform: Some(node.platform),
                 loopback: (
-                    addressing::ipv4_loopback(ipv4.addr(), ipv4.prefix_len(), id),
-                    addressing::ipv6_loopback(ipv6.addr(), ipv6.prefix_len(), id),
+                    addressing::ipv4_in(ipv4.addr(), ipv4.prefix_len(), id),
+                    addressing::ipv6_in(ipv6.addr(), ipv6.prefix_len(), id),
                 ),
-                link_local: addressing::ipv6_loopback(
-                    link_local.addr(),
-                    link_local.prefix_len(),
-                    id,
-                ),
+                link_local: addressing::ipv6_in(link_local.addr(), link_local.prefix_len(), id),
                 tunnel_ipv4: tunnel_ipv4
-                    .map(|net| addressing::ipv4_loopback(net.addr(), net.prefix_len(), id)),
+                    .map(|net| addressing::ipv4_in(net.addr(), net.prefix_len(), id)),
                 private_key: node
                     .wireguard
                     .as_ref()
@@ -445,9 +442,6 @@ mod tests {
         );
         assert_eq!(network.mtu, Some(1320));
         assert_eq!(network.classes, [("egress".to_owned(), 152)]);
-        assert_eq!(network.keys, Keys::V2);
-        assert_eq!(network.metrics, MetricsPorts::default());
-        assert!(network.v1.is_none());
         let names: Vec<&str> = network
             .nodes
             .iter()

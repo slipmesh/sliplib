@@ -74,8 +74,8 @@ fn tunnel_networks(mesh: &MeshConfig) -> Result<Option<Networks>, Error> {
 /// The two addresses `node_id` gives in `networks`: itself in the host part of each.
 fn addresses((v4, v4_prefix, v6, v6_prefix): Networks, node_id: Ipv4Addr) -> (Ipv4Addr, Ipv6Addr) {
     (
-        addressing::ipv4_loopback(v4, v4_prefix, node_id),
-        addressing::ipv6_loopback(v6, v6_prefix, node_id),
+        addressing::ipv4_in(v4, v4_prefix, node_id),
+        addressing::ipv6_in(v6, v6_prefix, node_id),
     )
 }
 

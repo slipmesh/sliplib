@@ -138,7 +138,7 @@ pub(crate) fn resolve_dns(mesh: &MeshConfig, pool: &RoadwarriorPool) -> Option<S
     let subnet = mesh.cluster.service_subnet.as_deref()?;
     let subnet = sliplib_net::parse_ipv4(subnet).ok()?;
     Some(
-        addressing::ipv4_loopback(
+        addressing::ipv4_in(
             subnet.addr(),
             subnet.prefix_len(),
             Ipv4Addr::new(0, 0, 0, 10),

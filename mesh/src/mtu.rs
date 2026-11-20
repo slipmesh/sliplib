@@ -11,7 +11,7 @@ use crate::model::{Family, Link, Network, Node};
 use crate::secrets::{ResolvedSecrets, link_key};
 use sliplib_config::v1::mesh_config::UnknownNode;
 
-/// An uplink's MTU when `nodes[].uplink_mtu` does not say.
+/// A node's underlay MTU when the files set none: that of Ethernet.
 pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
 
 /// The least MTU IPv6 allows a link (RFC 8200); the mesh carries OSPFv3 over IPv6 link-locals.
@@ -80,8 +80,9 @@ pub enum LinkError {
     },
 }
 
-/// The MTU of every mesh interface: `cluster.mesh_mtu` when it fits every link, else the least
-/// link limit. None for a mesh without links, which has no mesh interface to give it to.
+/// The MTU of every mesh interface: the one the files set for the mesh when it fits every link,
+/// else the least link limit. None for a mesh without links, which has no mesh interface to give
+/// it to.
 pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32>, MtuError> {
     let key = mesh.keys.mtu;
     let mut least: Option<(u32, &Link)> = None;
