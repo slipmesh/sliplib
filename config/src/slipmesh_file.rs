@@ -53,36 +53,46 @@ pub enum SlipmeshFile {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    /// The text is not a stream of YAML documents.
+    #[error(transparent)]
+    Yaml(Source),
+    #[error(
+        "{place} has a `version` below 2: version 1 is the format whose `network` document has no `version` - take the key out to read the files as version 1, or convert them to version 2"
+    )]
+    VersionOneWritten { place: Place },
     #[error(transparent)]
     V1(#[from] v1::slipmesh_file::Error),
     #[error(transparent)]
     V2(#[from] v2::Error),
 }
 
-/// Whether a `network` document of `yaml` says a `version`: only version 1 has none.
-fn says_its_version(yaml: &MultiDoc) -> bool {
-    yaml.documents()
-        .iter()
-        .filter_map(|document| document.value.get(META_KEY))
-        .any(|block| {
-            block.get("kind").and_then(Value::as_str) == Some("network")
-                && block.get("version").is_some()
-        })
+/// The version a `network` document of `yaml` writes, with where that document stands.
+fn written_version(yaml: &MultiDoc) -> Option<(Place, &Value)> {
+    yaml.documents().iter().find_map(|document| {
+        let block = document.value.get(META_KEY)?;
+        let version = block.get("version")?;
+        (block.get("kind").and_then(Value::as_str) == Some("network"))
+            .then(|| (Place::new("network", document.line), version))
+    })
 }
 
 impl SlipmeshFile {
     pub fn parse(raw: &str) -> Result<Self, Error> {
-        let yaml =
-            MultiDoc::parse(raw).map_err(|source| v1::slipmesh_file::Error::Yaml(source.into()))?;
+        let yaml = MultiDoc::parse(raw).map_err(|source| Error::Yaml(source.into()))?;
         Self::read(&yaml)
     }
 
-    /// `slipmesh.yaml` as `yaml` holds it - for a caller that goes on to edit it.
+    /// `slipmesh.yaml` as `yaml` holds it - for a caller that goes on to edit it. Without
+    /// `version` it is version 1; with a number below 2, or `null`, it is neither.
     pub fn read(yaml: &MultiDoc) -> Result<Self, Error> {
-        if says_its_version(yaml) {
-            Ok(Self::V2(v2::File::read(yaml)?))
-        } else {
-            Ok(Self::V1(v1::slipmesh_file::SlipmeshFile::read(yaml)?))
+        match written_version(yaml) {
+            None => Ok(Self::V1(v1::slipmesh_file::SlipmeshFile::read(yaml)?)),
+            Some((place, version))
+                if version.is_null() || version.as_u64().is_some_and(|v| v < v2::VERSION) =>
+            {
+                Err(Error::VersionOneWritten { place })
+            }
+            Some(_) => Ok(Self::V2(v2::File::read(yaml)?)),
         }
     }
 }
@@ -148,11 +158,23 @@ mod tests {
     }
 
     #[test]
-    fn a_text_that_is_not_yaml_is_refused() {
+    fn a_text_that_is_not_yaml_is_refused_before_any_version_is_known() {
         let refusal = refusal("slipmesh: [unclosed\n");
-        assert!(
-            matches!(refusal, Error::V1(v1::slipmesh_file::Error::Yaml(_))),
-            "{refusal:?}"
-        );
+        assert!(matches!(refusal, Error::Yaml(_)), "{refusal:?}");
+    }
+
+    #[test]
+    fn a_version_below_2_is_refused_with_how_to_read_the_files_as_version_1() {
+        for version in ["0", "1", "null"] {
+            let written = VERSION_1.replace(
+                "{kind: network}",
+                &format!("{{kind: network, version: {version}}}"),
+            );
+            let refusal = refusal(&written);
+            assert!(
+                matches!(&refusal, Error::VersionOneWritten { place } if *place == Place::new("network", 1)),
+                "{version}: {refusal:?}"
+            );
+        }
     }
 }
