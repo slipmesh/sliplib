@@ -67,7 +67,7 @@ pub enum LinkError {
         endpoint: String,
     },
     #[error(
-        "node {node:?}: {key} {mtu} is below {minimum}, the least {family} allows a link, and the link is dialed over {family}"
+        "node {node:?}: {key} {mtu} is below {minimum}, the least {family} allows a link, and the link is dialed over {family} - set the MTU the path has"
     )]
     UnderlayBelowMinimum {
         node: String,
