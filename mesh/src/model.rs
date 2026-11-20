@@ -47,20 +47,20 @@ pub struct Keys {
     pub private_key: &'static str,
     /// The MTU set for the mesh.
     pub mtu: &'static str,
-    /// The MTU of a node's underlay, under the node.
-    pub underlay_mtu: &'static str,
+    /// The network the links' IPv4 addresses come from.
+    pub tunnel_ipv4: &'static str,
 }
 
 impl Keys {
     pub const V1: Self = Self {
         private_key: "mesh_private_key",
         mtu: "cluster.mesh_mtu",
-        underlay_mtu: "uplink_mtu",
+        tunnel_ipv4: "cluster.tunnel_networks",
     };
     pub const V2: Self = Self {
         private_key: "wireguard.private_key",
         mtu: "mesh.mtu",
-        underlay_mtu: "underlay.<entry>.mtu",
+        tunnel_ipv4: "addressing.tunnel.ipv4",
     };
 }
 
@@ -104,6 +104,8 @@ pub struct Node {
     /// Where the node's peers dial it. None, it is never dialed.
     pub endpoint: Option<Endpoint>,
     pub underlay_mtu: u32,
+    /// How a message names the key of `underlay_mtu`, under the node.
+    pub underlay_mtu_key: String,
     pub direct_interfaces: Vec<String>,
     pub learn: Vec<String>,
     pub announce: Vec<AnnounceEntry>,

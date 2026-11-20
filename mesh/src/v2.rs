@@ -35,7 +35,7 @@ pub enum Error {
         second: String,
     },
     #[error(
-        "the node {node:?} gets the link-local address {address}/{LINK_LOCAL_PREFIX_LEN}, whose host part is all zeros: that is the Subnet-Router anycast address, which no interface takes - give the node a `node_id` that leaves a bit set there"
+        "the node {node:?} gets the link-local address {address}/{LINK_LOCAL_PREFIX_LEN}, whose host part is all zeros: that is the Subnet-Router anycast address, which no interface takes - give the node a `node_id` that leaves a bit set there, or take an `addressing.tunnel.link_local` where it does"
     )]
     AnycastLinkLocal { node: String, address: Ipv6Addr },
 }
@@ -110,7 +110,13 @@ pub fn lower(files: &File) -> Result<Network, Error> {
         .map(|(name, node)| {
             let id = node.node_id;
             let (ipv4, ipv6) = (loopback.ipv4.0, loopback.ipv6.0);
-            let underlay = node.underlay.values().next();
+            // The loader leaves exactly one entry.
+            let (entry, underlay) = node
+                .underlay
+                .first()
+                .map_or(("", None), |(entry, underlay)| {
+                    (entry.as_str(), Some(underlay))
+                });
             let mut direct_interfaces = node.routing.direct_interfaces.clone();
             if let Some(pattern) = &pattern
                 && !direct_interfaces.contains(pattern)
@@ -144,6 +150,7 @@ pub fn lower(files: &File) -> Result<Network, Error> {
                 underlay_mtu: underlay
                     .and_then(|underlay| underlay.mtu)
                     .unwrap_or(DEFAULT_UPLINK_MTU),
+                underlay_mtu_key: format!("underlay.{entry}.mtu"),
                 direct_interfaces,
                 learn: prefixes(&node.routing.learn),
                 announce: prefixes(&node.routing.announce)
@@ -561,7 +568,7 @@ mod tests {
         let underlay = mtu_refusal("{nodes: {node-b: {underlay: {wan: {mtu: 0}}}}}");
         assert!(
             matches!(&underlay, MtuError::Link { link, source: LinkError::UnderlayBelowMinimum { node, key, mtu: 0, .. } }
-                if link == "a-b" && node == "node-b" && *key == Keys::V2.underlay_mtu),
+                if link == "a-b" && node == "node-b" && key == "underlay.wan.mtu"),
             "{underlay:?}"
         );
         let mesh = mtu_refusal("{mesh: {mtu: 0}}");

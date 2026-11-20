@@ -87,9 +87,14 @@ pub enum RenderError {
         source: KeyError,
     },
     #[error(
-        "node {node:?}: cluster.tunnel_networks is configured, so direct_interfaces must include {glob:?} - the tunnel IPv4 address is otherwise announced by nothing (OSPFv3 is IPv6-only) and is reachable on no other node"
+        "node {node:?}: {key} is configured, so direct_interfaces must include {glob:?} - the tunnel IPv4 address is otherwise announced by nothing (OSPFv3 is IPv6-only) and is reachable on no other node"
     )]
-    MeshPatternMissing { node: String, glob: String },
+    MeshPatternMissing {
+        node: String,
+        /// The network the links' IPv4 addresses come from.
+        key: &'static str,
+        glob: String,
+    },
 }
 
 type Result<T> = std::result::Result<T, RenderError>;
@@ -150,6 +155,7 @@ pub(crate) fn render_router_config(mesh: &Network, node_name: &str) -> Result<Ro
     if node.tunnel_ipv4.is_some() && !direct_interfaces.contains(&glob) {
         return Err(RenderError::MeshPatternMissing {
             node: node_name.to_owned(),
+            key: mesh.keys.tunnel_ipv4,
             glob,
         });
     }
@@ -822,9 +828,12 @@ mesh:
     fn render_router_config_rejects_tunnel_networks_without_the_mesh_glob() {
         let mesh: MeshConfig =
             sliplib_yaml::from_str(mesh_and_roadwarriors_with_tunnel_networks_yaml()).unwrap();
-        let err = render_router_config(&mesh, "a").unwrap_err().to_string();
-        assert!(err.contains("mesh-*"), "unexpected error: {err}");
-        assert!(err.contains("tunnel_networks"), "unexpected error: {err}");
+        let refusal = render_router_config(&mesh, "a").unwrap_err();
+        assert!(
+            matches!(&refusal, RenderError::MeshPatternMissing { node, key: "cluster.tunnel_networks", glob }
+                if node == "a" && glob == "mesh-*"),
+            "{refusal:?}"
+        );
     }
 
     #[test]

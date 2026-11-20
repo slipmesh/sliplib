@@ -64,15 +64,20 @@ pub enum LinkError {
     )]
     UnderlayBelowMinimum {
         node: String,
-        key: &'static str,
+        key: String,
         mtu: u32,
         family: &'static str,
         minimum: u32,
     },
     #[error(
-        "an underlay MTU of {underlay} leaves no room for the {overhead} bytes the link adds to a packet - lower `s4`, or raise the MTU where the path allows it"
+        "node {node:?}: {key} {underlay} leaves no room for the {overhead} bytes the link adds to a packet - lower `s4`, or raise the MTU where the path allows it"
     )]
-    NoRoom { underlay: u32, overhead: u32 },
+    NoRoom {
+        node: String,
+        key: String,
+        underlay: u32,
+        overhead: u32,
+    },
 }
 
 /// The MTU of every mesh interface: `cluster.mesh_mtu` when it fits every link, else the least
@@ -134,13 +139,18 @@ fn link_limit(mesh: &Network, link: &Link, resolved: &ResolvedSecrets) -> Result
     if let Some(node) = [a, b].into_iter().find(|node| node.underlay_mtu < minimum) {
         return Err(LinkError::UnderlayBelowMinimum {
             node: node.name.clone(),
-            key: mesh.keys.underlay_mtu,
+            key: node.underlay_mtu_key.clone(),
             mtu: node.underlay_mtu,
             family,
             minimum,
         });
     }
-    let uplink = a.underlay_mtu.min(b.underlay_mtu);
+    let narrower = if b.underlay_mtu < a.underlay_mtu {
+        b
+    } else {
+        a
+    };
+    let uplink = narrower.underlay_mtu;
     let junk = resolved
         .mesh_link_obfuscation
         .get(&link_key(&link.ends))
@@ -150,6 +160,8 @@ fn link_limit(mesh: &Network, link: &Link, resolved: &ResolvedSecrets) -> Result
     match uplink.checked_sub(overhead) {
         Some(limit) if limit > 0 => Ok(limit),
         _ => Err(LinkError::NoRoom {
+            node: narrower.name.clone(),
+            key: narrower.underlay_mtu_key.clone(),
             underlay: uplink,
             overhead,
         }),
@@ -351,8 +363,8 @@ mod tests {
         ] {
             let refusal = link_refusal(a, b, PLAIN);
             assert!(
-                matches!(&refusal, LinkError::UnderlayBelowMinimum { node, key: "uplink_mtu", mtu: m, family: f, minimum: least }
-                    if node == "b" && *m == mtu && *f == family && *least == minimum),
+                matches!(&refusal, LinkError::UnderlayBelowMinimum { node, key, mtu: m, family: f, minimum: least }
+                    if node == "b" && key == "uplink_mtu" && *m == mtu && *f == family && *least == minimum),
                 "{b}: {refusal:?}"
             );
         }
@@ -372,7 +384,8 @@ mod tests {
         for (s4, overhead) in [(1420, 1500), (1500, 1580)] {
             let refusal = link_refusal(V6, "", &format!(", obfuscation: {{s4: {s4}}}"));
             assert!(
-                matches!(refusal, LinkError::NoRoom { underlay: 1500, overhead: o } if o == overhead),
+                matches!(&refusal, LinkError::NoRoom { node, key, underlay: 1500, overhead: o }
+                    if node == "a" && key == "uplink_mtu" && *o == overhead),
                 "{s4}: {refusal:?}"
             );
         }

@@ -160,6 +160,7 @@ fn node(
                 .any(|link| link.pair.contains(&entry.name)),
         )?,
         underlay_mtu: entry.uplink_mtu.unwrap_or(DEFAULT_UPLINK_MTU),
+        underlay_mtu_key: "uplink_mtu".to_owned(),
         // The node's own list replaces the cluster's. Nothing is added to it: what a node
         // announces has to be readable in the file.
         direct_interfaces: entry
