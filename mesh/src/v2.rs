@@ -545,6 +545,27 @@ mod tests {
         );
     }
 
+    fn mtu_refusal(overlay: &str) -> crate::mtu::MtuError {
+        let network = lowered(overlay);
+        crate::mtu::mesh_mtu(&network, &secrets::read(&network)).unwrap_err()
+    }
+
+    #[test]
+    fn an_mtu_of_zero_is_refused_by_its_key() {
+        use crate::mtu::{LinkError, MtuError};
+        let underlay = mtu_refusal("{nodes: {node-b: {underlay: {wan: {mtu: 0}}}}}");
+        assert!(
+            matches!(&underlay, MtuError::Link { link, source: LinkError::UnderlayBelowMinimum { node, key, mtu: 0, .. } }
+                if link == "a-b" && node == "node-b" && *key == Keys::V2.underlay_mtu),
+            "{underlay:?}"
+        );
+        let mesh = mtu_refusal("{mesh: {mtu: 0}}");
+        assert!(
+            matches!(mesh, MtuError::BelowMinimum { key, mtu: 0 } if key == Keys::V2.mtu),
+            "{mesh:?}"
+        );
+    }
+
     fn peer_keepalive(network: &Network, node: &str, peer: &str) -> Option<Range<u16>> {
         let configs = node_configs(network, node, &secrets::read(network)).unwrap();
         let interface = configs

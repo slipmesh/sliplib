@@ -43,16 +43,20 @@ pub struct Keys {
     pub private_key: &'static str,
     /// The MTU set for the mesh.
     pub mtu: &'static str,
+    /// The MTU of a node's underlay, under the node.
+    pub underlay_mtu: &'static str,
 }
 
 impl Keys {
     pub const V1: Self = Self {
         private_key: "mesh_private_key",
         mtu: "cluster.mesh_mtu",
+        underlay_mtu: "uplink_mtu",
     };
     pub const V2: Self = Self {
         private_key: "wireguard.private_key",
         mtu: "mesh.mtu",
+        underlay_mtu: "underlay.<entry>.mtu",
     };
 }
 
