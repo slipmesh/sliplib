@@ -15,6 +15,7 @@ use sliplib_config::Obfuscation;
 use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_config::v1::mesh_config::RoadwarriorClient;
 use sliplib_config::v1::mesh_config::missing_defaults;
+use sliplib_config::v2::Name;
 use sliplib_mesh::mint::Minted;
 use sliplib_mesh::model::Network;
 use sliplib_secrets::wireguard::PrivateKey;
@@ -47,9 +48,7 @@ pub fn record(
         // block of its type, and only a link of type `amneziawg` is minted for.
         let entry = match file {
             SlipmeshFile::V1(_) => links.as_deref_mut().and_then(|links| links.get_mut(*link)),
-            SlipmeshFile::V2(_) => links
-                .as_deref_mut()
-                .and_then(|links| links.get_mut(network.links[*link].name.as_str()))
+            SlipmeshFile::V2(_) => named(links.as_deref_mut(), &network.links[*link].name)
                 .and_then(|link| link.get_mut("amneziawg")),
         }
         .context("a link the network document does not have")?;
@@ -95,9 +94,7 @@ pub fn set_node_key(
             set(entry, "mesh_private_key", key.expose().into())
         }
         SlipmeshFile::V2(_) => {
-            let entry = nodes
-                .and_then(|nodes| nodes.get_mut(node))
-                .context(missing)?;
+            let entry = named(nodes, node).context(missing)?;
             if entry.get("wireguard").is_none_or(Value::is_null) {
                 set(entry, "wireguard", Value::Mapping(Mapping::new()))?;
             }
@@ -197,6 +194,18 @@ fn write_obfuscation(owner: &mut Value, generated: &Obfuscation) -> Result<()> {
         None => set(owner, "obfuscation", Value::Mapping(fields.collect()))?,
     }
     Ok(())
+}
+
+/// The entry of `mapping` whose key reads as `name`, as the loader reads it: a name YAML reads as
+/// a number, `7`, stands under a key that is one.
+fn named<'a>(mapping: Option<&'a mut Value>, name: &str) -> Option<&'a mut Value> {
+    mapping?
+        .as_mapping_mut()?
+        .iter_mut()
+        .find_map(|(key, value)| {
+            let key: Name = sliplib_yaml::from_value(key.clone()).ok()?;
+            (key.as_str() == name).then_some(value)
+        })
 }
 
 fn set(entry: &mut Value, key: &str, value: Value) -> Result<()> {
@@ -313,6 +322,39 @@ plain: true
             }
             _ => part == whole,
         }
+    }
+
+    /// The example of version 2 with a node and a link whose names YAML reads as numbers: they
+    /// stand under keys that are numbers.
+    fn numbered() -> String {
+        format!(
+            "{}  7: {{platform: talos, node_id: 0.0.0.7, underlay: {{wan: {{}}}}}}\n",
+            include_str!("../../docs/example/mesh.yaml").replace(
+                "  links:\n",
+                "  links:\n    9: {type: amneziawg, ends: {node-a: {}, 7: {}}, amneziawg: {port: 51840}}\n",
+            )
+        )
+    }
+
+    #[test]
+    fn a_node_and_a_link_named_like_numbers_are_minted_under_their_own_keys() {
+        let written: Value = sliplib_yaml::from_str(&run(&numbered())).unwrap();
+        let node = &written["nodes"][&Value::from(7)];
+        assert!(node["wireguard"]["private_key"].is_string(), "{written:?}");
+        let link = &written["mesh"]["links"][&Value::from(9)];
+        assert!(
+            link["amneziawg"]["obfuscation"]["jc"].is_number(),
+            "{written:?}"
+        );
+    }
+
+    #[test]
+    fn a_node_named_like_a_number_is_rekeyed_under_its_own_key() {
+        let mut yaml = MultiDoc::parse(&numbered()).unwrap();
+        let file = SlipmeshFile::read(&yaml).unwrap();
+        set_node_key(&mut yaml, &file, "7", &PrivateKey::generate()).unwrap();
+        let node = &yaml.documents()[0].value["nodes"][&Value::from(7)];
+        assert!(node["wireguard"]["private_key"].is_string());
     }
 
     fn topology(raw: &str) -> MeshConfig {
