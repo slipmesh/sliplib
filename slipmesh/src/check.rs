@@ -96,15 +96,6 @@ pub fn network(file: &SlipmeshFile, talos: Option<&TalosSettings>) -> Result<Net
     Ok(network)
 }
 
-/// The settings of `talos` of a file of version 2, where they read. Whether they do is
-/// `check`'s to say.
-pub fn talos(file: &SlipmeshFile) -> Option<TalosSettings> {
-    match file {
-        SlipmeshFile::V1(_) => None,
-        SlipmeshFile::V2(files) => files.talos_settings().ok(),
-    }
-}
-
 /// Prints `<node>: ok` for each node that passes and every refusal on a line of its own. Where
 /// nothing was refused it then prints every warning, which fails nothing: a warning is counted
 /// from settings that pass the checks.
