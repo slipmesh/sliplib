@@ -2,10 +2,14 @@
 
 use libfuzzer_sys::fuzz_target;
 use serde::de::DeserializeOwned;
+use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_config::v2::network::LinkKind;
 use sliplib_config::v2::{Aim, File, Name};
 use sliplib_config::{Obfuscation, Range};
+use sliplib_mesh::model::Network;
+use sliplib_net::{Ipv4Net, Ipv6Net};
 use sliplib_yaml::{Mapping, MultiDoc, Value};
+use std::net::Ipv6Addr;
 
 /// What the loader holds of a document's aim: it reaches nodes, each of the document's platform.
 fn assert_aimed(files: &File, aim: &Aim) {
@@ -146,16 +150,68 @@ fn written_network(text: &str) -> Value {
         .clone()
 }
 
-// Everything a tool reads of a file of format version 2: the text may be refused at any step,
-// none of the steps may panic, and what is not refused holds what the loader promises of it.
-fuzz_target!(|data: &[u8]| {
-    let Ok(text) = std::str::from_utf8(data) else {
-        return;
-    };
-    let Ok(files) = File::parse(text) else {
-        return;
-    };
-    assert_in_force(&files, &written_network(text));
+/// The networks a node's addresses are derived in: its loopbacks, its link-local, and the IPv4 of
+/// its links where the links carry one.
+struct Networks {
+    loopback: (Ipv4Net, Ipv6Net),
+    link_local: Ipv6Net,
+    tunnel_ipv4: Option<Ipv4Net>,
+}
+
+/// Where a link-local comes from when the files name no network for it.
+const DEFAULT_LINK_LOCAL: Ipv6Net =
+    Ipv6Net::new_assert(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 64);
+
+fn networks(file: &SlipmeshFile) -> Networks {
+    match file {
+        SlipmeshFile::V1(file) => {
+            let cluster = &file.topology().cluster;
+            let loopbacks = &cluster.loopback_networks;
+            let tunnels = cluster.tunnel_networks.as_ref();
+            Networks {
+                loopback: (
+                    sliplib_net::parse_ipv4(&loopbacks.ipv4).unwrap(),
+                    sliplib_net::parse_ipv6(&loopbacks.ipv6).unwrap(),
+                ),
+                link_local: tunnels.map_or(DEFAULT_LINK_LOCAL, |tunnels| {
+                    sliplib_net::parse_ipv6(&tunnels.ipv6).unwrap()
+                }),
+                tunnel_ipv4: tunnels.map(|tunnels| sliplib_net::parse_ipv4(&tunnels.ipv4).unwrap()),
+            }
+        }
+        SlipmeshFile::V2(files) => {
+            let addressing = &files.network().addressing;
+            let tunnel = addressing.tunnel.as_ref();
+            Networks {
+                loopback: (addressing.loopback.ipv4.0, addressing.loopback.ipv6.0),
+                link_local: tunnel
+                    .and_then(|tunnel| tunnel.link_local)
+                    .map_or(DEFAULT_LINK_LOCAL, |prefix| prefix.0),
+                tunnel_ipv4: tunnel.and_then(|tunnel| tunnel.ipv4).map(|prefix| prefix.0),
+            }
+        }
+    }
+}
+
+/// Every address the lowering derived lies in the network it is derived in.
+fn assert_derived(file: &SlipmeshFile, network: &Network) {
+    let networks = networks(file);
+    for node in &network.nodes {
+        let name = &node.name;
+        assert!(networks.loopback.0.contains(&node.loopback.0), "{name}");
+        assert!(networks.loopback.1.contains(&node.loopback.1), "{name}");
+        assert!(networks.link_local.contains(&node.link_local), "{name}");
+        match (networks.tunnel_ipv4, node.tunnel_ipv4) {
+            (Some(net), Some(address)) => assert!(net.contains(&address), "{name}"),
+            (None, None) => {}
+            other => panic!("{name}: the IPv4 of its links {other:?}"),
+        }
+    }
+}
+
+/// What a tool reads of a file of format version 2, and what the loader promises of it.
+fn assert_read(files: &File, text: &str) {
+    assert_in_force(files, &written_network(text));
     let _ = files.talos_settings();
     let _ = files.routeros_settings();
     let templates: Vec<&Aim> = files.templates().iter().map(|t| t.aim()).collect();
@@ -164,7 +220,7 @@ fuzz_target!(|data: &[u8]| {
         let _ = template.read();
     }
     for aim in templates.iter().chain(&patches) {
-        assert_aimed(&files, aim);
+        assert_aimed(files, aim);
     }
     for node in files.network().nodes.keys() {
         let node = node.as_str();
@@ -180,5 +236,28 @@ fuzz_target!(|data: &[u8]| {
             .map(|patch| index_of(files.patches(), *patch))
             .collect();
         assert_given(node, &given, &patches);
+    }
+}
+
+// Everything a tool reads of a file of either version, up to the configs of every node: the text
+// may be refused at any step, none of the steps may panic, and what is not refused holds what
+// each step promises of it.
+fuzz_target!(|data: &[u8]| {
+    let Ok(text) = std::str::from_utf8(data) else {
+        return;
+    };
+    let Ok(file) = SlipmeshFile::parse(text) else {
+        return;
+    };
+    if let SlipmeshFile::V2(files) = &file {
+        assert_read(files, text);
+    }
+    let Ok(network) = sliplib_mesh::model::lower(&file) else {
+        return;
+    };
+    assert_derived(&file, &network);
+    let resolved = sliplib_mesh::secrets::read(&network);
+    for node in &network.nodes {
+        let _ = sliplib_mesh::render::node_configs(&network, &node.name, &resolved);
     }
 });

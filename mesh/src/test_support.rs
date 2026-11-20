@@ -3,7 +3,7 @@
 
 use crate::secrets::{self, ResolvedSecrets};
 use sliplib_config::Obfuscation;
-use sliplib_config::mesh_config::MeshConfig;
+use sliplib_config::v1::mesh_config::MeshConfig;
 use sliplib_secrets::wireguard::PrivateKey;
 
 /// Every field a minted obfuscation carries, at values the kernel module accepts.
@@ -24,7 +24,7 @@ pub fn minted_obfuscation() -> Obfuscation {
 
 /// What `mesh` reads as, with whatever it lacks filled in.
 pub fn minted(mesh: &MeshConfig) -> ResolvedSecrets {
-    let mut resolved = secrets::read(mesh);
+    let mut resolved = secrets::read(&crate::v1::lower(mesh).unwrap());
     for node in &mesh.nodes {
         resolved
             .mesh_private_keys

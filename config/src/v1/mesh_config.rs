@@ -211,7 +211,7 @@ pub struct MeshLink {
 }
 
 /// Strict for the same reason `ClusterConfig` is.
-#[derive(Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RoadwarriorPool {
     pub name: String,
@@ -242,7 +242,7 @@ pub struct RoadwarriorPool {
 /// A client is written down by one of its keys: `public_key` when its private key stays with the
 /// client, `private_key` when the file keeps it - the public key is then derived from it, so the
 /// two cannot disagree.
-#[derive(Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(try_from = "ClientEntry")]
 pub struct RoadwarriorClient {
     pub name: String,
@@ -290,7 +290,7 @@ impl TryFrom<ClientEntry> for RoadwarriorClient {
     }
 }
 
-#[derive(Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct BypassEntry {
     pub node: String,
     #[serde(default)]

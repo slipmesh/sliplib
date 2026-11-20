@@ -35,7 +35,7 @@ pub enum Error {
     #[error(transparent)]
     Yaml(Source),
     #[error(
-        "{place} has no `version`, or one below {VERSION}, so it is of format version 1, which this tool does not read - convert the files to version {VERSION} as `docs/slipmesh-yaml-v1-to-v2.md` of sliplib says under \"Converting a file by hand\""
+        "{place} has no `version`, or one below {VERSION}, so it is of format version 1, which the reader of version {VERSION} does not take - convert the files to version {VERSION} as `docs/slipmesh-yaml-v1-to-v2.md` of sliplib says under \"Converting a file by hand\""
     )]
     VersionOne { place: Place },
     #[error(

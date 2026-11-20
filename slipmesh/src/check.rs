@@ -2,8 +2,9 @@
 //! computed and checked the way the tool that configures the node would. It writes nothing.
 
 use anyhow::{Context, Result};
-use sliplib_config::mesh_config::missing_defaults;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::mesh_config::missing_defaults;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
+use sliplib_mesh::model::Network;
 use sliplib_mesh::render::node_configs;
 use sliplib_mesh::secrets::ResolvedSecrets;
 use sliplib_yaml::MultiDoc;
@@ -31,9 +32,8 @@ fn whole_file(config_path: &Path, file: &SlipmeshFile) -> Result<()> {
     Ok(())
 }
 
-fn node(file: &SlipmeshFile, host: &str, resolved: &ResolvedSecrets) -> Result<()> {
-    let model = file.effective_for(host)?;
-    let Err(refusal) = node_configs(&model, host, resolved) else {
+fn node(network: &Network, host: &str, resolved: &ResolvedSecrets) -> Result<()> {
+    let Err(refusal) = node_configs(network, host, resolved) else {
         return Ok(());
     };
     let cured_by_minting = refusal.missing_secret().is_some();
@@ -47,11 +47,21 @@ fn node(file: &SlipmeshFile, host: &str, resolved: &ResolvedSecrets) -> Result<(
 
 /// Every node of `file` in its order, each with what refuses its configs: one refusal says nothing
 /// about the next node, so all of them are checked.
-pub fn nodes<'f>(file: &'f SlipmeshFile, resolved: &ResolvedSecrets) -> Vec<(&'f str, Result<()>)> {
+pub fn nodes<'f>(
+    file: &'f SlipmeshFile,
+    network: &Network,
+    resolved: &ResolvedSecrets,
+) -> Vec<(&'f str, Result<()>)> {
     file.hosts()
         .into_iter()
-        .map(|host| (host, node(file, host, resolved)))
+        .map(|host| (host, node(network, host, resolved)))
         .collect()
+}
+
+/// The network of `file`, which every node's configs are computed from: what refuses it refuses
+/// them all.
+pub fn network(file: &SlipmeshFile) -> Result<Network> {
+    Ok(sliplib_mesh::v1::lower(file.topology())?)
 }
 
 /// Prints `<node>: ok` for each node that passes and every refusal on a line of its own. Where
@@ -69,16 +79,21 @@ pub fn run(config_path: &Path) -> ExitCode {
             if let Err(refusal) = whole_file(config_path, &file) {
                 refuse(refusal);
             }
-            let resolved = sliplib_mesh::secrets::read(file.topology());
-            for (host, checked) in nodes(&file, &resolved) {
-                match checked {
-                    Ok(()) => println!("{host}: ok"),
-                    Err(refusal) => refuse(refusal),
-                }
-            }
-            if passed == ExitCode::SUCCESS {
-                for warning in sliplib_mesh::warnings::warnings(file.topology(), &resolved) {
-                    eprintln!("warning: {warning}");
+            match network(&file) {
+                Err(refusal) => refuse(refusal),
+                Ok(network) => {
+                    let resolved = sliplib_mesh::secrets::read(&network);
+                    for (host, checked) in nodes(&file, &network, &resolved) {
+                        match checked {
+                            Ok(()) => println!("{host}: ok"),
+                            Err(refusal) => refuse(refusal),
+                        }
+                    }
+                    if passed == ExitCode::SUCCESS {
+                        for warning in sliplib_mesh::warnings::warnings(&network, &resolved) {
+                            eprintln!("warning: {warning}");
+                        }
+                    }
                 }
             }
         }

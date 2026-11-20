@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result, bail};
 use sliplib_config::Obfuscation;
-use sliplib_config::mesh_config::{MeshConfig, RoadwarriorClient, RoadwarriorPool};
+use sliplib_config::v1::mesh_config::{MeshConfig, RoadwarriorClient, RoadwarriorPool};
 use sliplib_mesh::addressing;
 use sliplib_mesh::secrets::ResolvedSecrets;
 use sliplib_secrets::wireguard::PrivateKey;
@@ -138,7 +138,7 @@ pub(crate) fn resolve_dns(mesh: &MeshConfig, pool: &RoadwarriorPool) -> Option<S
     let subnet = mesh.cluster.service_subnet.as_deref()?;
     let subnet = sliplib_net::parse_ipv4(subnet).ok()?;
     Some(
-        addressing::ipv4_loopback(
+        addressing::ipv4_in(
             subnet.addr(),
             subnet.prefix_len(),
             Ipv4Addr::new(0, 0, 0, 10),
@@ -423,7 +423,7 @@ roadwarriors:
     }
 
     fn secrets(mesh: &MeshConfig) -> ResolvedSecrets {
-        let mut secrets = sliplib_mesh::secrets::read(mesh);
+        let mut secrets = sliplib_mesh::secrets::read_pools(mesh);
         for pool in &mesh.roadwarriors {
             secrets
                 .roadwarrior_private_keys

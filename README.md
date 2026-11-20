@@ -193,7 +193,11 @@ aggregation are `ipnet`'s own methods. On top of them:
 - `parse`, `parse_ipv4` and `parse_ipv6` read `"<address>/<prefix length>"` as a config writes it, keeping the
   host bits, with errors that name the input;
 - `exclude(net, excluded)` is what `ipnet` lacks: the rest of `net` without `excluded`, as the fewest
-  networks, in address order.
+  networks, in address order;
+- `reserved(address)` says whether an address is one no host takes on an interface where it stands
+  with that prefix length: the network and broadcast addresses of an IPv4 prefix shorter than /31,
+  the Subnet-Router anycast address of an IPv6 prefix shorter than /127. `ipnet` leaves the two
+  IPv4 ones out only when it lists the hosts of a network, and has no such rule for IPv6.
 
 ### `sliplib-yaml`
 
@@ -222,25 +226,32 @@ for a node from it, and what its readers take - the daemons on the node, and the
 Types and their checks only; reading and writing the files is `sliplib-yaml`'s.
 
 Every check and the loader return an error type of their own, one variant for each refusal:
-`slipmesh_file::Error`, `mesh_config::Invalid` and `UnknownNode`, `awg::Invalid`, `router::Invalid`
-and `LoopbackAddressError`, `ObfuscationError`, `MetricsError`. A variant's text is one line of the
-refusal. Where that line names its cause itself - an address that does not parse, with why - the
-variant holds the cause as a field and has no `source`; where the cause is a line of its own, it is
-the variant's `source`. A variant never does both, so printing the whole chain gives the whole
-message, each part once.
+`slipmesh_file::Error`, `v1::slipmesh_file::Error`, `v1::mesh_config::Invalid` and `UnknownNode`,
+`v2::Error`, `v2::Invalid`, `v2::NameError` and those of `v2::groups`, `v2::network` and
+`v2::platform`, `awg::Invalid`, `router::Invalid` and `LoopbackAddressError`, `ObfuscationError`,
+`MetricsError`. A variant's text
+is one line of the refusal. Where that line names its cause itself - an address that does not
+parse, with why - the variant holds the cause as a field and has no `source`; where the cause is a
+line of its own, it is the variant's `source`. A variant never does both, so printing the whole
+chain gives the whole message, each part once.
 
-- `slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a `MultiDoc`
-  (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
+- `slipmesh_file::SlipmeshFile` reads `slipmesh.yaml` of either version (`parse`, `read`): a file
+  whose `network` document says no `version` with the reader of version 1, a `version` of 2 or
+  more with that of version 2. It refuses a `version` below 2 or `null`, saying to take the key
+  out, and a text that is not YAML; any other refusal is the reader's own.
+- `v1::slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a
+  `MultiDoc` (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
   `roadwarriors` document, and `patch` documents aimed at hosts by `include`/`exclude`. It gives the
   hosts in order, the topology, and the `patch` documents as written: all of them (`patches`) or
   those that reach one host (`patches_for`), in the order of the file. A `Patch` gives its
   document, its `rank` among the documents that reach the same host, and reads as where it stands
   in the file. What a `patch` holds is for the tool of its platform to read and merge.
-- `mesh_config`: the topology - `MeshConfig` with its cluster settings, nodes, mesh links,
+- `v1::mesh_config`: the topology - `MeshConfig` with its cluster settings, nodes, mesh links,
   roadwarriors pools and bypass entries - and `validate`, the checks across them.
   `missing_defaults` lists the network settings the topology leaves to a default that a node is
   told, each with that default.
-- `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md), which no tool reads yet.
+- `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md), which `sliplib-mesh`
+  computes configs from and no tool reads yet.
   `v2::File` reads the files as a whole (`parse`, `read`) and refuses whatever its specification
   has the loader refuse, as `v2::Error`. It gives the `network` with what is in force for each
   node and each link written where they hold their own: a node's `routing`, a link's block of its
@@ -274,32 +285,50 @@ message, each part once.
 
 ### `sliplib-mesh`
 
-What a node's daemons are configured with, computed from the topology `sliplib-config` reads, for
+What a node's daemons are configured with, computed from the file `sliplib-config` reads, for
 every tool that configures a node of any platform.
 
 A refusal is a `render::Error`, which names the node and which of its configs it is about, with
-its cause as its `source`, or an `mtu::MtuError`.
+its cause as its `source`, or an `mtu::MtuError`. A file that reads and gives no network to
+compute from is refused as a `model::Error`: a `v1::Error` or a `v2::Error`, as the lowering of its
+version says it.
 
-- `secrets::read` takes the secrets the file sets: each node's mesh private key, each pool's private
-  key, and each link's and pool's obfuscation layered over the topology's. It never creates one: a
-  key the file lacks is absent from `ResolvedSecrets`, while every link and pool gets an obfuscation
-  entry, empty when nothing is set or it is `plain`.
+- `model::Network` is what the configs are computed from, whichever version of the format the file
+  is of: every node with the addresses derived for it, every link with the obfuscation and the
+  keepalive in force on it, the route classes, the ports of the metrics listeners, and what only a
+  file of version 1 describes, its pools and bypass lists. `model::lower` gives it for a
+  `SlipmeshFile`; `v1::lower` and `v2::lower` are the two it picks between. The lowering of
+  version 1 refuses a network or a `node_id` that does not read, a metrics port of 0, and an
+  `address_family` that contradicts the endpoint of a node on a link. That of version 2 refuses
+  files without `mesh.interface_prefix`, two nodes that get one address and a link-local no
+  interface takes. The
+  metrics ports of a file of version 2 are the `talos` platform's settings, which the lowering
+  does not read: the Talos generator sets them on the network.
+- `secrets::read` takes the secrets the network holds: each node's private key, each pool's
+  private key, and each link's and pool's obfuscation. It never creates one: a key the file lacks
+  is absent from `ResolvedSecrets`, while every link and pool gets an obfuscation entry, empty
+  when nothing is set or it is `plain`. `secrets::read_pools` takes those of the pools from a
+  topology of version 1 itself, for a client's config.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
-  node checks it. It needs the node's own mesh key always; for each of its links, the peer's key
-  and the link's obfuscation; for each pool on it, the pool's key and obfuscation. It refuses what
-  of these is missing, or an obfuscation not `plain` without one of `jc`, `jmin`, `jmax`, `s1`,
-  `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes, links
-  and pools the node is not on. Such a refusal gives its `secrets::MissingSecret` through
-  `render::Error::missing_secret`, so a tool can add how its user creates the secret.
-- The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks,
-  created, each by the entry it belongs to, or `NoHeaderLeft` when an entry's magic headers leave
-  no room for the ones it lacks. `slipmesh` builds with it; a tool that only reads the file leaves
-  it off, and that function is not in its build.
+  node checks it. It needs the node's own key, but on a node of version 2 that is on no link; for
+  each of its links, the peer's key and the link's obfuscation; for each pool on it, the pool's key
+  and obfuscation. It refuses what of these is missing, or an obfuscation not `plain` without one of
+  `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for
+  the secrets of nodes, links and pools the node is not on. Such a refusal gives its
+  `secrets::MissingSecret` through `render::Error::missing_secret`, so a tool can add how its user
+  creates the secret. A peer the node dials is given the keepalive of its link where that differs
+  from what `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes
+  of `talos`, and to every node of a file of version 1, which names no platform.
+- The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
+  each by the entry it belongs to, and no key for a node of version 2 on no link, or `NoHeaderLeft`
+  when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a
+  tool that only reads the file leaves it off, and that function is not in its build.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
-  crosses every link's underlay unfragmented, or `cluster.mesh_mtu` when it fits. It reads every
-  link's obfuscation through its `s4`, links the node is not on included; a missing entry counts as
-  no junk.
-- `addressing` gives a node's IPv4 loopback from its `node_id`, the link-local of a loopback, and
+  crosses every link's underlay unfragmented, or the one the file sets for the mesh when it fits. It
+  reads every link's obfuscation through its `s4`, links the node is not on included; a missing
+  entry counts as no junk. It refuses an underlay MTU below the least the family a link is dialed
+  over allows, 68 for IPv4 and 1280 for IPv6, and one that leaves no room for what the link adds.
+- `addressing` gives the address a `node_id` gives in a network, the link-local of a loopback, and
   an endpoint to dial.
 - `warnings::warnings` lists what the tools accept and tell about: for every link, in order, each
   `TrailerLoss` of its obfuscation. A `Warning` reads as the line a tool prints and says whether it
@@ -407,13 +436,14 @@ UPDATE_EXPECT=1 cargo test -p sliplib-mesh --test golden
 ```
 
 [`fuzz/`](fuzz) holds a target for [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz.html),
-which needs a nightly toolchain: `read_slipmesh` gives a text to the loader of format version 2
-and to everything a tool reads of what it gave. It expects a refusal, or a result that holds what
-the loader promises - each node's and each link's values in force as the format lays them,
-documents that reach nodes of their own platform, and each node given what reaches it, by rank and
-then as read - and never a panic. It is run before a pull request
-that changes how a file is read. Its first input is the specification's example, the network and
-the Talos documents joined into one text:
+which needs a nightly toolchain: `read_slipmesh` gives a text to `SlipmeshFile`, which reads either
+version, lowers what reads into the network, and computes the configs of every node. It expects a
+refusal at any step, or a result that holds what each step promises - for version 2, each node's
+and each link's values in force as the format lays them, documents that reach nodes of their own
+platform, and each node given what reaches it, by rank and then as read; for either, every derived
+address in the network it is derived in - and never a panic. It is run before a pull request that
+changes how a file is read or lowered. Its first inputs are the specification's example, the
+network and the Talos documents joined into one text, and the golden fixture of version 1:
 
 ```bash
 mkdir -p fuzz/corpus/read_slipmesh
@@ -421,6 +451,10 @@ mkdir -p fuzz/corpus/read_slipmesh
 
 ```bash
 for file in docs/example/mesh.yaml docs/example/talos.yaml; do echo ---; cat "$file"; done > fuzz/corpus/read_slipmesh/example.yaml
+```
+
+```bash
+cp mesh/tests/golden/v1/slipmesh.yaml fuzz/corpus/read_slipmesh/v1.yaml
 ```
 
 ```bash

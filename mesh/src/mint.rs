@@ -6,9 +6,9 @@
 //! The whole topology at once, not per node: a link's two ends share one obfuscation, and a node's
 //! config needs its peers' keys.
 
+use crate::model::Network;
 use crate::secrets::{self, link_key};
 use sliplib_config::Obfuscation;
-use sliplib_config::mesh_config::MeshConfig;
 use sliplib_secrets::wireguard::PrivateKey;
 use std::fmt;
 
@@ -72,15 +72,15 @@ fn mint_obfuscation(
     Ok(secrets::fill(obfuscation, &fresh))
 }
 
-/// Whatever secrets `topology` lacks, generated, each by the entry it belongs to. A `plain` link
+/// Whatever secrets `network` lacks, generated, each by the entry it belongs to. A `plain` link
 /// or pool gets no obfuscation generated: it would turn "no obfuscation" back into an obfuscated
 /// one.
-pub fn create(topology: &MeshConfig) -> Result<Minted, NoHeaderLeft> {
-    let mut written = secrets::read(topology);
+pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
+    let mut written = secrets::read(network);
     let mut minted = Minted::default();
 
-    for (index, node) in topology.nodes.iter().enumerate() {
-        if written.mesh_private_keys.contains_key(&node.name) {
+    for (index, node) in network.nodes.iter().enumerate() {
+        if written.mesh_private_keys.contains_key(&node.name) || !network.needs_a_key(&node.name) {
             continue;
         }
         minted.node_keys.push((index, PrivateKey::generate()));
@@ -89,11 +89,11 @@ pub fn create(topology: &MeshConfig) -> Result<Minted, NoHeaderLeft> {
             .push(format!("nodes[{}].mesh_private_key", node.name));
     }
 
-    for (index, link) in topology.mesh.links.iter().enumerate() {
+    for (index, link) in network.links.iter().enumerate() {
         if link.plain {
             continue;
         }
-        let pair = link_key(&link.pair);
+        let pair = link_key(&link.ends);
         let obfuscation = written
             .mesh_link_obfuscation
             .entry(pair.clone())
@@ -105,7 +105,7 @@ pub fn create(topology: &MeshConfig) -> Result<Minted, NoHeaderLeft> {
         }
     }
 
-    for pool in &topology.roadwarriors {
+    for pool in network.v1.iter().flat_map(|v1| &v1.pools) {
         let private_key =
             (!written.roadwarrior_private_keys.contains_key(&pool.name)).then(PrivateKey::generate);
         if private_key.is_some() {
@@ -143,6 +143,12 @@ pub fn create(topology: &MeshConfig) -> Result<Minted, NoHeaderLeft> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sliplib_config::v1::mesh_config::MeshConfig;
+
+    // The fixtures are topologies of format version 1, read through its lowering.
+    fn create(topology: &MeshConfig) -> Result<Minted, NoHeaderLeft> {
+        super::create(&crate::v1::lower(topology).unwrap())
+    }
 
     /// The 3.1 switches are never invented: they are not among the minted fields, so an
     /// unconfigured mesh stays as it was.

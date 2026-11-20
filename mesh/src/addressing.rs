@@ -7,8 +7,9 @@ fn node_id_bits(node_id: Ipv4Addr) -> u32 {
     u32::from(node_id)
 }
 
-/// `network/prefix_len`'s network bits with `node_id`'s low bits filling in the host portion.
-pub fn ipv4_loopback(network: Ipv4Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv4Addr {
+/// The address `node_id` gives in `network/prefix_len`: the network's bits, and the low bits of
+/// `node_id` in the host part.
+pub fn ipv4_in(network: Ipv4Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv4Addr {
     let mask: u32 = if prefix_len == 0 {
         0
     } else {
@@ -17,9 +18,10 @@ pub fn ipv4_loopback(network: Ipv4Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ip
     Ipv4Addr::from((u32::from(network) & mask) | (node_id_bits(node_id) & !mask))
 }
 
-/// Same `network | node_id` idea as `ipv4_loopback`, embedding `node_id`'s 32 bits into the low 32
-/// bits of `network/prefix_len`'s host portion.
-pub(crate) fn ipv6_loopback(network: Ipv6Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv6Addr {
+/// The address `node_id` gives in `network/prefix_len`: the network's bits, and `node_id`'s 32 bits
+/// in the low bits of the host part. A network longer than /96 leaves fewer than 32, and takes
+/// only that many low bits of `node_id`, as the link-local networks do.
+pub(crate) fn ipv6_in(network: Ipv6Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv6Addr {
     let mask: u128 = if prefix_len == 0 {
         0
     } else {
@@ -61,7 +63,7 @@ mod tests {
         let network = Ipv4Addr::new(198, 51, 100, 0);
         let node_id = Ipv4Addr::new(0, 0, 0, 5);
         assert_eq!(
-            ipv4_loopback(network, 25, node_id),
+            ipv4_in(network, 25, node_id),
             Ipv4Addr::new(198, 51, 100, 5)
         );
     }
@@ -69,8 +71,8 @@ mod tests {
     #[test]
     fn different_node_ids_never_collide_for_the_same_network() {
         let network = Ipv4Addr::new(198, 51, 100, 0);
-        let a = ipv4_loopback(network, 25, Ipv4Addr::new(0, 0, 0, 1));
-        let b = ipv4_loopback(network, 25, Ipv4Addr::new(0, 0, 0, 2));
+        let a = ipv4_in(network, 25, Ipv4Addr::new(0, 0, 0, 1));
+        let b = ipv4_in(network, 25, Ipv4Addr::new(0, 0, 0, 2));
         assert_ne!(a, b);
     }
 
@@ -78,17 +80,14 @@ mod tests {
     fn ipv6_loopback_ors_node_id_into_the_low_32_host_bits() {
         let network: Ipv6Addr = "3fff::".parse().unwrap();
         let node_id = Ipv4Addr::new(0, 0, 0, 5);
-        assert_eq!(ipv6_loopback(network, 32, node_id).to_string(), "3fff::5");
+        assert_eq!(ipv6_in(network, 32, node_id).to_string(), "3fff::5");
     }
 
     #[test]
     fn ipv6_loopback_leaves_middle_bits_zero() {
         let network: Ipv6Addr = "3fff::".parse().unwrap();
         let node_id = Ipv4Addr::new(198, 51, 100, 1);
-        assert_eq!(
-            ipv6_loopback(network, 32, node_id).to_string(),
-            "3fff::c633:6401"
-        );
+        assert_eq!(ipv6_in(network, 32, node_id).to_string(), "3fff::c633:6401");
     }
 
     #[test]

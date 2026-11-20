@@ -1,12 +1,14 @@
-//! Format version 1, pinned: what every node of the fixtures under `golden/` gets, compared byte
-//! for byte with the files beside each fixture, with derived public keys named by their owner. A
-//! change that moves one of them changes what the nodes of a working network are configured
-//! with. `UPDATE_EXPECT=1` rewrites the files; the difference is then reviewed like any other.
+//! What every node of the fixtures under `golden/` gets: each fixture of format version 1 compared
+//! byte for byte with the files beside it, derived public keys named by their owner, and its twin
+//! of version 2 with what version 1 gives. A change that moves one of them changes what the nodes
+//! of a working network are configured with. `UPDATE_EXPECT=1` rewrites the files; the difference is then reviewed like any other.
 
 use expect_test::expect_file;
 use sha2::{Digest, Sha256};
-use sliplib_config::mesh_config::MeshConfig;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::mesh_config::MeshConfig;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
+use sliplib_config::v2::Platform;
+use sliplib_mesh::model::MetricsPorts;
 use sliplib_mesh::render::node_configs;
 
 /// A fixture, the nodes it holds and the SHA-256 of its text below the comment that opens it. The
@@ -92,7 +94,8 @@ fn every_node_gets_the_configs_it_got_before(fixture: &Fixture) {
     // Named here, not taken from the code under test: a node that code lost would leave its
     // golden files unread.
     assert_eq!(file.hosts(), fixture.nodes);
-    let resolved = sliplib_mesh::secrets::read(file.topology());
+    let network = sliplib_mesh::v1::lower(file.topology()).unwrap();
+    let resolved = sliplib_mesh::secrets::read(&network);
     let public_keys = derived_public_keys(file.topology());
     let named = |text: String| {
         public_keys
@@ -101,8 +104,7 @@ fn every_node_gets_the_configs_it_got_before(fixture: &Fixture) {
     };
 
     for host in fixture.nodes {
-        let model = file.effective_for(host).unwrap();
-        let configs = node_configs(&model, host, &resolved).unwrap();
+        let configs = node_configs(&network, host, &resolved).unwrap();
         let directory = fixture.directory;
         expect_file![format!("{directory}/{host}.awg.yaml")]
             .assert_eq(&named(sliplib_yaml::to_string(&configs.awg).unwrap()));
@@ -119,4 +121,95 @@ fn every_node_of_the_full_version_1_file_gets_the_configs_it_got_before() {
 #[test]
 fn every_node_of_the_alternate_version_1_file_gets_the_configs_it_got_before() {
     every_node_gets_the_configs_it_got_before(&ALTERNATE);
+}
+
+/// A fixture of version 1 beside the same network written in version 2 by hand.
+struct Twin {
+    v1: &'static Fixture,
+    text: &'static str,
+    /// An endpoint a peer dialed in version 1 because the node wrote a port into its own, and
+    /// the one it dials now: the node's address and the link's port.
+    redialed: &'static [(&'static str, &'static str)],
+}
+
+const FULL_TWIN: Twin = Twin {
+    v1: &FULL,
+    text: include_str!("golden/v2/slipmesh.yaml"),
+    redialed: &[("192.0.2.4:51999", "192.0.2.4:51832")],
+};
+
+const ALTERNATE_TWIN: Twin = Twin {
+    v1: &ALTERNATE,
+    text: include_str!("golden/v2-alternate/slipmesh.yaml"),
+    redialed: &[],
+};
+
+/// Every node of the twin gets what the file of version 1 gave it, but for what
+/// `docs/slipmesh-yaml-v1-to-v2.md` says a conversion changes: no pool interface, no bypass list,
+/// no label on what is announced, the link's port where a node's endpoint held another, and no
+/// metrics listener on a node that is not of `talos`.
+fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
+    let file = SlipmeshFile::parse(twin.v1.text).unwrap();
+    let before = sliplib_mesh::v1::lower(file.topology()).unwrap();
+    let before_secrets = sliplib_mesh::secrets::read(&before);
+
+    let files = sliplib_config::v2::File::parse(twin.text).unwrap();
+    let mut after = sliplib_mesh::v2::lower(&files).unwrap();
+    let metrics = files.talos_settings().unwrap().metrics.unwrap_or_default();
+    after.metrics = MetricsPorts {
+        awg: metrics.mesh.map(|listener| listener.port),
+        router: metrics.router.map(|listener| listener.port),
+    };
+    let after_secrets = sliplib_mesh::secrets::read(&after);
+    let names: Vec<&str> = after.nodes.iter().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, twin.v1.nodes);
+
+    for host in twin.v1.nodes {
+        let mut expected = node_configs(&before, host, &before_secrets).unwrap();
+        expected
+            .awg
+            .interfaces
+            .retain(|interface| !interface.name.starts_with("rw-"));
+        expected.router.bypass = None;
+        for announced in &mut expected.router.announce {
+            announced.label = None;
+        }
+        let endpoints = expected
+            .awg
+            .interfaces
+            .iter_mut()
+            .flat_map(|interface| &mut interface.peers)
+            .filter_map(|peer| peer.endpoint.as_mut());
+        for endpoint in endpoints {
+            if let Some((_, now)) = twin.redialed.iter().find(|(was, _)| endpoint == was) {
+                *endpoint = (*now).to_owned();
+            }
+        }
+        if after.node(host).unwrap().platform != Some(Platform::Talos) {
+            expected.awg.metrics = None;
+            expected.router.metrics = None;
+        }
+
+        let got = node_configs(&after, host, &after_secrets).unwrap();
+        assert_eq!(
+            sliplib_yaml::to_string(&got.awg).unwrap(),
+            sliplib_yaml::to_string(&expected.awg).unwrap(),
+            "the awg config of {host}"
+        );
+        assert_eq!(
+            sliplib_yaml::to_string(&got.router).unwrap(),
+            sliplib_yaml::to_string(&expected.router).unwrap(),
+            "the router config of {host}"
+        );
+    }
+}
+
+#[test]
+fn the_version_2_twin_of_the_full_file_gives_every_node_what_version_1_gave_it() {
+    the_twin_gives_every_node_what_version_1_gave_it(&FULL_TWIN);
+}
+
+#[test]
+fn the_version_2_twin_of_the_alternate_file_gives_every_node_what_version_1_gave_it() {
+    the_twin_gives_every_node_what_version_1_gave_it(&ALTERNATE_TWIN);
 }

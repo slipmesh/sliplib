@@ -3,13 +3,13 @@
 //! their checks only; reading and writing files is `sliplib-yaml`'s.
 
 pub mod awg;
-pub mod mesh_config;
 mod metrics;
 pub mod nftables;
 mod obfuscation;
 mod range;
 pub mod router;
 pub mod slipmesh_file;
+pub mod v1;
 pub mod v2;
 
 pub use metrics::{MetricsConfig, MetricsError};

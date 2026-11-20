@@ -5,8 +5,8 @@ use crate::file::{read_slipmesh, write_edits};
 use crate::{edit, roadwarrior};
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use sliplib_config::mesh_config;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::mesh_config;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use sliplib_mesh::secrets::{self, ResolvedSecrets};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::path::{Path, PathBuf};
@@ -255,5 +255,5 @@ fn written_secrets(
         "{} lacks the secrets of pool {name:?} - `slipmesh mint` creates and writes them",
         config_path.display()
     );
-    Ok(secrets::read(topology))
+    Ok(secrets::read_pools(topology))
 }

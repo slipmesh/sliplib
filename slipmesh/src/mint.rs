@@ -5,13 +5,13 @@
 use crate::file::{read_slipmesh, write_edits};
 use crate::{check, edit};
 use anyhow::{Context, Result};
-use sliplib_config::mesh_config::missing_defaults;
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v1::mesh_config::missing_defaults;
+use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use std::path::Path;
 
 pub fn run(config_path: &Path) -> Result<()> {
     let (mut yaml, file) = read_slipmesh(config_path)?;
-    let minted = sliplib_mesh::mint::create(file.topology())?;
+    let minted = sliplib_mesh::mint::create(&check::network(&file)?)?;
     edit::record(&mut yaml, &file, &minted)?;
     let unset = missing_defaults(file.topology());
     edit::write_defaults(&mut yaml, &file, &unset)?;
@@ -24,8 +24,9 @@ pub fn run(config_path: &Path) -> Result<()> {
     // node's config is refused with must not reach the file.
     let edited = SlipmeshFile::read(&yaml)
         .context("slipmesh.yaml with what was minted does not read back - not written")?;
-    let written = sliplib_mesh::secrets::read(edited.topology());
-    let refusals: Vec<anyhow::Error> = check::nodes(&edited, &written)
+    let network = check::network(&edited)?;
+    let written = sliplib_mesh::secrets::read(&network);
+    let refusals: Vec<anyhow::Error> = check::nodes(&edited, &network, &written)
         .into_iter()
         .filter_map(|(_, checked)| checked.err())
         .collect();

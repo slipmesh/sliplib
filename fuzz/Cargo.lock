@@ -339,7 +339,19 @@ dependencies = [
  "libfuzzer-sys",
  "serde",
  "sliplib-config",
+ "sliplib-mesh",
+ "sliplib-net",
  "sliplib-yaml",
+]
+
+[[package]]
+name = "sliplib-mesh"
+version = "0.19.0"
+dependencies = [
+ "sliplib-config",
+ "sliplib-net",
+ "sliplib-secrets",
+ "thiserror",
 ]
 
 [[package]]
