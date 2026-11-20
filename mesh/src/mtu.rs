@@ -7,10 +7,9 @@
 //! never past the MTU, so a full-size packet carries no padding. A fragmented outer packet takes
 //! TCP in the tunnel down to a few Mbit/s, which is what this guards against.
 
-use crate::model::{Link, Network, Node};
+use crate::model::{Family, Link, Network, Node};
 use crate::secrets::{ResolvedSecrets, link_key};
-use sliplib_config::v1::mesh_config::{AddressFamily, UnknownNode};
-use std::net::IpAddr;
+use sliplib_config::v1::mesh_config::UnknownNode;
 
 /// An uplink's MTU when `nodes[].uplink_mtu` does not say.
 pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
@@ -60,12 +59,6 @@ pub enum LinkError {
     FamiliesDiffer(String, String),
     #[error("neither {0:?} nor {1:?} has an endpoint, so neither can dial the other")]
     NoEndpoint(String, String),
-    #[error("node {node:?}: address_family {said:?} contradicts its endpoint {endpoint}")]
-    FamilyContradicts {
-        node: String,
-        said: AddressFamily,
-        endpoint: String,
-    },
     #[error(
         "node {node:?}: {key} {mtu} is below {minimum}, the least {family} allows a link, and the link is dialed over {family} - set the MTU the path has"
     )]
@@ -135,8 +128,8 @@ fn link_limit(mesh: &Network, link: &Link, resolved: &ResolvedSecrets) -> Result
     let [a, b] = &link.ends;
     let (a, b) = (mesh.node(a)?, mesh.node(b)?);
     let (ip_header, family, minimum) = match link_family(a, b)? {
-        AddressFamily::Ipv4 => (20, "IPv4", MIN_IPV4_MTU),
-        AddressFamily::Ipv6 => (40, "IPv6", MIN_MESH_MTU),
+        Family::Ipv4 => (20, "IPv4", MIN_IPV4_MTU),
+        Family::Ipv6 => (40, "IPv6", MIN_MESH_MTU),
     };
     if let Some(node) = [a, b].into_iter().find(|node| node.underlay_mtu < minimum) {
         return Err(LinkError::UnderlayBelowMinimum {
@@ -164,35 +157,14 @@ fn link_limit(mesh: &Network, link: &Link, resolved: &ResolvedSecrets) -> Result
 }
 
 /// The family of the endpoint a link is dialed at: either side's, and the same when both have one.
-fn link_family(a: &Node, b: &Node) -> Result<AddressFamily, LinkError> {
-    match (endpoint_family(a)?, endpoint_family(b)?) {
+fn link_family(a: &Node, b: &Node) -> Result<Family, LinkError> {
+    let family = |node: &Node| node.endpoint.as_ref().map(|endpoint| endpoint.family);
+    match (family(a), family(b)) {
         (Some(x), Some(y)) if x != y => {
             Err(LinkError::FamiliesDiffer(a.name.clone(), b.name.clone()))
         }
         (Some(family), _) | (None, Some(family)) => Ok(family),
         (None, None) => Err(LinkError::NoEndpoint(a.name.clone(), b.name.clone())),
-    }
-}
-
-fn endpoint_family(node: &Node) -> Result<Option<AddressFamily>, LinkError> {
-    let Some(endpoint) = &node.endpoint else {
-        return Ok(None);
-    };
-    let Ok(literal) = endpoint.written.parse::<IpAddr>() else {
-        return Ok(Some(endpoint.stated_family.unwrap_or(AddressFamily::Ipv6)));
-    };
-    let family = if literal.is_ipv4() {
-        AddressFamily::Ipv4
-    } else {
-        AddressFamily::Ipv6
-    };
-    match endpoint.stated_family {
-        Some(said) if said != family => Err(LinkError::FamilyContradicts {
-            node: node.name.clone(),
-            said,
-            endpoint: endpoint.written.clone(),
-        }),
-        _ => Ok(Some(family)),
     }
 }
 
@@ -281,9 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn an_address_family_that_contradicts_a_literal_endpoint_is_an_error() {
-        let err = error(&format!("{V4}, address_family: ipv6"), "", PLAIN, "");
-        assert!(err.contains(r#"node "a": address_family"#), "{err}");
+    fn an_address_family_that_agrees_with_a_literal_endpoint_is_taken() {
         assert_eq!(
             mtu(&format!("{V4}, address_family: ipv4"), "", PLAIN, ""),
             1440

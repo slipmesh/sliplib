@@ -6,14 +6,15 @@
 //! It refuses nothing: it can hold every file of version 1 that reads. What only one version
 //! refuses is refused where that version is read and lowered.
 
-use crate::render::RenderError;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::slipmesh_file::SlipmeshFile;
-use sliplib_config::v1::mesh_config::{AddressFamily, BypassEntry, RoadwarriorPool, UnknownNode};
+use sliplib_config::v1::mesh_config::{BypassEntry, RoadwarriorPool, UnknownNode};
 use sliplib_config::v2::Platform;
+pub use sliplib_config::v2::network::Family;
 use sliplib_config::{Obfuscation, Range};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::num::NonZeroU16;
 
 #[derive(Debug)]
 pub struct Network {
@@ -85,8 +86,8 @@ impl Network {
 /// listener.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct MetricsPorts {
-    pub awg: Option<u16>,
-    pub router: Option<u16>,
+    pub awg: Option<NonZeroU16>,
+    pub router: Option<NonZeroU16>,
 }
 
 #[derive(Debug)]
@@ -112,8 +113,8 @@ pub struct Node {
 pub struct Endpoint {
     /// The address or host name as the files write it, which a peer dials with the link's port.
     pub written: String,
-    /// The family the files say it is dialed over, where they say one.
-    pub stated_family: Option<AddressFamily>,
+    /// The family it is dialed over.
+    pub family: Family,
 }
 
 #[derive(Debug)]
@@ -149,7 +150,7 @@ pub struct V1Only {
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
-    V1(#[from] RenderError),
+    V1(#[from] crate::v1::Error),
     #[error(transparent)]
     V2(#[from] crate::v2::Error),
 }
@@ -192,7 +193,7 @@ mod tests {
         assert!(
             matches!(
                 of_version_1,
-                Error::V1(RenderError::Network {
+                Error::V1(crate::v1::Error::Network {
                     field: "cluster.loopback_networks.ipv4",
                     ..
                 })

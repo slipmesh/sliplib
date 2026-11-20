@@ -1,13 +1,40 @@
 //! A topology of format version 1 as the network the configs are computed from.
 
 use crate::addressing;
-use crate::model::{Endpoint, Keys, Link, MetricsPorts, Network, Node, V1Only};
+use crate::model::{Endpoint, Family, Keys, Link, MetricsPorts, Network, Node, V1Only};
 use crate::mtu::DEFAULT_UPLINK_MTU;
-use crate::render::RenderError;
 use crate::secrets::unless_plain;
 use sliplib_config::router::AnnounceEntry;
-use sliplib_config::v1::mesh_config::{MeshConfig, NodeEntry};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use sliplib_config::v1::mesh_config::{AddressFamily, MeshConfig, NodeEntry};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::num::NonZeroU16;
+
+/// Why a topology of version 1, which reads, gives no network to compute from.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// The network at the key `field` of the file does not read as one.
+    #[error("{field}")]
+    Network {
+        field: &'static str,
+        #[source]
+        source: sliplib_net::ParseError,
+    },
+    #[error("node {node:?}: node_id must be a valid IPv4-shaped identity")]
+    NodeId {
+        node: String,
+        #[source]
+        source: std::net::AddrParseError,
+    },
+    #[error("cluster.{0} is 0 - remove the field to serve no metrics")]
+    MetricsPortZero(&'static str),
+    #[error("node {node:?}: address_family {said:?} contradicts its endpoint {endpoint}")]
+    FamilyContradicts {
+        node: String,
+        said: AddressFamily,
+        endpoint: String,
+    },
+}
 
 /// The label of the Kubernetes service range in a node's routing configuration.
 const SERVICE_SUBNET_LABEL: &str = "k8s-services";
@@ -18,11 +45,11 @@ const EGRESS_CLASS: &str = "egress";
 /// An IPv4 and an IPv6 network, each as its address and prefix length.
 type Networks = (Ipv4Addr, u8, Ipv6Addr, u8);
 
-fn network(field: &'static str) -> impl Fn(sliplib_net::ParseError) -> RenderError {
-    move |source| RenderError::Network { field, source }
+fn network(field: &'static str) -> impl Fn(sliplib_net::ParseError) -> Error {
+    move |source| Error::Network { field, source }
 }
 
-fn loopback_networks(mesh: &MeshConfig) -> Result<Networks, RenderError> {
+fn loopback_networks(mesh: &MeshConfig) -> Result<Networks, Error> {
     let v4 = sliplib_net::parse_ipv4(&mesh.cluster.loopback_networks.ipv4)
         .map_err(network("cluster.loopback_networks.ipv4"))?;
     let v6 = sliplib_net::parse_ipv6(&mesh.cluster.loopback_networks.ipv6)
@@ -30,7 +57,7 @@ fn loopback_networks(mesh: &MeshConfig) -> Result<Networks, RenderError> {
     Ok((v4.addr(), v4.prefix_len(), v6.addr(), v6.prefix_len()))
 }
 
-fn tunnel_networks(mesh: &MeshConfig) -> Result<Option<Networks>, RenderError> {
+fn tunnel_networks(mesh: &MeshConfig) -> Result<Option<Networks>, Error> {
     let Some(tn) = &mesh.cluster.tunnel_networks else {
         return Ok(None);
     };
@@ -52,19 +79,63 @@ fn addresses((v4, v4_prefix, v6, v6_prefix): Networks, node_id: Ipv4Addr) -> (Ip
     )
 }
 
+fn family(family: AddressFamily) -> Family {
+    match family {
+        AddressFamily::Ipv4 => Family::Ipv4,
+        AddressFamily::Ipv6 => Family::Ipv6,
+    }
+}
+
+/// Where the node's peers dial it, over the family of its address, or the one `address_family`
+/// says for a host name, IPv6 when it says none. An `address_family` that contradicts an address
+/// is refused for a node on a link alone: no other is dialed, and version 1 refused no other.
+fn endpoint(entry: &NodeEntry, on_a_link: bool) -> Result<Option<Endpoint>, Error> {
+    let Some(written) = &entry.endpoint else {
+        return Ok(None);
+    };
+    let family = match written.parse::<IpAddr>() {
+        Ok(address) => {
+            let of_address = if address.is_ipv4() {
+                Family::Ipv4
+            } else {
+                Family::Ipv6
+            };
+            match entry.address_family {
+                Some(said) if on_a_link && family(said) != of_address => {
+                    return Err(Error::FamilyContradicts {
+                        node: entry.name.clone(),
+                        said,
+                        endpoint: written.clone(),
+                    });
+                }
+                _ => of_address,
+            }
+        }
+        Err(_) => entry.address_family.map_or(Family::Ipv6, family),
+    };
+    Ok(Some(Endpoint {
+        written: written.clone(),
+        family,
+    }))
+}
+
+/// A metrics port, where `field` names one: 0 serves nothing, as leaving it out does, so it is a
+/// mistake.
+fn metrics_port(port: Option<u16>, field: &'static str) -> Result<Option<NonZeroU16>, Error> {
+    port.map(|port| NonZeroU16::new(port).ok_or(Error::MetricsPortZero(field)))
+        .transpose()
+}
+
 fn node(
     mesh: &MeshConfig,
     entry: &NodeEntry,
     loopbacks: Networks,
     tunnels: Option<Networks>,
-) -> Result<Node, RenderError> {
-    let node_id: Ipv4Addr = entry
-        .node_id
-        .parse()
-        .map_err(|source| RenderError::NodeId {
-            node: entry.name.clone(),
-            source,
-        })?;
+) -> Result<Node, Error> {
+    let node_id: Ipv4Addr = entry.node_id.parse().map_err(|source| Error::NodeId {
+        node: entry.name.clone(),
+        source,
+    })?;
     let loopback = addresses(loopbacks, node_id);
     // With `tunnel_networks`, its IPv6 half is the interface's only link-local, replacing the one
     // derived from the loopback: OSPFv3 takes any link-scoped address, and with two it is unclear
@@ -81,10 +152,13 @@ fn node(
         link_local,
         tunnel_ipv4,
         private_key: entry.mesh_private_key.clone(),
-        endpoint: entry.endpoint.as_ref().map(|written| Endpoint {
-            written: written.clone(),
-            stated_family: entry.address_family,
-        }),
+        endpoint: endpoint(
+            entry,
+            mesh.mesh
+                .links
+                .iter()
+                .any(|link| link.pair.contains(&entry.name)),
+        )?,
         underlay_mtu: entry.uplink_mtu.unwrap_or(DEFAULT_UPLINK_MTU),
         // The node's own list replaces the cluster's. Nothing is added to it: what a node
         // announces has to be readable in the file.
@@ -108,7 +182,7 @@ fn node(
 
 /// `mesh` as a network. Refuses what no address can be derived from: a loopback or tunnel
 /// network that does not read.
-pub fn lower(mesh: &MeshConfig) -> Result<Network, RenderError> {
+pub fn lower(mesh: &MeshConfig) -> Result<Network, Error> {
     let loopbacks = loopback_networks(mesh)?;
     let tunnels = tunnel_networks(mesh)?;
     let cluster = &mesh.cluster;
@@ -137,8 +211,8 @@ pub fn lower(mesh: &MeshConfig) -> Result<Network, RenderError> {
         mtu: cluster.mesh_mtu,
         classes: vec![(EGRESS_CLASS.to_owned(), cluster.egress_route_proto_id())],
         metrics: MetricsPorts {
-            awg: cluster.awg_metrics_port,
-            router: cluster.router_metrics_port,
+            awg: metrics_port(cluster.awg_metrics_port, "awg_metrics_port")?,
+            router: metrics_port(cluster.router_metrics_port, "router_metrics_port")?,
         },
         keys: Keys::V1,
         key_on_a_link_only: false,
@@ -149,4 +223,48 @@ pub fn lower(mesh: &MeshConfig) -> Result<Network, RenderError> {
             bypass_refresh_interval_secs: cluster.bypass_refresh_interval_secs,
         }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two nodes, `a` dialed at an IPv4 literal; `cluster` adds lines to the cluster block, `a`
+    /// fields to node `a`, and `links` is the list of links.
+    fn topology(cluster: &str, a: &str, links: &str) -> MeshConfig {
+        sliplib_yaml::from_str(&format!(
+            "cluster:\n  bgp_as: 64512\n  loopback_networks: {{ipv4: 198.51.100.0/25, ipv6: \
+             '3fff::/32'}}\n{cluster}nodes:\n  - {{name: a, node_id: 198.51.100.1, endpoint: \
+             192.0.2.10{a}}}\n  - {{name: b, node_id: 198.51.100.2}}\nmesh:\n  links: {links}\n"
+        ))
+        .unwrap()
+    }
+
+    const LINKED: &str = "[{pair: [a, b], port: 51820, plain: true}]";
+
+    #[test]
+    fn a_metrics_port_of_zero_is_refused_by_its_field() {
+        for field in ["awg_metrics_port", "router_metrics_port"] {
+            let refusal = lower(&topology(&format!("  {field}: 0\n"), "", LINKED)).unwrap_err();
+            assert!(
+                matches!(refusal, Error::MetricsPortZero(named) if named == field),
+                "{refusal:?}"
+            );
+        }
+        let served = lower(&topology("  awg_metrics_port: 9586\n", "", LINKED)).unwrap();
+        assert_eq!(served.metrics.awg.map(u16::from), Some(9586));
+    }
+
+    #[test]
+    fn an_address_family_that_contradicts_the_endpoint_of_a_node_on_a_link_is_refused() {
+        let said = ", address_family: ipv6";
+        let refusal = lower(&topology("", said, LINKED)).unwrap_err();
+        assert!(
+            matches!(&refusal, Error::FamilyContradicts { node, said: AddressFamily::Ipv6, endpoint }
+                if node == "a" && endpoint == "192.0.2.10"),
+            "{refusal:?}"
+        );
+        // A node on no link is dialed by nobody, and its family is never counted.
+        lower(&topology("", said, "[]")).unwrap();
+    }
 }

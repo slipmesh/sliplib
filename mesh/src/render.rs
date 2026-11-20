@@ -14,6 +14,7 @@ use sliplib_config::v1::mesh_config::UnknownNode;
 use sliplib_config::v2::Platform;
 use sliplib_config::{MetricsConfig, Obfuscation, ObfuscationError};
 use sliplib_secrets::wireguard::KeyError;
+use std::num::NonZeroU16;
 
 /// Why a node has no configs. Every variant names the node and which of its two configs it is
 /// about; the cause is its source.
@@ -77,19 +78,6 @@ pub enum RenderError {
     UnknownNode(#[from] UnknownNode),
     #[error(transparent)]
     Mtu(#[from] MtuError),
-    /// The network at the key `field` of the file does not read as one.
-    #[error("{field}")]
-    Network {
-        field: &'static str,
-        #[source]
-        source: sliplib_net::ParseError,
-    },
-    #[error("node {node:?}: node_id must be a valid IPv4-shaped identity")]
-    NodeId {
-        node: String,
-        #[source]
-        source: std::net::AddrParseError,
-    },
     #[error("node {node:?}: {key}")]
     Key {
         node: String,
@@ -102,8 +90,6 @@ pub enum RenderError {
         "node {node:?}: cluster.tunnel_networks is configured, so direct_interfaces must include {glob:?} - the tunnel IPv4 address is otherwise announced by nothing (OSPFv3 is IPv6-only) and is reachable on no other node"
     )]
     MeshPatternMissing { node: String, glob: String },
-    #[error("cluster.{0} is 0 - remove the field to serve no metrics")]
-    MetricsPortZero(&'static str),
 }
 
 type Result<T> = std::result::Result<T, RenderError>;
@@ -179,7 +165,7 @@ pub(crate) fn render_router_config(mesh: &Network, node_name: &str) -> Result<Ro
         learn: node.learn.clone(),
         announce: node.announce.clone(),
         bypass: bypass_for(mesh, node_name),
-        metrics: metrics_for(node, mesh.metrics.router, "router_metrics_port")?,
+        metrics: metrics_for(node, mesh.metrics.router),
     })
 }
 
@@ -337,7 +323,7 @@ pub(crate) fn render_awg_config(
     interfaces.extend(roadwarrior_interfaces_for(mesh, node_name, resolved)?);
     Ok(AwgConfig {
         interfaces,
-        metrics: metrics_for(mesh.node(node_name)?, mesh.metrics.awg, "awg_metrics_port")?,
+        metrics: metrics_for(mesh.node(node_name)?, mesh.metrics.awg),
     })
 }
 
@@ -417,27 +403,16 @@ fn minted_obfuscation(
 
 /// A metrics listener for this node, when the port says there is one, on the node's own IPv4
 /// loopback - the address the router daemon brings up, so no listener can drift from it.
-fn metrics_for(
-    node: &Node,
-    port: Option<u16>,
-    field: &'static str,
-) -> Result<Option<MetricsConfig>> {
+fn metrics_for(node: &Node, port: Option<NonZeroU16>) -> Option<MetricsConfig> {
     // The listeners are those of the daemons the Talos generator installs. A file of version 1
     // names no platform, and every node of it gets them.
     let served = node
         .platform
         .is_none_or(|platform| platform == Platform::Talos);
-    let Some(port) = port.filter(|_| served) else {
-        return Ok(None);
-    };
-    // Refused here, not by the daemon: unset already serves nothing, so 0 is a mistake, better
-    // caught where it was written than on every node at once.
-    if port == 0 {
-        return Err(RenderError::MetricsPortZero(field));
-    }
-    Ok(Some(MetricsConfig {
+    let port = port.filter(|_| served)?;
+    Some(MetricsConfig {
         listen: format!("{}:{port}", node.loopback.0),
-    }))
+    })
 }
 
 #[cfg(test)]
@@ -448,33 +423,33 @@ mod tests {
 
     // The fixtures are topologies of format version 1. Each function under test is reached
     // through that version's lowering, as a tool reaches it.
-    fn lowered(mesh: &MeshConfig) -> Result<Network> {
-        crate::v1::lower(mesh)
+    fn lowered(mesh: &MeshConfig) -> Network {
+        crate::v1::lower(mesh).unwrap()
     }
 
     fn node_loopbacks(mesh: &MeshConfig, node: &str) -> Result<(Ipv4Addr, Ipv6Addr)> {
-        Ok(lowered(mesh)?.node(node)?.loopback)
+        Ok(lowered(mesh).node(node)?.loopback)
     }
 
     fn node_tunnel_addresses(
         mesh: &MeshConfig,
         node: &str,
     ) -> Result<Option<(Ipv4Addr, Ipv6Addr)>> {
-        let network = lowered(mesh)?;
+        let network = lowered(mesh);
         let node = network.node(node)?;
         Ok(node.tunnel_ipv4.map(|v4| (v4, node.link_local)))
     }
 
     fn bgp_peers_for(mesh: &MeshConfig, node: &str) -> Result<Vec<BgpPeerEntry>> {
-        Ok(super::bgp_peers_for(&lowered(mesh)?, node))
+        Ok(super::bgp_peers_for(&lowered(mesh), node))
     }
 
     fn bypass_for(mesh: &MeshConfig, node: &str) -> Option<BypassConfig> {
-        super::bypass_for(&lowered(mesh).unwrap(), node)
+        super::bypass_for(&lowered(mesh), node)
     }
 
     fn render_router_config(mesh: &MeshConfig, node: &str) -> Result<RouterConfig> {
-        super::render_router_config(&lowered(mesh)?, node)
+        super::render_router_config(&lowered(mesh), node)
     }
 
     fn mesh_interfaces_for(
@@ -482,7 +457,7 @@ mod tests {
         node: &str,
         resolved: &ResolvedSecrets,
     ) -> Result<Vec<InterfaceEntry>> {
-        super::mesh_interfaces_for(&lowered(mesh)?, node, resolved)
+        super::mesh_interfaces_for(&lowered(mesh), node, resolved)
     }
 
     fn roadwarrior_interfaces_for(
@@ -490,7 +465,7 @@ mod tests {
         node: &str,
         resolved: &ResolvedSecrets,
     ) -> Result<Vec<InterfaceEntry>> {
-        super::roadwarrior_interfaces_for(&lowered(mesh)?, node, resolved)
+        super::roadwarrior_interfaces_for(&lowered(mesh), node, resolved)
     }
 
     fn render_awg_config(
@@ -498,7 +473,7 @@ mod tests {
         node: &str,
         resolved: &ResolvedSecrets,
     ) -> Result<AwgConfig> {
-        super::render_awg_config(&lowered(mesh)?, node, resolved)
+        super::render_awg_config(&lowered(mesh), node, resolved)
     }
 
     fn node_configs(
@@ -506,7 +481,7 @@ mod tests {
         node: &str,
         resolved: &ResolvedSecrets,
     ) -> std::result::Result<NodeConfigs, Error> {
-        super::node_configs(&lowered(mesh).unwrap(), node, resolved)
+        super::node_configs(&lowered(mesh), node, resolved)
     }
 
     fn three_node_mesh_yaml() -> &'static str {
@@ -980,23 +955,6 @@ mesh:
             listen.starts_with(&node_loopbacks(&mesh, "a").unwrap().0.to_string()),
             "listen {listen} is not this node's own v4 loopback"
         );
-
-        let yaml = base.replace(
-            "  bgp_as: 64512",
-            "  bgp_as: 64512
-  router_metrics_port: 0",
-        );
-        let mesh: MeshConfig = sliplib_yaml::from_str(&yaml).unwrap();
-        assert!(render_router_config(&mesh, "a").is_err());
-    }
-
-    #[test]
-    fn render_awg_config_refuses_a_metrics_port_of_zero() {
-        let yaml = mesh_and_roadwarriors_yaml()
-            .replace("  bgp_as: 64512", "  bgp_as: 64512\n  awg_metrics_port: 0");
-        let mesh: MeshConfig = sliplib_yaml::from_str(&yaml).unwrap();
-        let resolved = resolved_for(&mesh);
-        assert!(render_awg_config(&mesh, "a", &resolved).is_err());
     }
 
     #[test]
@@ -1278,13 +1236,9 @@ mesh:
 
     #[test]
     fn a_refusal_that_no_secret_cures_is_not_marked_as_a_missing_secret() {
-        let unrendered = mesh_and_roadwarriors_yaml()
-            .replace("bgp_as: 64512", "bgp_as: 64512\n  awg_metrics_port: 0");
         let invalid = mesh_and_roadwarriors_yaml().replace("bgp_as: 64512", "bgp_as: 0");
-        for yaml in [unrendered, invalid] {
-            let mesh: MeshConfig = sliplib_yaml::from_str(&yaml).unwrap();
-            assert!(!is_a_missing_secret(&mesh, &resolved_for(&mesh)), "{yaml}");
-        }
+        let mesh: MeshConfig = sliplib_yaml::from_str(&invalid).unwrap();
+        assert!(!is_a_missing_secret(&mesh, &resolved_for(&mesh)));
 
         let mesh: MeshConfig = sliplib_yaml::from_str(mesh_and_roadwarriors_yaml()).unwrap();
         let mut resolved = resolved_for(&mesh);
@@ -1334,7 +1288,7 @@ mesh:
             b = written_key("node-b"),
         );
         let mesh: MeshConfig = sliplib_yaml::from_str(&yaml).unwrap();
-        let resolved = crate::secrets::read(&lowered(&mesh).unwrap());
+        let resolved = crate::secrets::read(&lowered(&mesh));
         let iface = |node: &str| {
             let configs = node_configs(&mesh, node, &resolved).unwrap();
             let [iface] = <[_; 1]>::try_from(configs.awg.interfaces).unwrap();

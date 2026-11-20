@@ -5,9 +5,8 @@ use crate::addressing;
 use crate::model::{Endpoint, Keys, Link, MetricsPorts, Network, Node};
 use crate::mtu::DEFAULT_UPLINK_MTU;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
-use sliplib_config::v1::mesh_config::AddressFamily;
 use sliplib_config::v2::File;
-use sliplib_config::v2::network::{self, Family, LinkKind};
+use sliplib_config::v2::network::{self, LinkKind};
 use sliplib_config::{Obfuscation, Range};
 use sliplib_net::{IpNet, Ipv6Net};
 use std::net::{IpAddr, Ipv6Addr};
@@ -85,13 +84,6 @@ fn distinct(
     Ok(())
 }
 
-fn family(family: Family) -> AddressFamily {
-    match family {
-        Family::Ipv4 => AddressFamily::Ipv4,
-        Family::Ipv6 => AddressFamily::Ipv6,
-    }
-}
-
 /// `files` as a network. Refuses what only the derived addresses show: two nodes with one
 /// address, and a link-local no interface takes.
 pub fn lower(files: &File) -> Result<Network, Error> {
@@ -147,7 +139,7 @@ pub fn lower(files: &File) -> Result<Network, Error> {
                     .and_then(|underlay| underlay.endpoint.as_ref())
                     .map(|endpoint| Endpoint {
                         written: endpoint.host().to_owned(),
-                        stated_family: Some(family(endpoint.family())),
+                        family: endpoint.family(),
                     }),
                 underlay_mtu: underlay
                     .and_then(|underlay| underlay.mtu)
@@ -238,6 +230,7 @@ fn prefixes(list: &[network::Prefix4]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Family;
     use crate::render::node_configs;
     use crate::secrets;
     use sliplib_config::v2::Platform;
@@ -369,14 +362,14 @@ mod tests {
             network.node("node-a").unwrap().endpoint,
             Some(Endpoint {
                 written: "192.0.2.1".into(),
-                stated_family: Some(AddressFamily::Ipv4),
+                family: Family::Ipv4,
             })
         );
         assert_eq!(
             network.node("node-b").unwrap().endpoint,
             Some(Endpoint {
                 written: "node-b.example.com".into(),
-                stated_family: Some(AddressFamily::Ipv6),
+                family: Family::Ipv6,
             })
         );
         assert_eq!(network.node("node-c").unwrap().endpoint, None);
@@ -691,8 +684,8 @@ mod tests {
     fn the_metrics_ports_reach_the_nodes_of_talos_alone() {
         let mut network = lowered("{}");
         network.metrics = MetricsPorts {
-            awg: Some(9586),
-            router: Some(9324),
+            awg: std::num::NonZeroU16::new(9586),
+            router: std::num::NonZeroU16::new(9324),
         };
         let resolved = secrets::read(&network);
         let talos = node_configs(&network, "node-a", &resolved).unwrap();

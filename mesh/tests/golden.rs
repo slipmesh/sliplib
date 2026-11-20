@@ -157,8 +157,8 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
     let mut after = sliplib_mesh::v2::lower(&files).unwrap();
     let metrics = files.talos_settings().unwrap().metrics.unwrap_or_default();
     after.metrics = MetricsPorts {
-        awg: metrics.mesh.map(|listener| listener.port.get()),
-        router: metrics.router.map(|listener| listener.port.get()),
+        awg: metrics.mesh.map(|listener| listener.port),
+        router: metrics.router.map(|listener| listener.port),
     };
     let after_secrets = sliplib_mesh::secrets::read(&after);
     let names: Vec<&str> = after.nodes.iter().map(|node| node.name.as_str()).collect();
