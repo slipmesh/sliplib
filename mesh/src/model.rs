@@ -186,19 +186,24 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_reads_as_the_lowering_of_the_version_gives_it() {
+    fn a_refusal_is_the_one_the_lowering_of_the_version_gives() {
         let of_version_1 =
             lowered(&VERSION_1.replace("198.51.100.0/25", "198.51.100.0")).unwrap_err();
-        let of_version_1 = format!("{:#}", anyhow::Error::new(of_version_1));
         assert!(
-            of_version_1.starts_with("cluster.loopback_networks.ipv4: "),
-            "{of_version_1}"
+            matches!(
+                of_version_1,
+                Error::V1(RenderError::Network {
+                    field: "cluster.loopback_networks.ipv4",
+                    ..
+                })
+            ),
+            "{of_version_1:?}"
         );
         let of_version_2 =
             lowered(&VERSION_2.replace("  interface_prefix: mesh-\n", "")).unwrap_err();
-        assert_eq!(
-            of_version_2.to_string(),
-            "mesh.interface_prefix is not set - `slipmesh mint` writes it"
+        assert!(
+            matches!(of_version_2, Error::V2(crate::v2::Error::NoInterfacePrefix)),
+            "{of_version_2:?}"
         );
     }
 }

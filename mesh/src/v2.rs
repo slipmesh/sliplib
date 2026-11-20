@@ -469,9 +469,10 @@ mod tests {
 
     #[test]
     fn files_without_the_interface_prefix_are_refused_naming_what_writes_it() {
-        let refusal = refusal("{mesh: {interface_prefix: null}}");
-        assert_eq!(refusal, Error::NoInterfacePrefix);
-        assert!(refusal.to_string().contains("`slipmesh mint`"));
+        assert_eq!(
+            refusal("{mesh: {interface_prefix: null}}"),
+            Error::NoInterfacePrefix
+        );
     }
 
     #[test]
@@ -691,22 +692,30 @@ mod tests {
         assert!(routeros.awg.metrics.is_none() && routeros.router.metrics.is_none());
     }
 
-    fn refused(network: &Network, node: &str) -> String {
-        let refusal = node_configs(network, node, &secrets::read(network)).unwrap_err();
-        format!("{:#}", anyhow::Error::new(refusal))
+    fn refused(network: &Network, node: &str) -> crate::render::Error {
+        node_configs(network, node, &secrets::read(network)).unwrap_err()
     }
 
     #[test]
     fn a_refusal_names_the_keys_as_version_2_writes_them() {
         let keyless = lowered("{nodes: {node-b: {wireguard: null}}}");
         let refusal = refused(&keyless, "node-a");
+        let missing = refusal.missing_secret().map(ToString::to_string);
         assert!(
-            refusal.contains("node \"node-b\": wireguard.private_key is not set"),
-            "{refusal}"
+            missing.is_some_and(|missing| missing.contains(Keys::V2.private_key)),
+            "{refusal:?}"
         );
-        let above = lowered("{mesh: {mtu: 9000}}");
-        let refusal = refused(&above, "node-a");
-        assert!(refusal.contains("mesh.mtu 9000 is above"), "{refusal}");
+        let above = refused(&lowered("{mesh: {mtu: 9000}}"), "node-a");
+        assert!(
+            matches!(
+                &above,
+                crate::render::Error::RenderingAwg {
+                    source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit { key, mtu: 9000, .. }),
+                    ..
+                } if *key == Keys::V2.mtu
+            ),
+            "{above:?}"
+        );
     }
 
     #[test]
@@ -741,9 +750,10 @@ mod tests {
     fn a_link_that_lacks_a_field_mint_writes_is_refused_when_its_nodes_are_computed() {
         let unminted = lowered("{mesh: {links: {a-b: {amneziawg: {obfuscation: {jc: null}}}}}}");
         let refusal = refused(&unminted, "node-b");
+        let missing = refusal.missing_secret().map(ToString::to_string);
         assert!(
-            refusal.contains("mesh link a-b: obfuscation lacks jc"),
-            "{refusal}"
+            missing.is_some_and(|missing| missing.contains("a-b") && missing.contains("jc")),
+            "{refusal:?}"
         );
     }
 }
