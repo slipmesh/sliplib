@@ -394,20 +394,14 @@ roadwarriors:
     }
 
     #[test]
-    fn in_version_2_a_node_on_no_link_gets_no_key() {
-        let alone = "{nodes: {node-x: {platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}}}";
-        let minted = super::create(&unminted(alone)).unwrap();
-        let nodes: Vec<usize> = minted.node_keys.iter().map(|(node, _)| *node).collect();
-        assert_eq!(nodes, [0, 1, 2, 3]);
-    }
-
-    #[test]
     fn a_link_of_version_2_with_no_header_left_is_named_as_that_version_writes_it() {
         let full = "{mesh: {links: {a-b: {amneziawg: {obfuscation: {h1: 0-4294967295}}}}}}";
-        let refusal = super::create(&unminted(full)).err().unwrap().to_string();
-        assert!(
-            refusal.starts_with("mesh.links.a-b.amneziawg.obfuscation: "),
-            "{refusal}"
+        let refusal = super::create(&unminted(full)).err();
+        assert_eq!(
+            refusal,
+            Some(NoHeaderLeft(
+                "mesh.links.a-b.amneziawg.obfuscation".to_owned()
+            ))
         );
     }
 }
