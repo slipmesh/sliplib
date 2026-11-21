@@ -99,3 +99,29 @@ pub fn mint(config: &Config) {
 pub fn topology(config: &Config) -> MeshConfig {
     SlipmeshFile::parse(&config.text()).unwrap().into_topology()
 }
+
+/// The mesh of the example, with none of its secrets written.
+pub const MESH: &str = include_str!("../../../docs/example/mesh.yaml");
+/// The documents of `talos` of the example, and its groups.
+pub const TALOS: &str = include_str!("../../../docs/example/talos.yaml");
+
+/// Whether `text` names line `line`: the number whole, not the start of a longer one.
+pub fn names_line(text: &str, line: usize) -> bool {
+    let named = format!("line {line}");
+    text.match_indices(&named)
+        .any(|(at, _)| !text[at + named.len()..].starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// The example in one file, minted.
+pub fn minted() -> Config {
+    let config = Config::holding(&format!("{MESH}---\n{TALOS}"));
+    mint(&config);
+    config
+}
+
+/// The file with `edit` made to its first document, the network.
+pub fn edited(config: &Config, edit: impl FnOnce(&mut Value)) {
+    let mut yaml = MultiDoc::parse(&config.text()).unwrap();
+    edit(yaml.document_mut(0).unwrap());
+    std::fs::write(&config.path, yaml.text().unwrap()).unwrap();
+}

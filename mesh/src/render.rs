@@ -1349,4 +1349,183 @@ mesh:
         assert!(resolved.roadwarrior_obfuscation.remove("north").is_some());
         node_configs(&mesh, "b", &resolved).unwrap();
     }
+
+    use crate::test_support::example;
+
+    fn configs_of(network: &Network, node: &str) -> std::result::Result<NodeConfigs, Error> {
+        super::node_configs(network, node, &crate::secrets::read(network))
+    }
+
+    #[test]
+    fn an_unknown_node_gets_no_configs() {
+        let refusal = configs_of(&example("{}"), "node-x").unwrap_err();
+        assert!(
+            matches!(&refusal, Error::RenderingAwg { node, .. } if node == "node-x"),
+            "{refusal:?}"
+        );
+    }
+
+    #[test]
+    fn a_node_peers_over_bgp_with_every_other_node_at_its_ipv6_loopback() {
+        let network = example("{}");
+        let peers = super::bgp_peers_for(&network, "node-b");
+        let peers: Vec<(&str, &str)> = peers
+            .iter()
+            .map(|peer| (peer.name.as_str(), peer.address.as_str()))
+            .collect();
+        assert_eq!(
+            peers,
+            [
+                ("node-a", "3fff:0:0:1::1"),
+                ("node-c", "3fff:0:0:1::3"),
+                ("router1", "3fff:0:0:1::4"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_peer_dialed_over_ipv6_is_dialed_in_brackets() {
+        // Both ends of a link are dialed over one family.
+        let network = example(
+            "{nodes: {node-a: {underlay: {wan: {endpoint: {ipv4: null, ipv6: '2001:db8::1'}}}}, \
+             node-b: {underlay: {wan: {endpoint: {ipv4: null, ipv6: '2001:db8::11'}}}}, \
+             router1: {underlay: {wan: {endpoint: {ipv4: null, ipv6: '2001:db8::4'}}}}}}",
+        );
+        let configs = configs_of(&network, "node-a").unwrap();
+        let interface = configs
+            .awg
+            .interfaces
+            .iter()
+            .find(|interface| interface.name == "mesh-node-b")
+            .unwrap();
+        assert_eq!(
+            interface.peers[0].endpoint.as_deref(),
+            Some("[2001:db8::11]:51830")
+        );
+    }
+
+    #[test]
+    fn the_interface_prefix_names_the_interfaces_and_what_ospf_runs_on() {
+        let configs = configs_of(&example("{mesh: {interface_prefix: wg-}}"), "node-a").unwrap();
+        let names: Vec<&str> = configs
+            .awg
+            .interfaces
+            .iter()
+            .map(|interface| interface.name.as_str())
+            .collect();
+        assert_eq!(names, ["wg-node-b", "wg-node-c", "wg-router1"]);
+        assert_eq!(configs.router.ospf_interfaces, ["wg-*", "router-lo"]);
+    }
+
+    #[test]
+    fn a_nodes_configs_are_its_rendered_awg_and_router_configs() {
+        let network = example("{}");
+        let resolved = crate::secrets::read(&network);
+        let configs = super::node_configs(&network, "node-a", &resolved).unwrap();
+        assert_eq!(
+            configs.awg,
+            super::render_awg_config(&network, "node-a", &resolved).unwrap()
+        );
+        assert_eq!(
+            configs.router,
+            super::render_router_config(&network, "node-a").unwrap()
+        );
+    }
+
+    #[test]
+    fn a_node_whose_own_key_or_a_peers_is_not_written_is_refused_for_a_missing_secret() {
+        let network = example("{nodes: {node-b: {wireguard: null}}}");
+        for node in ["node-b", "node-a"] {
+            let refusal = configs_of(&network, node).unwrap_err();
+            assert!(
+                matches!(&refusal, Error::RenderingAwg { node: refused, .. } if refused == node),
+                "{node}: {refusal:?}"
+            );
+            let missing = refusal.missing_secret().map(ToString::to_string);
+            assert!(
+                missing.is_some_and(|missing| missing.contains("node-b")
+                    && missing.contains("wireguard.private_key")),
+                "{node}: {refusal:?}"
+            );
+        }
+        configs_of(&network, "node-c").unwrap();
+    }
+
+    #[test]
+    fn a_key_that_does_not_decode_refuses_its_node_and_its_peers_and_no_secret_cures_it() {
+        let network = example("{nodes: {node-b: {wireguard: {private_key: not a key}}}}");
+        for node in ["node-b", "node-a"] {
+            assert_not_a_key(configs_of(&network, node).unwrap_err(), "node-b");
+        }
+        configs_of(&network, "node-c").unwrap();
+    }
+
+    /// `refusal` is for the key of `owner`, which does not decode, and creating none cures it.
+    fn assert_not_a_key(refusal: Error, owner: &str) {
+        assert!(
+            matches!(&refusal, Error::RenderingAwg { source: RenderError::Key { node, .. }, .. }
+                if node == owner),
+            "{refusal:?}"
+        );
+        assert!(refusal.missing_secret().is_none(), "{refusal:?}");
+        let cause = sliplib_secrets::wireguard::decode_key("not a key").unwrap_err();
+        let chain = format!("{:#}", anyhow::Error::new(refusal));
+        assert!(chain.contains(&cause.to_string()), "{chain}");
+    }
+
+    // Every node's own key is decoded, whether or not a link uses it.
+    #[test]
+    fn a_key_that_does_not_decode_refuses_a_node_on_no_link_too() {
+        let network = example(
+            "{nodes: {node-d: {platform: talos, node_id: 0.0.0.5, underlay: {wan: {}}, \
+             wireguard: {private_key: not a key}}}}",
+        );
+        assert_not_a_key(configs_of(&network, "node-d").unwrap_err(), "node-d");
+        configs_of(&network, "node-a").unwrap();
+    }
+
+    #[test]
+    fn a_link_without_any_obfuscation_is_refused_for_a_missing_secret_at_both_ends() {
+        let network = example(
+            "{mesh: {amneziawg: {obfuscation: null}, \
+             links: {a-b: {amneziawg: {obfuscation: null}}}}}",
+        );
+        for node in ["node-a", "node-b"] {
+            let refusal = configs_of(&network, node).unwrap_err();
+            let missing = refusal.missing_secret().map(ToString::to_string);
+            assert!(
+                missing.is_some_and(|missing| missing.contains("a-b")),
+                "{node}: {refusal:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_obfuscation_the_kernel_module_refuses_refuses_both_ends_and_no_secret_cures_it() {
+        let network = example("{mesh: {links: {a-b: {amneziawg: {obfuscation: {h2: 1101}}}}}}");
+        for (node, interface) in [("node-a", "mesh-node-b"), ("node-b", "mesh-node-a")] {
+            let refusal = configs_of(&network, node).unwrap_err();
+            assert!(
+                matches!(&refusal, Error::Obfuscation { node: refused, interface: on, .. }
+                    if refused == node && on == interface),
+                "{node}: {refusal:?}"
+            );
+            assert!(refusal.missing_secret().is_none(), "{node}");
+        }
+    }
+
+    #[test]
+    fn a_secret_of_a_node_or_link_the_rendered_node_does_not_touch_is_not_refused() {
+        let network = example(
+            "{nodes: {node-c: {wireguard: null}}, \
+             mesh: {links: {a-c: {amneziawg: {obfuscation: null}}}}}",
+        );
+        configs_of(&network, "node-b").unwrap();
+        configs_of(&network, "router1").unwrap();
+        // The two ends of `a-c` need what the overlay took.
+        for node in ["node-a", "node-c"] {
+            let refusal = configs_of(&network, node).unwrap_err();
+            assert!(refusal.missing_secret().is_some(), "{node}: {refusal:?}");
+        }
+    }
 }

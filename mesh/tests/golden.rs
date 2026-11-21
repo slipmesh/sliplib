@@ -1,10 +1,13 @@
 //! What every node of the fixtures under `golden/` gets: each fixture of format version 1 compared
 //! byte for byte with the files beside it, derived public keys named by their owner, and its twin
-//! of version 2 with what version 1 gives. A change that moves one of them changes what the nodes
-//! of a working network are configured with. `UPDATE_EXPECT=1` rewrites the files; the difference is then reviewed like any other.
+//! of version 2 with those same files. A change that moves one of them changes what the nodes of
+//! a working network are configured with. `UPDATE_EXPECT=1` rewrites the files; the difference is
+//! then reviewed like any other.
 
 use expect_test::expect_file;
 use sha2::{Digest, Sha256};
+use sliplib_config::awg::AwgConfig;
+use sliplib_config::router::RouterConfig;
 use sliplib_config::v1::mesh_config::MeshConfig;
 use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use sliplib_config::v2::Platform;
@@ -76,6 +79,13 @@ fn derived_public_keys(topology: &MeshConfig) -> Vec<(String, String)> {
     nodes.chain(clients).collect()
 }
 
+/// `text` with each public key of `public_keys` replaced by the name of whose it is.
+fn named(text: String, public_keys: &[(String, String)]) -> String {
+    public_keys
+        .iter()
+        .fold(text, |text, (key, whose)| text.replace(key, whose))
+}
+
 fn every_node_gets_the_configs_it_got_before(fixture: &Fixture) {
     // Set there, `UPDATE_EXPECT` would rewrite the golden files and pass whatever the code gives.
     assert!(
@@ -97,11 +107,7 @@ fn every_node_gets_the_configs_it_got_before(fixture: &Fixture) {
     let network = sliplib_mesh::v1::lower(file.topology()).unwrap();
     let resolved = sliplib_mesh::secrets::read(&network);
     let public_keys = derived_public_keys(file.topology());
-    let named = |text: String| {
-        public_keys
-            .iter()
-            .fold(text, |text, (key, whose)| text.replace(key, whose))
-    };
+    let named = |text: String| named(text, &public_keys);
 
     for host in fixture.nodes {
         let configs = node_configs(&network, host, &resolved).unwrap();
@@ -123,7 +129,8 @@ fn every_node_of_the_alternate_version_1_file_gets_the_configs_it_got_before() {
     every_node_gets_the_configs_it_got_before(&ALTERNATE);
 }
 
-/// A fixture of version 1 beside the same network written in version 2 by hand.
+/// The same network written in version 2 by hand, beside the configs its fixture of version 1
+/// gave.
 struct Twin {
     v1: &'static Fixture,
     text: &'static str,
@@ -144,34 +151,66 @@ const ALTERNATE_TWIN: Twin = Twin {
     redialed: &[],
 };
 
-/// Every node of the twin gets what the file of version 1 gave it, but for what
+fn golden(directory: &str, file: &str) -> String {
+    std::fs::read_to_string(format!(
+        "{}/tests/{directory}/{file}",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap()
+}
+
+/// Every node of the twin gets the configs its fixture of version 1 gave it, but for what
 /// `docs/slipmesh-yaml-v1-to-v2.md` says a conversion changes: no pool interface, no bypass list,
 /// no label on what is announced, the link's port where a node's endpoint held another, and no
 /// metrics listener on a node that is not of `talos`.
 fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
-    let file = SlipmeshFile::parse(twin.v1.text).unwrap();
-    let before = sliplib_mesh::v1::lower(file.topology()).unwrap();
-    let before_secrets = sliplib_mesh::secrets::read(&before);
-
     let files = sliplib_config::v2::File::parse(twin.text).unwrap();
-    let mut after = sliplib_mesh::v2::lower(&files).unwrap();
-    after.metrics = MetricsPorts::from(&files.talos_settings().unwrap());
-    let after_secrets = sliplib_mesh::secrets::read(&after);
-    let names: Vec<&str> = after.nodes.iter().map(|node| node.name.as_str()).collect();
+    let mut network = sliplib_mesh::v2::lower(&files).unwrap();
+    network.metrics = MetricsPorts::from(&files.talos_settings().unwrap());
+    let resolved = sliplib_mesh::secrets::read(&network);
+    let names: Vec<&str> = network
+        .nodes
+        .iter()
+        .map(|node| node.name.as_str())
+        .collect();
     assert_eq!(names, twin.v1.nodes);
+    let public_keys: Vec<(String, String)> = network
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let key = node.private_key.as_ref()?.public_key().unwrap();
+            Some((key, format!("<public key of {}>", node.name)))
+        })
+        .collect();
+    let named = |text: String| named(text, &public_keys);
 
     for host in twin.v1.nodes {
-        let mut expected = node_configs(&before, host, &before_secrets).unwrap();
-        expected
-            .awg
+        let directory = twin.v1.directory;
+        let golden_text = |config: &str| golden(directory, &format!("{host}.{config}.yaml"));
+        let mut expected_awg: AwgConfig = sliplib_yaml::from_str(&golden_text("awg")).unwrap();
+        let mut expected_router: RouterConfig =
+            sliplib_yaml::from_str(&golden_text("router")).unwrap();
+        // Written back, each file is the text it holds: a key the type does not take, or a field
+        // the type now writes elsewhere or not at all, fails here and not unseen in the
+        // comparison below, where both sides go through the type.
+        assert_eq!(
+            sliplib_yaml::to_string(&expected_awg).unwrap(),
+            golden_text("awg"),
+            "{directory}/{host}.awg.yaml"
+        );
+        assert_eq!(
+            sliplib_yaml::to_string(&expected_router).unwrap(),
+            golden_text("router"),
+            "{directory}/{host}.router.yaml"
+        );
+        expected_awg
             .interfaces
             .retain(|interface| !interface.name.starts_with("rw-"));
-        expected.router.bypass = None;
-        for announced in &mut expected.router.announce {
+        expected_router.bypass = None;
+        for announced in &mut expected_router.announce {
             announced.label = None;
         }
-        let endpoints = expected
-            .awg
+        let endpoints = expected_awg
             .interfaces
             .iter_mut()
             .flat_map(|interface| &mut interface.peers)
@@ -181,20 +220,24 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
                 *endpoint = (*now).to_owned();
             }
         }
-        if after.node(host).unwrap().platform != Some(Platform::Talos) {
-            expected.awg.metrics = None;
-            expected.router.metrics = None;
+        if network.node(host).unwrap().platform != Some(Platform::Talos) {
+            expected_awg.metrics = None;
+            expected_router.metrics = None;
         }
 
-        let got = node_configs(&after, host, &after_secrets).unwrap();
+        let got = node_configs(&network, host, &resolved).unwrap();
+        let got_awg: AwgConfig =
+            sliplib_yaml::from_str(&named(sliplib_yaml::to_string(&got.awg).unwrap())).unwrap();
+        let got_router: RouterConfig =
+            sliplib_yaml::from_str(&named(sliplib_yaml::to_string(&got.router).unwrap())).unwrap();
         assert_eq!(
-            sliplib_yaml::to_string(&got.awg).unwrap(),
-            sliplib_yaml::to_string(&expected.awg).unwrap(),
+            sliplib_yaml::to_string(&got_awg).unwrap(),
+            sliplib_yaml::to_string(&expected_awg).unwrap(),
             "the awg config of {host}"
         );
         assert_eq!(
-            sliplib_yaml::to_string(&got.router).unwrap(),
-            sliplib_yaml::to_string(&expected.router).unwrap(),
+            sliplib_yaml::to_string(&got_router).unwrap(),
+            sliplib_yaml::to_string(&expected_router).unwrap(),
             "the router config of {host}"
         );
     }

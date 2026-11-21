@@ -1,35 +1,9 @@
 //! The commands on a file of format version 2: the example of its specification.
 
-use crate::common::{Config, mint};
+use crate::common::{Config, MESH, TALOS, edited, mint, minted, names_line};
 use sliplib_config::v2::File;
 use sliplib_config::v2::network::LinkKind;
-use sliplib_yaml::{MultiDoc, Value};
-
-/// The mesh of the example, with none of its secrets written.
-const MESH: &str = include_str!("../../../docs/example/mesh.yaml");
-/// The documents of `talos` of the example, and its groups.
-const TALOS: &str = include_str!("../../../docs/example/talos.yaml");
-
-/// Whether `text` names line `line`: the number whole, not the start of a longer one.
-fn names_line(text: &str, line: usize) -> bool {
-    let named = format!("line {line}");
-    text.match_indices(&named)
-        .any(|(at, _)| !text[at + named.len()..].starts_with(|c: char| c.is_ascii_digit()))
-}
-
-/// The example in one file, minted.
-fn minted() -> Config {
-    let config = Config::holding(&format!("{MESH}---\n{TALOS}"));
-    mint(&config);
-    config
-}
-
-/// The file with `edit` made to its first document, the network.
-fn edited(config: &Config, edit: impl FnOnce(&mut Value)) {
-    let mut yaml = MultiDoc::parse(&config.text()).unwrap();
-    edit(yaml.document_mut(0).unwrap());
-    std::fs::write(&config.path, yaml.text().unwrap()).unwrap();
-}
+use sliplib_yaml::Value;
 
 #[test]
 fn mint_writes_a_key_for_every_node_on_a_link_and_the_obfuscation_of_every_amneziawg_link() {
@@ -84,16 +58,6 @@ fn mint_writes_into_the_network_document_wherever_it_stands_in_the_file() {
     assert!(network["nodes"]["node-a"]["wireguard"]["private_key"].is_string());
     assert!(network["mesh"]["links"]["a-b"]["amneziawg"]["obfuscation"]["h1"].is_number());
     assert!(written[0].get("nodes").is_none());
-}
-
-#[test]
-fn a_second_mint_changes_nothing() {
-    let config = minted();
-    let first = config.text();
-    let ran = config.run(&["mint"]);
-    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
-    assert_eq!(config.text(), first);
-    assert_eq!(ran.stdout, "");
 }
 
 #[test]

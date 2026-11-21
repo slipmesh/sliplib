@@ -397,4 +397,66 @@ roadwarriors:
             ))
         );
     }
+
+    #[test]
+    fn a_node_with_its_key_written_gets_none() {
+        let network = unminted(
+            "{nodes: {node-b: {wireguard: \
+             {private_key: EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE=}}}}",
+        );
+        let minted = super::create(&network).unwrap();
+        let keyed: Vec<&str> = minted
+            .node_keys
+            .iter()
+            .map(|(node, _)| network.nodes[*node].name.as_str())
+            .collect();
+        assert_eq!(keyed, ["node-a", "node-c", "router1"]);
+    }
+
+    #[test]
+    fn a_link_of_type_amneziawg_gets_every_minted_field_it_lacks() {
+        let network = unminted("{}");
+        let minted = super::create(&network).unwrap();
+        // `a-b` and `a-c`; `a-r1` is of type `wireguard`.
+        assert_eq!(minted.link_obfuscation.len(), 2);
+        for (link, generated) in &minted.link_obfuscation {
+            // Exactly the minted fields the link lacked: none it writes, none its type sets.
+            let mut lacked = secrets::unminted(&network.links[*link].obfuscation);
+            let mut generated = sliplib_yaml::to_value(generated)
+                .unwrap()
+                .as_mapping()
+                .unwrap()
+                .iter()
+                .filter(|(_, value)| !value.is_null())
+                .map(|(field, _)| field.as_str().unwrap().to_owned())
+                .collect::<Vec<_>>();
+            lacked.sort_unstable();
+            generated.sort_unstable();
+            assert!(!lacked.is_empty(), "{link}");
+            assert_eq!(generated, lacked, "{link}");
+        }
+    }
+
+    #[test]
+    fn nothing_is_minted_for_files_that_lack_nothing() {
+        let minted = super::create(&crate::test_support::example("{}")).unwrap();
+        assert!(minted.is_empty());
+    }
+
+    // The `s4` in force on a link is its type's where it sets none of its own.
+    #[test]
+    fn offsets_go_around_the_s4_the_type_gives_a_link() {
+        let network = unminted("{mesh: {amneziawg: {obfuscation: {s4: 100}}}}");
+        let off_the_header = |offset: Option<u16>| !(101..=115).contains(&offset.unwrap());
+        for _ in 0..200 {
+            let minted = super::create(&network).unwrap();
+            assert_eq!(minted.link_obfuscation.len(), 2);
+            for (link, generated) in &minted.link_obfuscation {
+                assert!(
+                    off_the_header(generated.s1) && off_the_header(generated.s2),
+                    "{link}: {generated:?}"
+                );
+            }
+        }
+    }
 }

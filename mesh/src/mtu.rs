@@ -419,4 +419,230 @@ mod tests {
             }
         }
     }
+
+    /// A network of `mesh_and_nodes`, its `mesh` and `nodes`, under one `slipmesh:` block, its
+    /// addressing and its AS number.
+    fn lowered(mesh_and_nodes: &str) -> Network {
+        let text = format!(
+            "slipmesh: {{kind: network, version: 2, revision: 1}}\naddressing: {{loopback: \
+             {{ipv4: 198.51.100.0/25, ipv6: '3fff::/64'}}}}\nrouting: {{bgp: {{as: 64512}}}}\n\
+             {mesh_and_nodes}"
+        );
+        crate::v2::lower(&sliplib_config::v2::File::parse(&text).unwrap()).unwrap()
+    }
+
+    /// Two nodes `a` and `b` and the link `a-b` between them: `a` and `b` are their underlay
+    /// entries, `link` the link's keys after its ends, `mesh` keys of `mesh`.
+    fn network(a: &str, b: &str, link: &str, mesh: &str) -> Network {
+        lowered(&format!(
+            "mesh: {{interface_prefix: mesh-, links: {{a-b: {{ends: {{a: {{}}, b: {{}}}}, \
+             {link}}}}}{mesh}}}\nnodes:\n  a: {{platform: talos, node_id: 0.0.0.1, underlay: \
+             {{wan: {a}}}}}\n  b: {{platform: talos, node_id: 0.0.0.2, underlay: {{wan: {b}}}}}\n"
+        ))
+    }
+
+    fn of(network: &Network) -> Result<Option<u32>, MtuError> {
+        mesh_mtu(network, &secrets::read(network))
+    }
+
+    fn mtu_of(a: &str, b: &str, link: &str, mesh: &str) -> u32 {
+        of(&network(a, b, link, mesh)).unwrap().unwrap()
+    }
+
+    fn refusal_of(a: &str, b: &str, link: &str, mesh: &str) -> MtuError {
+        of(&network(a, b, link, mesh)).unwrap_err()
+    }
+
+    fn link_refusal_of(a: &str, b: &str, link: &str) -> LinkError {
+        match refusal_of(a, b, link, "") {
+            MtuError::Link { link, source } if link == "a-b" => source,
+            other => panic!("refused for its link: {other:?}"),
+        }
+    }
+
+    const WIREGUARD: &str = "type: wireguard, wireguard: {port: 51820}";
+    const AT_V4: &str = "{endpoint: {ipv4: 192.0.2.10}}";
+    const AT_V4_OTHER: &str = "{endpoint: {ipv4: 192.0.2.11}}";
+    const AT_V6: &str = "{endpoint: {ipv6: '2001:db8::10'}}";
+    const UNDIALED: &str = "{}";
+
+    fn amneziawg(obfuscation: &str) -> String {
+        format!("type: amneziawg, amneziawg: {{port: 51820, obfuscation: {obfuscation}}}")
+    }
+
+    #[test]
+    fn a_link_dialed_over_ipv4_on_a_1500_underlay_takes_1440_and_over_ipv6_20_less() {
+        assert_eq!(mtu_of(AT_V4, AT_V4_OTHER, WIREGUARD, ""), 1440);
+        assert_eq!(mtu_of(AT_V6, UNDIALED, WIREGUARD, ""), 1420);
+    }
+
+    #[test]
+    fn a_link_is_dialed_over_the_family_of_whichever_end_has_an_endpoint() {
+        assert_eq!(mtu_of(AT_V4, UNDIALED, WIREGUARD, ""), 1440);
+        assert_eq!(mtu_of(UNDIALED, AT_V4, WIREGUARD, ""), 1440);
+        assert_eq!(mtu_of(UNDIALED, AT_V6, WIREGUARD, ""), 1420);
+    }
+
+    #[test]
+    fn a_host_name_is_dialed_over_the_family_of_its_key() {
+        let named = |family: &str| format!("{{endpoint: {{{family}: a.example.com}}}}");
+        assert_eq!(mtu_of(&named("ipv4"), UNDIALED, WIREGUARD, ""), 1440);
+        assert_eq!(mtu_of(&named("ipv6"), UNDIALED, WIREGUARD, ""), 1420);
+    }
+
+    #[test]
+    fn ends_dialed_over_two_families_or_neither_dialed_refuse_the_link_naming_its_ends() {
+        let differ = link_refusal_of(AT_V4, AT_V6, WIREGUARD);
+        assert!(
+            matches!(&differ, LinkError::FamiliesDiffer(a, b) if a == "a" && b == "b"),
+            "{differ:?}"
+        );
+        let neither = link_refusal_of(UNDIALED, UNDIALED, WIREGUARD);
+        assert!(
+            matches!(&neither, LinkError::NoEndpoint(a, b) if a == "a" && b == "b"),
+            "{neither:?}"
+        );
+    }
+
+    #[test]
+    fn the_smaller_underlay_of_the_two_ends_bounds_the_link() {
+        let at_v4 = |mtu: u32| format!("{{mtu: {mtu}, endpoint: {{ipv4: 192.0.2.10}}}}");
+        assert_eq!(mtu_of(&at_v4(1460), UNDIALED, WIREGUARD, ""), 1400);
+        assert_eq!(mtu_of(AT_V4, "{mtu: 1460}", WIREGUARD, ""), 1400);
+        assert_eq!(mtu_of(&at_v4(1460), "{mtu: 1450}", WIREGUARD, ""), 1390);
+    }
+
+    #[test]
+    fn the_junk_on_data_packets_lowers_the_link_by_its_size_its_own_or_its_types() {
+        assert_eq!(mtu_of(AT_V6, UNDIALED, &amneziawg("{s4: 12}"), ""), 1408);
+        let of_the_type = ", amneziawg: {obfuscation: {s4: 12}}";
+        assert_eq!(mtu_of(AT_V4, UNDIALED, &amneziawg("{}"), of_the_type), 1428);
+        assert_eq!(
+            mtu_of(AT_V4, UNDIALED, &amneziawg("{s4: 20}"), of_the_type),
+            1420
+        );
+    }
+
+    #[test]
+    fn the_mesh_takes_the_least_limit_of_its_links() {
+        // a-b dials a over IPv4 at 1500: 1440. b-c dials c over IPv6 at 1490: 1410.
+        let network = lowered(
+            "mesh:\n  interface_prefix: mesh-\n  links:\n    a-b: {type: wireguard, ends: \
+             {a: {}, b: {}}, wireguard: {port: 51820}}\n    b-c: {type: wireguard, ends: {b: {}, \
+             c: {}}, wireguard: {port: 51821}}\nnodes:\n  a: {platform: talos, node_id: 0.0.0.1, \
+             underlay: {wan: {endpoint: {ipv4: 192.0.2.10}}}}\n  b: {platform: talos, node_id: \
+             0.0.0.2, underlay: {wan: {}}}\n  c: {platform: talos, node_id: 0.0.0.3, underlay: \
+             {wan: {mtu: 1490, endpoint: {ipv6: '2001:db8::12'}}}}\n",
+        );
+        assert_eq!(of(&network).unwrap(), Some(1410));
+    }
+
+    #[test]
+    fn a_mesh_mtu_at_or_below_the_least_limit_is_taken_and_one_above_is_refused() {
+        assert_eq!(mtu_of(AT_V4, UNDIALED, WIREGUARD, ", mtu: 1420"), 1420);
+        assert_eq!(mtu_of(AT_V4, UNDIALED, WIREGUARD, ", mtu: 1440"), 1440);
+        let above = refusal_of(AT_V4, UNDIALED, WIREGUARD, ", mtu: 1441");
+        assert!(
+            matches!(&above, MtuError::AboveLimit { key: "mesh.mtu", mtu: 1441, limit: 1440, link }
+                if link == "a-b"),
+            "{above:?}"
+        );
+    }
+
+    #[test]
+    fn a_limit_or_a_mesh_mtu_below_1280_is_refused_and_1280_is_not() {
+        assert_eq!(mtu_of(AT_V4, "{mtu: 1340}", WIREGUARD, ""), 1280);
+        let limit = refusal_of(AT_V4, "{mtu: 1339}", WIREGUARD, "");
+        assert!(
+            matches!(&limit, MtuError::LimitBelowMinimum { link, limit: 1279 } if link == "a-b"),
+            "{limit:?}"
+        );
+        let set = refusal_of(AT_V4, UNDIALED, WIREGUARD, ", mtu: 1279");
+        assert!(
+            matches!(
+                set,
+                MtuError::BelowMinimum {
+                    key: "mesh.mtu",
+                    mtu: 1279
+                }
+            ),
+            "{set:?}"
+        );
+    }
+
+    #[test]
+    fn a_mesh_without_links_takes_no_mtu_and_refuses_one_set() {
+        let unlinked = |mesh: &str| {
+            lowered(&format!(
+                "mesh: {{interface_prefix: mesh-{mesh}}}\nnodes:\n  a: {{platform: talos, \
+                 node_id: 0.0.0.1, underlay: {{wan: {{}}}}}}\n"
+            ))
+        };
+        assert_eq!(of(&unlinked("")).unwrap(), None);
+        let refusal = of(&unlinked(", mtu: 1400")).unwrap_err();
+        assert!(
+            matches!(refusal, MtuError::NoLink { key: "mesh.mtu" }),
+            "{refusal:?}"
+        );
+    }
+
+    #[test]
+    fn an_underlay_below_the_least_its_family_allows_is_refused_naming_its_node_and_key() {
+        for (a, b, mtu, family, minimum) in [
+            (AT_V6, "{mtu: 1279}", 1279, "IPv6", 1280),
+            (AT_V4, "{mtu: 67}", 67, "IPv4", 68),
+        ] {
+            let refusal = link_refusal_of(a, b, WIREGUARD);
+            assert!(
+                matches!(&refusal, LinkError::UnderlayBelowMinimum {
+                    node, key, mtu: m, family: f, minimum: least
+                } if node == "b" && key == "underlay.wan.mtu"
+                    && (*m, *f, *least) == (mtu, family, minimum)),
+                "{b}: {refusal:?}"
+            );
+        }
+        // At the least IPv4 allows, the link is counted, and its limit is what is refused.
+        let at_the_least = of(&network(AT_V4, "{mtu: 68}", WIREGUARD, ""));
+        assert!(
+            matches!(
+                at_the_least,
+                Err(MtuError::LimitBelowMinimum { limit: 8, .. })
+            ),
+            "{at_the_least:?}"
+        );
+    }
+
+    #[test]
+    fn an_underlay_that_leaves_no_room_for_what_the_link_adds_is_refused_naming_its_key() {
+        for (s4, overhead) in [(1420, 1500), (1500, 1580)] {
+            let refusal = link_refusal_of(AT_V6, UNDIALED, &amneziawg(&format!("{{s4: {s4}}}")));
+            assert!(
+                matches!(&refusal, LinkError::NoRoom { node, key, underlay: 1500, overhead: o }
+                    if node == "a" && key == "underlay.wan.mtu" && *o == overhead),
+                "{s4}: {refusal:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn across_the_grid_a_full_size_packet_of_version_2_fits_and_one_byte_more_does_not() {
+        for s4 in [0, 12, 20, 89, 150] {
+            for underlay in [1400, 1460, 1500, 9000] {
+                for (endpoint, ip) in [("ipv4: 192.0.2.10", 20), ("ipv6: '2001:db8::10'", 40)] {
+                    let a = format!("{{mtu: {underlay}, endpoint: {{{endpoint}}}}}");
+                    let b = format!("{{mtu: {underlay}}}");
+                    let link = amneziawg(&format!("{{s4: {s4}}}"));
+                    let Ok(Some(mtu)) = of(&network(&a, &b, &link, "")) else {
+                        assert!(underlay - 32 - 8 - ip - s4 < MIN_MESH_MTU);
+                        continue;
+                    };
+                    assert!(outer(mtu, mtu, s4, ip) <= underlay, "{s4} {underlay} {ip}");
+                    assert!(
+                        outer(mtu + 1, mtu + 1, s4, ip) > underlay,
+                        "{s4} {underlay} {ip}"
+                    );
+                }
+            }
+        }
+    }
 }

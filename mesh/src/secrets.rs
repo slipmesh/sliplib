@@ -344,4 +344,35 @@ roadwarriors:
         );
         assert!(unminted(&crate::test_support::minted_obfuscation()).is_empty());
     }
+
+    /// The secrets of [`crate::test_support::example`].
+    fn example(overlay: &str) -> ResolvedSecrets {
+        super::read(&crate::test_support::example(overlay))
+    }
+
+    #[test]
+    fn the_keys_the_files_write_are_read_and_the_others_are_absent() {
+        let read = example("{nodes: {node-c: {wireguard: null}}}");
+        let mut keyed: Vec<&str> = read.mesh_private_keys.keys().map(String::as_str).collect();
+        keyed.sort_unstable();
+        assert_eq!(keyed, ["node-a", "node-b", "router1"]);
+        assert_eq!(
+            read.mesh_private_keys["node-b"].expose(),
+            "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="
+        );
+    }
+
+    #[test]
+    fn every_link_carries_the_obfuscation_in_force_on_it_and_one_of_wireguard_none() {
+        let read = example("{}");
+        let a_b = &read.mesh_link_obfuscation["node-a|node-b"];
+        // Its own, and the type's beneath it.
+        assert_eq!(a_b.jc, Some(4));
+        assert_eq!(a_b.s3, Some(40));
+        assert_eq!(
+            read.mesh_link_obfuscation["node-a|router1"],
+            Obfuscation::default()
+        );
+        assert_eq!(read.mesh_link_obfuscation.len(), 3);
+    }
 }
