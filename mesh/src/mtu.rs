@@ -7,9 +7,8 @@
 //! never past the MTU, so a full-size packet carries no padding. A fragmented outer packet takes
 //! TCP in the tunnel down to a few Mbit/s, which is what this guards against.
 
-use crate::model::{Family, Link, Network, Node};
+use crate::model::{Family, Link, Network, Node, UnknownNode};
 use crate::secrets::{ResolvedSecrets, link_key};
-use sliplib_config::v1::mesh_config::UnknownNode;
 
 /// A node's underlay MTU when the files set none: that of Ethernet.
 pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
@@ -84,7 +83,7 @@ pub enum LinkError {
 /// else the least link limit. None for a mesh without links, which has no mesh interface to give
 /// it to.
 pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32>, MtuError> {
-    let key = mesh.format.mtu();
+    let key = "mesh.mtu";
     let mut least: Option<(u32, &Link)> = None;
     for link in &mesh.links {
         let limit = link_limit(mesh, link, resolved).map_err(|source| MtuError::Link {
@@ -185,239 +184,11 @@ fn link_family(a: &Node, b: &Node) -> Result<Family, LinkError> {
 mod tests {
     use super::*;
     use crate::secrets;
-    use sliplib_config::v1::mesh_config::MeshConfig;
-
-    /// Two nodes `a` and `b` and one link between them: `a`, `b` and `link` add fields to each,
-    /// `cluster` adds lines to the cluster block.
-    fn mesh(a: &str, b: &str, link: &str, cluster: &str) -> MeshConfig {
-        let yaml = format!(
-            "cluster:\n  bgp_as: 64512\n  loopback_networks: {{ipv4: \"198.51.100.0/25\", \
-             ipv6: \"3fff::/32\"}}\n{cluster}nodes:\n  - {{name: a, node_id: \
-             \"198.51.100.1\"{a}}}\n  - {{name: b, node_id: \"198.51.100.2\"{b}}}\nmesh:\n  \
-             links:\n    - {{pair: [a, b], port: 51820{link}}}\n"
-        );
-        sliplib_yaml::from_str(&yaml).unwrap()
-    }
-
-    fn computed(mesh: &MeshConfig) -> Result<Option<u32>, MtuError> {
-        let network = crate::v1::lower(mesh).unwrap();
-        mesh_mtu(&network, &secrets::read(&network))
-    }
-
-    fn mtu(a: &str, b: &str, link: &str, cluster: &str) -> u32 {
-        computed(&mesh(a, b, link, cluster)).unwrap().unwrap()
-    }
-
-    fn error(a: &str, b: &str, link: &str, cluster: &str) -> String {
-        format!(
-            "{:#}",
-            anyhow::Error::new(computed(&mesh(a, b, link, cluster)).unwrap_err())
-        )
-    }
-
-    const PLAIN: &str = ", plain: true";
-    const V4: &str = ", endpoint: \"192.0.2.10\"";
-    const V4_OTHER: &str = ", endpoint: \"192.0.2.11\"";
-    const V6: &str = ", endpoint: \"2001:db8::10\"";
-    const NAME: &str = ", endpoint: node-a.example.com";
-
-    #[test]
-    fn an_ipv4_link_with_no_junk_on_a_1500_underlay_takes_1440() {
-        assert_eq!(mtu(V4, V4_OTHER, PLAIN, ""), 1440);
-    }
-
-    #[test]
-    fn an_ipv6_link_takes_20_less() {
-        assert_eq!(mtu(V6, "", PLAIN, ""), 1420);
-    }
-
-    #[test]
-    fn the_family_is_that_of_the_endpoint_dialed_whichever_side_has_it() {
-        assert_eq!(mtu(V4, "", PLAIN, ""), 1440);
-        assert_eq!(mtu("", V4, PLAIN, ""), 1440);
-        assert_eq!(mtu("", V6, PLAIN, ""), 1420);
-    }
-
-    #[test]
-    fn endpoints_of_two_families_on_one_link_are_an_error_naming_it() {
-        let err = error(V4, V6, PLAIN, "");
-        assert!(
-            err.contains("mesh link a-b")
-                && err.contains(r#""a" and "b""#)
-                && err.contains("family"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn a_link_with_no_endpoint_on_either_side_is_an_error_naming_it() {
-        let err = error("", "", PLAIN, "");
-        assert!(
-            err.contains("mesh link a-b") && err.contains(r#"neither "a" nor "b""#),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn a_hostname_endpoint_is_ipv6_unless_its_node_says_otherwise() {
-        assert_eq!(mtu(NAME, "", PLAIN, ""), 1420);
-        let named_v4 = format!("{NAME}, address_family: ipv4");
-        assert_eq!(mtu(&named_v4, "", PLAIN, ""), 1440);
-    }
-
-    #[test]
-    fn an_address_family_that_agrees_with_a_literal_endpoint_is_taken() {
-        assert_eq!(
-            mtu(&format!("{V4}, address_family: ipv4"), "", PLAIN, ""),
-            1440
-        );
-    }
-
-    #[test]
-    fn the_smaller_uplink_of_the_two_nodes_bounds_the_link() {
-        assert_eq!(mtu(&format!("{V4}, uplink_mtu: 1460"), "", PLAIN, ""), 1400);
-        assert_eq!(mtu(V4, ", uplink_mtu: 1460", PLAIN, ""), 1400);
-        assert_eq!(
-            mtu(
-                &format!("{V4}, uplink_mtu: 1460"),
-                ", uplink_mtu: 1450",
-                PLAIN,
-                ""
-            ),
-            1390
-        );
-    }
-
-    #[test]
-    fn junk_on_data_packets_lowers_the_link_by_its_size() {
-        assert_eq!(mtu(V6, "", ", obfuscation: {s4: 12}", ""), 1408);
-        let global = "obfuscation: {s4: 12}\n";
-        assert_eq!(mtu(V4, "", "", global), 1428);
-        assert_eq!(mtu(V4, "", ", obfuscation: {s4: 20}", global), 1420);
-    }
-
-    #[test]
-    fn the_mesh_takes_the_least_of_its_links() {
-        // a-b dials a over IPv4 at 1500: 1440. b-c dials c over IPv6 at 1490: 1410.
-        let yaml = "cluster:\n  bgp_as: 64512\n  loopback_networks: {ipv4: \"198.51.100.0/25\", \
-                    ipv6: \"3fff::/32\"}\nnodes:\n  - {name: a, node_id: \"198.51.100.1\", \
-                    endpoint: \"192.0.2.10\"}\n  - {name: b, node_id: \"198.51.100.2\"}\n  - \
-                    {name: c, node_id: \"198.51.100.3\", endpoint: \"2001:db8::12\", uplink_mtu: \
-                    1490}\nmesh:\n  links:\n    - {pair: [a, b], port: 51820, plain: true}\n    - \
-                    {pair: [b, c], port: 51821, plain: true}\n";
-        let topology: MeshConfig = sliplib_yaml::from_str(yaml).unwrap();
-        assert_eq!(computed(&topology).unwrap(), Some(1410));
-    }
-
-    #[test]
-    fn a_mesh_mtu_at_or_below_the_least_link_is_taken() {
-        assert_eq!(mtu(V4, "", PLAIN, "  mesh_mtu: 1420\n"), 1420);
-        assert_eq!(mtu(V4, "", PLAIN, "  mesh_mtu: 1440\n"), 1440);
-    }
-
-    #[test]
-    fn a_mesh_mtu_above_the_least_link_is_an_error_naming_the_link_and_its_limit() {
-        let err = error(V4, "", PLAIN, "  mesh_mtu: 1441\n");
-        assert!(err.contains("1441") && err.contains("1440"), "{err}");
-        assert!(err.contains("the limit of mesh link a-b"), "{err}");
-    }
-
-    #[test]
-    fn an_mtu_below_1280_is_an_error_and_1280_is_not() {
-        assert_eq!(mtu(V4, ", uplink_mtu: 1340", PLAIN, ""), 1280);
-        let err = error(V4, ", uplink_mtu: 1339", PLAIN, "");
-        assert!(
-            err.contains("mesh link a-b limits the mesh MTU to 1279, below 1280"),
-            "{err}"
-        );
-        let err = error(V4, "", PLAIN, "  mesh_mtu: 1279\n");
-        assert!(err.contains("cluster.mesh_mtu 1279 is below 1280"), "{err}");
-    }
-
-    #[test]
-    fn a_mesh_without_links_takes_no_mtu_and_refuses_one() {
-        let mut topology = mesh(V4, V6, PLAIN, "");
-        topology.mesh.links.clear();
-        assert_eq!(computed(&topology).unwrap(), None);
-        let mut topology = mesh(V4, V6, PLAIN, "  mesh_mtu: 1400\n");
-        topology.mesh.links.clear();
-        let err = format!("{:#}", anyhow::Error::new(computed(&topology).unwrap_err()));
-        assert!(
-            err.contains("cluster.mesh_mtu is set, but the mesh has no link"),
-            "{err}"
-        );
-    }
-
-    fn link_refusal(a: &str, b: &str, link: &str) -> LinkError {
-        match computed(&mesh(a, b, link, "")) {
-            Err(MtuError::Link { link, source }) if link == "a-b" => source,
-            other => panic!("refused for its link: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn an_underlay_below_the_least_its_family_allows_is_refused_naming_its_node() {
-        for (a, b, mtu, family, minimum) in [
-            (V6, ", uplink_mtu: 1279", 1279, "IPv6", 1280),
-            (V4, ", uplink_mtu: 67", 67, "IPv4", 68),
-            (V4, ", uplink_mtu: 0", 0, "IPv4", 68),
-        ] {
-            let refusal = link_refusal(a, b, PLAIN);
-            assert!(
-                matches!(&refusal, LinkError::UnderlayBelowMinimum { node, key, mtu: m, family: f, minimum: least }
-                    if node == "b" && key == "uplink_mtu" && *m == mtu && *f == family && *least == minimum),
-                "{b}: {refusal:?}"
-            );
-        }
-        // At the least IPv4 allows, the link is counted, and its limit is what is refused.
-        let at_the_least = computed(&mesh(V4, ", uplink_mtu: 68", PLAIN, ""));
-        assert!(
-            matches!(
-                at_the_least,
-                Err(MtuError::LimitBelowMinimum { limit: 8, .. })
-            ),
-            "{at_the_least:?}"
-        );
-    }
-
-    #[test]
-    fn an_underlay_that_leaves_no_room_for_what_the_link_adds_is_refused() {
-        for (s4, overhead) in [(1420, 1500), (1500, 1580)] {
-            let refusal = link_refusal(V6, "", &format!(", obfuscation: {{s4: {s4}}}"));
-            assert!(
-                matches!(&refusal, LinkError::NoRoom { node, key, underlay: 1500, overhead: o }
-                    if node == "a" && key == "uplink_mtu" && *o == overhead),
-                "{s4}: {refusal:?}"
-            );
-        }
-    }
 
     /// The outer packet as it leaves the node: the inner packet padded to 16 but never past the
     /// MTU, then the WireGuard header and tag, the junk, UDP and the underlay's IP header.
     fn outer(inner: u32, mtu: u32, s4: u32, ip: u32) -> u32 {
         inner.div_ceil(16).saturating_mul(16).min(mtu) + 32 + s4 + 8 + ip
-    }
-
-    #[test]
-    fn across_the_grid_a_full_size_packet_fits_and_one_byte_more_does_not() {
-        for s4 in [0, 12, 20, 89, 150] {
-            for uplink in [1400, 1460, 1500, 9000] {
-                for (endpoint, ip) in [(V4, 20), (V6, 40)] {
-                    let a = format!("{endpoint}, uplink_mtu: {uplink}");
-                    let b = format!(", uplink_mtu: {uplink}");
-                    let link = format!(", obfuscation: {{s4: {s4}}}");
-                    let Ok(Some(mtu)) = computed(&mesh(&a, &b, &link, "")) else {
-                        assert!(uplink - 32 - 8 - ip - s4 < MIN_MESH_MTU);
-                        continue;
-                    };
-                    assert!(outer(mtu, mtu, s4, ip) <= uplink, "{s4} {uplink} {ip}");
-                    assert!(
-                        outer(mtu + 1, mtu + 1, s4, ip) > uplink,
-                        "{s4} {uplink} {ip}"
-                    );
-                }
-            }
-        }
     }
 
     /// Two nodes `a` and `b` of format version 2 and the link `a-b` between them: `a` and `b`

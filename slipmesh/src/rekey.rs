@@ -30,7 +30,7 @@ pub fn run(node: &str, config_path: &Path) -> Result<()> {
     write_edits(config_path, &yaml)?;
     println!(
         "rekeyed {} in {}",
-        network.format.node_key(node),
+        sliplib_mesh::model::node_key(node),
         config_path.display()
     );
     Ok(())
