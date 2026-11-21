@@ -203,24 +203,29 @@ mod tests {
     fn a_link_of_type_amneziawg_gets_every_minted_field_it_lacks() {
         let network = unminted("{}");
         let minted = super::create(&network).unwrap();
+        // `a-b` and `a-c`; `a-r1` is of type `wireguard`.
+        assert_eq!(minted.link_obfuscation.len(), 2);
         for (link, generated) in &minted.link_obfuscation {
-            let lacked = secrets::unminted(&network.links[*link].obfuscation);
-            let left = secrets::unminted(generated);
+            // Exactly the minted fields the link lacked: none it writes, none its type sets.
+            let mut lacked = secrets::unminted(&network.links[*link].obfuscation);
+            let mut generated = sliplib_yaml::to_value(generated)
+                .unwrap()
+                .as_mapping()
+                .unwrap()
+                .iter()
+                .filter(|(_, value)| !value.is_null())
+                .map(|(field, _)| field.as_str().unwrap().to_owned())
+                .collect::<Vec<_>>();
+            lacked.sort_unstable();
+            generated.sort_unstable();
             assert!(!lacked.is_empty(), "{link}");
-            assert!(lacked.iter().all(|field| !left.contains(field)), "{link}");
+            assert_eq!(generated, lacked, "{link}");
         }
-        // What the link writes by hand is not minted again.
-        let a_c = &minted.link_obfuscation[1];
-        assert_eq!(a_c.1.h4, None);
     }
 
     #[test]
     fn nothing_is_minted_for_files_that_lack_nothing() {
-        let files = crate::test_support::laid(&[
-            crate::test_support::EXAMPLE_MESH,
-            crate::test_support::EXAMPLE_SECRETS,
-        ]);
-        let minted = super::create(&crate::v2::lower(&files).unwrap()).unwrap();
+        let minted = super::create(&crate::test_support::example("{}")).unwrap();
         assert!(minted.is_empty());
     }
 
@@ -231,6 +236,7 @@ mod tests {
         let off_the_header = |offset: Option<u16>| !(101..=115).contains(&offset.unwrap());
         for _ in 0..200 {
             let minted = super::create(&network).unwrap();
+            assert_eq!(minted.link_obfuscation.len(), 2);
             for (link, generated) in &minted.link_obfuscation {
                 assert!(
                     off_the_header(generated.s1) && off_the_header(generated.s2),

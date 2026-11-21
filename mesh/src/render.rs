@@ -321,15 +321,7 @@ fn metrics_for(node: &Node, port: Option<NonZeroU16>) -> Option<MetricsConfig> {
 mod tests {
     use super::*;
 
-    /// The example of the specification with its secrets, and `overlay` laid over both.
-    fn example(overlay: &str) -> Network {
-        crate::v2::lower(&crate::test_support::laid(&[
-            crate::test_support::EXAMPLE_MESH,
-            crate::test_support::EXAMPLE_SECRETS,
-            overlay,
-        ]))
-        .unwrap()
-    }
+    use crate::test_support::example;
 
     fn configs_of(network: &Network, node: &str) -> std::result::Result<NodeConfigs, Error> {
         super::node_configs(network, node, &crate::secrets::read(network))
@@ -434,15 +426,33 @@ mod tests {
     fn a_key_that_does_not_decode_refuses_its_node_and_its_peers_and_no_secret_cures_it() {
         let network = example("{nodes: {node-b: {wireguard: {private_key: not a key}}}}");
         for node in ["node-b", "node-a"] {
-            let refusal = configs_of(&network, node).unwrap_err();
-            assert!(refusal.missing_secret().is_none(), "{node}: {refusal:?}");
-            let refusal = format!("{:#}", anyhow::Error::new(refusal));
-            assert!(
-                refusal.contains("node-b") && refusal.contains("wireguard.private_key"),
-                "{node}: {refusal}"
-            );
+            assert_not_a_key(configs_of(&network, node).unwrap_err(), "node-b");
         }
         configs_of(&network, "node-c").unwrap();
+    }
+
+    /// `refusal` is for the key of `owner`, which does not decode, and creating none cures it.
+    fn assert_not_a_key(refusal: Error, owner: &str) {
+        assert!(
+            matches!(&refusal, Error::RenderingAwg { source: RenderError::Key { node, .. }, .. }
+                if node == owner),
+            "{refusal:?}"
+        );
+        assert!(refusal.missing_secret().is_none(), "{refusal:?}");
+        let cause = sliplib_secrets::wireguard::decode_key("not a key").unwrap_err();
+        let chain = format!("{:#}", anyhow::Error::new(refusal));
+        assert!(chain.contains(&cause.to_string()), "{chain}");
+    }
+
+    // Every node's own key is decoded, whether or not a link uses it.
+    #[test]
+    fn a_key_that_does_not_decode_refuses_a_node_on_no_link_too() {
+        let network = example(
+            "{nodes: {node-d: {platform: talos, node_id: 0.0.0.5, underlay: {wan: {}}, \
+             wireguard: {private_key: not a key}}}}",
+        );
+        assert_not_a_key(configs_of(&network, "node-d").unwrap_err(), "node-d");
+        configs_of(&network, "node-a").unwrap();
     }
 
     #[test]
@@ -483,5 +493,10 @@ mod tests {
         );
         configs_of(&network, "node-b").unwrap();
         configs_of(&network, "router1").unwrap();
+        // The two ends of `a-c` need what the overlay took.
+        for node in ["node-a", "node-c"] {
+            let refusal = configs_of(&network, node).unwrap_err();
+            assert!(refusal.missing_secret().is_some(), "{node}: {refusal:?}");
+        }
     }
 }

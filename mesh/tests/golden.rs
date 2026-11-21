@@ -49,6 +49,13 @@ const ALTERNATE_TWIN: Twin = Twin {
     redialed: &[],
 };
 
+/// `text` with each public key of `public_keys` replaced by the name of whose it is.
+fn named(text: String, public_keys: &[(String, String)]) -> String {
+    public_keys
+        .iter()
+        .fold(text, |text, (key, whose)| text.replace(key, whose))
+}
+
 fn golden(directory: &str, file: &str) -> String {
     std::fs::read_to_string(format!(
         "{}/tests/{directory}/{file}",
@@ -80,18 +87,27 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
             Some((key, format!("<public key of {}>", node.name)))
         })
         .collect();
-    let named = |text: String| {
-        public_keys
-            .iter()
-            .fold(text, |text, (key, whose)| text.replace(key, whose))
-    };
+    let named = |text: String| named(text, &public_keys);
 
     for host in twin.v1.nodes {
         let directory = twin.v1.directory;
-        let mut expected_awg: AwgConfig =
-            sliplib_yaml::from_str(&golden(directory, &format!("{host}.awg.yaml"))).unwrap();
+        let golden_text = |config: &str| golden(directory, &format!("{host}.{config}.yaml"));
+        let mut expected_awg: AwgConfig = sliplib_yaml::from_str(&golden_text("awg")).unwrap();
         let mut expected_router: RouterConfig =
-            sliplib_yaml::from_str(&golden(directory, &format!("{host}.router.yaml"))).unwrap();
+            sliplib_yaml::from_str(&golden_text("router")).unwrap();
+        // Written back, each file is the text it holds: a key the type does not take, or a field
+        // the type now writes elsewhere or not at all, fails here and not unseen in the
+        // comparison below, where both sides go through the type.
+        assert_eq!(
+            sliplib_yaml::to_string(&expected_awg).unwrap(),
+            golden_text("awg"),
+            "{directory}/{host}.awg.yaml"
+        );
+        assert_eq!(
+            sliplib_yaml::to_string(&expected_router).unwrap(),
+            golden_text("router"),
+            "{directory}/{host}.router.yaml"
+        );
         expected_awg
             .interfaces
             .retain(|interface| !interface.name.starts_with("rw-"));

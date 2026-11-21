@@ -116,6 +116,7 @@ fn fmt_keeps_in_files_of_version_2_a_number_a_string_and_a_block_scalar_what_the
         "{rewritten}"
     );
     assert_eq!(installer["first"], installer["second"]);
+    assert_eq!(installer["second"]["wipe"], Value::from(true));
     assert_eq!(rewritten.matches("\n---\n").count(), 1, "{rewritten}");
 }
 

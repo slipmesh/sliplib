@@ -60,38 +60,43 @@ fn a_file_that_is_not_there_is_one_refusal_naming_the_path_and_is_not_created() 
     assert!(names_in(dir.path()).is_empty());
 }
 
-/// `check` on `config`, which it has to leave as it was.
+/// `check` on `config`, which it has to leave as it was and nothing beside it.
 fn checked(config: &Config) -> Ran {
     let before = config.text();
     let ran = config.run(&["check"]);
     assert_eq!(config.text(), before);
+    assert_eq!(names_in(config.path.parent().unwrap()), ["network.yaml"]);
     ran
 }
 
 #[test]
 fn files_of_version_2_with_a_refused_node_get_no_warning() {
+    // A lossy link between two nodes that pass: `check` warns about it while nothing is refused.
     let config = minted();
     edited(&config, |network| {
-        network["mesh"]["links"]["a-b"]["amneziawg"]["obfuscation"]["h1"] = "100-199".into();
-        network["nodes"]["router1"]["wireguard"] = sliplib_yaml::Value::Null;
+        network["mesh"]["links"]["b-c"] = sliplib_yaml::from_str(
+            "{type: amneziawg, ends: {node-b: {}, node-c: {}}, amneziawg: {port: 51833, \
+             obfuscation: {jc: 4, jmin: 40, jmax: 400, s1: 64, s2: 48, h1: 100-199, h2: 2202, \
+             h3: 3303, h4: 4404}}}",
+        )
+        .unwrap();
     });
-    let checked = checked(&config);
-    assert_eq!(checked.code, Some(1));
-    assert!(checked.stdout.contains("node-b: ok"), "{}", checked.stdout);
-    assert!(!checked.stderr.contains("warning: "), "{}", checked.stderr);
-}
+    let passing = checked(&config);
+    assert_eq!(passing.code, Some(0), "{}", passing.stderr);
+    assert!(
+        passing.stderr.contains("warning: mesh link b-c: "),
+        "{}",
+        passing.stderr
+    );
 
-#[test]
-fn every_refused_node_of_version_2_is_reported_and_the_others_still_pass() {
-    let config = minted();
     edited(&config, |network| {
         network["nodes"]["router1"]["wireguard"] = sliplib_yaml::Value::Null;
     });
-    let checked = checked(&config);
-    assert_eq!(checked.code, Some(1));
-    assert_eq!(checked.stdout, "node-b: ok\nnode-c: ok\n");
+    let refused = checked(&config);
+    assert_eq!(refused.code, Some(1));
+    assert_eq!(refused.stdout, "node-b: ok\nnode-c: ok\n");
     refusals(
-        &checked.stderr,
+        &refused.stderr,
         &[
             &["for node \"node-a\"", "router1", "wireguard.private_key"],
             &["for node \"router1\"", "router1", "wireguard.private_key"],
@@ -111,8 +116,16 @@ fn a_link_of_version_2_without_its_obfuscation_refuses_both_its_ends_naming_it_a
     refusals(
         &checked.stderr,
         &[
-            &["for node \"node-a\"", "a-b", "`slipmesh mint`"],
-            &["for node \"node-b\"", "a-b", "`slipmesh mint`"],
+            &[
+                "for node \"node-a\"",
+                "mesh link a-b: obfuscation lacks",
+                "`slipmesh mint`",
+            ],
+            &[
+                "for node \"node-b\"",
+                "mesh link a-b: obfuscation lacks",
+                "`slipmesh mint`",
+            ],
         ],
     );
 }
@@ -126,11 +139,24 @@ fn a_key_of_version_2_that_does_not_decode_is_refused_on_its_owners_line_and_its
     let checked = checked(&config);
     assert_eq!(checked.code, Some(1));
     assert_eq!(checked.stdout, "node-c: ok\nrouter1: ok\n");
+    let not_a_key = sliplib_secrets::wireguard::decode_key("not a key")
+        .unwrap_err()
+        .to_string();
     refusals(
         &checked.stderr,
         &[
-            &["for node \"node-a\"", "node-b", "wireguard.private_key"],
-            &["for node \"node-b\"", "node-b", "wireguard.private_key"],
+            &[
+                "for node \"node-a\"",
+                "node-b",
+                "wireguard.private_key",
+                &not_a_key,
+            ],
+            &[
+                "for node \"node-b\"",
+                "node-b",
+                "wireguard.private_key",
+                &not_a_key,
+            ],
         ],
     );
     assert!(
