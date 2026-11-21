@@ -1177,24 +1177,3 @@ for instance into a README beside the files.
 A command with nothing to write leaves the file as it is. Before it replaces the file, a command
 other than `fmt` checks that the files, with the result in its place, still read as a valid
 network. Every command replaces the file in one step, keeping its permissions.
-
-### Writing into a file kept encrypted
-
-Whatever decrypts a file for editing hands its editor command one path, that of the decrypted copy,
-as the last word. `--config` takes that path:
-
-```bash
-EDITOR="slipmesh mint --config"
-```
-
-**Planned:** with several files, `--edit` takes that path, and the other files are given with
-`--in` before it. The file itself is not among them: the copy stands in its place.
-
-```bash
-EDITOR="slipmesh mint --in mesh.yaml --edit"
-```
-
-The copy lies in a temporary directory, not beside the file, so its place among the other files
-depends on where that directory is, which differs between machines. Where the files set the same
-keys, the file kept encrypted gives its documents an `order`, so that their place does not depend
-on where the copy lies.
