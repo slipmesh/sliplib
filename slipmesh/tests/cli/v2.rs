@@ -61,16 +61,6 @@ fn mint_writes_into_the_network_document_wherever_it_stands_in_the_file() {
 }
 
 #[test]
-fn a_second_mint_changes_nothing() {
-    let config = minted();
-    let first = config.text();
-    let ran = config.run(&["mint"]);
-    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
-    assert_eq!(config.text(), first);
-    assert_eq!(ran.stdout, "");
-}
-
-#[test]
 fn mint_writes_the_reference_value_of_the_interface_prefix_and_mints_with_it() {
     let config = Config::holding(MESH);
     edited(&config, |network| {

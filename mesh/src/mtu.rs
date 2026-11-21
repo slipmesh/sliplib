@@ -420,17 +420,25 @@ mod tests {
         }
     }
 
-    /// Two nodes `a` and `b` of format version 2 and the link `a-b` between them: `a` and `b`
-    /// are their underlay entries, `link` the link's keys after its ends, `mesh` keys of `mesh`.
-    fn network(a: &str, b: &str, link: &str, mesh: &str) -> Network {
+    /// A network of `mesh_and_nodes`, its `mesh` and `nodes`, under one `slipmesh:` block, its
+    /// addressing and its AS number.
+    fn lowered(mesh_and_nodes: &str) -> Network {
         let text = format!(
             "slipmesh: {{kind: network, version: 2, revision: 1}}\naddressing: {{loopback: \
              {{ipv4: 198.51.100.0/25, ipv6: '3fff::/64'}}}}\nrouting: {{bgp: {{as: 64512}}}}\n\
-             mesh: {{interface_prefix: mesh-, links: {{a-b: {{ends: {{a: {{}}, b: {{}}}}, \
-             {link}}}}}{mesh}}}\nnodes:\n  a: {{platform: talos, node_id: 0.0.0.1, underlay: \
-             {{wan: {a}}}}}\n  b: {{platform: talos, node_id: 0.0.0.2, underlay: {{wan: {b}}}}}\n"
+             {mesh_and_nodes}"
         );
         crate::v2::lower(&sliplib_config::v2::File::parse(&text).unwrap()).unwrap()
+    }
+
+    /// Two nodes `a` and `b` and the link `a-b` between them: `a` and `b` are their underlay
+    /// entries, `link` the link's keys after its ends, `mesh` keys of `mesh`.
+    fn network(a: &str, b: &str, link: &str, mesh: &str) -> Network {
+        lowered(&format!(
+            "mesh: {{interface_prefix: mesh-, links: {{a-b: {{ends: {{a: {{}}, b: {{}}}}, \
+             {link}}}}}{mesh}}}\nnodes:\n  a: {{platform: talos, node_id: 0.0.0.1, underlay: \
+             {{wan: {a}}}}}\n  b: {{platform: talos, node_id: 0.0.0.2, underlay: {{wan: {b}}}}}\n"
+        ))
     }
 
     fn of(network: &Network) -> Result<Option<u32>, MtuError> {
@@ -518,15 +526,14 @@ mod tests {
     #[test]
     fn the_mesh_takes_the_least_limit_of_its_links() {
         // a-b dials a over IPv4 at 1500: 1440. b-c dials c over IPv6 at 1490: 1410.
-        let text = "slipmesh: {kind: network, version: 2, revision: 1}\naddressing: {loopback: \
-            {ipv4: 198.51.100.0/25, ipv6: '3fff::/64'}}\nrouting: {bgp: {as: 64512}}\nmesh:\n  \
-            interface_prefix: mesh-\n  links:\n    a-b: {type: wireguard, ends: {a: {}, b: {}}, \
-            wireguard: {port: 51820}}\n    b-c: {type: wireguard, ends: {b: {}, c: {}}, \
-            wireguard: {port: 51821}}\nnodes:\n  a: {platform: talos, node_id: 0.0.0.1, \
-            underlay: {wan: {endpoint: {ipv4: 192.0.2.10}}}}\n  b: {platform: talos, node_id: \
-            0.0.0.2, underlay: {wan: {}}}\n  c: {platform: talos, node_id: 0.0.0.3, underlay: \
-            {wan: {mtu: 1490, endpoint: {ipv6: '2001:db8::12'}}}}\n";
-        let network = crate::v2::lower(&sliplib_config::v2::File::parse(text).unwrap()).unwrap();
+        let network = lowered(
+            "mesh:\n  interface_prefix: mesh-\n  links:\n    a-b: {type: wireguard, ends: \
+             {a: {}, b: {}}, wireguard: {port: 51820}}\n    b-c: {type: wireguard, ends: {b: {}, \
+             c: {}}, wireguard: {port: 51821}}\nnodes:\n  a: {platform: talos, node_id: 0.0.0.1, \
+             underlay: {wan: {endpoint: {ipv4: 192.0.2.10}}}}\n  b: {platform: talos, node_id: \
+             0.0.0.2, underlay: {wan: {}}}\n  c: {platform: talos, node_id: 0.0.0.3, underlay: \
+             {wan: {mtu: 1490, endpoint: {ipv6: '2001:db8::12'}}}}\n",
+        );
         assert_eq!(of(&network).unwrap(), Some(1410));
     }
 
@@ -566,13 +573,10 @@ mod tests {
     #[test]
     fn a_mesh_without_links_takes_no_mtu_and_refuses_one_set() {
         let unlinked = |mesh: &str| {
-            let text = format!(
-                "slipmesh: {{kind: network, version: 2, revision: 1}}\naddressing: {{loopback: \
-                 {{ipv4: 198.51.100.0/25, ipv6: '3fff::/64'}}}}\nrouting: {{bgp: {{as: 64512}}}}\n\
-                 mesh: {{interface_prefix: mesh-{mesh}}}\nnodes:\n  a: {{platform: talos, \
+            lowered(&format!(
+                "mesh: {{interface_prefix: mesh-{mesh}}}\nnodes:\n  a: {{platform: talos, \
                  node_id: 0.0.0.1, underlay: {{wan: {{}}}}}}\n"
-            );
-            crate::v2::lower(&sliplib_config::v2::File::parse(&text).unwrap()).unwrap()
+            ))
         };
         assert_eq!(of(&unlinked("")).unwrap(), None);
         let refusal = of(&unlinked(", mtu: 1400")).unwrap_err();

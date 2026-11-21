@@ -345,14 +345,9 @@ roadwarriors:
         assert!(unminted(&crate::test_support::minted_obfuscation()).is_empty());
     }
 
-    /// The example of the specification with its secrets, and `overlay` laid over both.
+    /// The secrets of [`crate::test_support::example`].
     fn example(overlay: &str) -> ResolvedSecrets {
-        let files = crate::test_support::laid(&[
-            crate::test_support::EXAMPLE_MESH,
-            crate::test_support::EXAMPLE_SECRETS,
-            overlay,
-        ]);
-        super::read(&crate::v2::lower(&files).unwrap())
+        super::read(&crate::test_support::example(overlay))
     }
 
     #[test]

@@ -69,3 +69,14 @@ pub fn laid(layers: &[&str]) -> sliplib_config::v2::File {
         });
     sliplib_config::v2::File::parse(&sliplib_yaml::to_string(&tree).unwrap()).unwrap()
 }
+
+/// The example of the specification, its secrets laid over its mesh as the two files are read, and
+/// `overlay` over both.
+pub fn example_files(overlay: &str) -> sliplib_config::v2::File {
+    laid(&[EXAMPLE_MESH, EXAMPLE_SECRETS, overlay])
+}
+
+/// [`example_files`] as the network the configs are computed from.
+pub fn example(overlay: &str) -> crate::model::Network {
+    crate::v2::lower(&example_files(overlay)).unwrap()
+}

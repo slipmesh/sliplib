@@ -131,12 +131,7 @@ mesh:
     /// The links of the example of the specification with its secrets, and `overlay` laid over
     /// both: what is told of them.
     fn told_of(overlay: &str) -> Vec<Warning> {
-        let files = crate::test_support::laid(&[
-            crate::test_support::EXAMPLE_MESH,
-            crate::test_support::EXAMPLE_SECRETS,
-            overlay,
-        ]);
-        let network = crate::v2::lower(&files).unwrap();
+        let network = crate::test_support::example(overlay);
         warnings(&network, &crate::secrets::read(&network))
     }
 
@@ -168,16 +163,28 @@ mesh:
     #[test]
     fn every_loss_of_each_named_link_is_told_in_the_order_written() {
         // Without its header protection key, an `s1` or `s2` 4 bytes above the type's `s4` of 16
-        // reads a data packet's header.
+        // reads a data packet's header. `1-b-c`, written after the example's links, sorts before
+        // them.
         let told = lines(&told_of(
             "{mesh: {links: {a-b: {amneziawg: {obfuscation: {h2: 20-29, s1: 20, \
-             header_protection_key: null}}}, a-c: {amneziawg: {obfuscation: {s2: 20}}}}}}",
+             header_protection_key: null}}}, a-c: {amneziawg: {obfuscation: {s2: 20}}}, \
+             1-b-c: {type: amneziawg, ends: {node-b: {}, node-c: {}}, amneziawg: {port: 51833, \
+             obfuscation: {jc: 4, jmin: 40, jmax: 400, s1: 64, s2: 20, h1: 1101, h2: 2202, \
+             h3: 3303, h4: 4404}}}}}}",
         ));
         let links: Vec<&str> = told
             .iter()
             .map(|warning| warning.split(": ").next().unwrap())
             .collect();
-        assert_eq!(links, ["mesh link a-b", "mesh link a-b", "mesh link a-c"]);
+        assert_eq!(
+            links,
+            [
+                "mesh link a-b",
+                "mesh link a-b",
+                "mesh link a-c",
+                "mesh link 1-b-c"
+            ]
+        );
     }
 
     #[test]

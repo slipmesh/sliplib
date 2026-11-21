@@ -235,18 +235,9 @@ mod tests {
     use crate::model::{Family, Format};
     use crate::render::node_configs;
     use crate::secrets;
-    use crate::test_support::{EXAMPLE_MESH, EXAMPLE_SECRETS};
     use sliplib_config::v2::Platform;
 
-    /// The example of the specification, its secrets laid over its mesh as the two files are
-    /// read, and `overlay` over both.
-    fn files(overlay: &str) -> File {
-        crate::test_support::laid(&[EXAMPLE_MESH, EXAMPLE_SECRETS, overlay])
-    }
-
-    fn lowered(overlay: &str) -> Network {
-        lower(&files(overlay)).unwrap()
-    }
+    use crate::test_support::{example as lowered, example_files as files};
 
     fn refusal(overlay: &str) -> Error {
         lower(&files(overlay)).unwrap_err()
