@@ -1,4 +1,4 @@
-use crate::common::{Ran, slipmesh};
+use crate::common::{Config, Ran, edited, minted, slipmesh};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::path::Path;
 
@@ -298,4 +298,122 @@ fn a_refusal_that_no_secret_cures_names_no_command() {
     assert_eq!(checked.code, Some(1));
     assert_eq!(checked.stderr.lines().count(), 1, "{}", checked.stderr);
     assert!(!checked.stderr.contains("slipmesh"), "{}", checked.stderr);
+}
+
+/// `check` on `config`, which it has to leave as it was.
+fn checked(config: &Config) -> Ran {
+    let before = config.text();
+    let ran = config.run(&["check"]);
+    assert_eq!(config.text(), before);
+    ran
+}
+
+#[test]
+fn files_of_version_2_with_a_refused_node_get_no_warning() {
+    let config = minted();
+    edited(&config, |network| {
+        network["mesh"]["links"]["a-b"]["amneziawg"]["obfuscation"]["h1"] = "100-199".into();
+        network["nodes"]["router1"]["wireguard"] = sliplib_yaml::Value::Null;
+    });
+    let checked = checked(&config);
+    assert_eq!(checked.code, Some(1));
+    assert!(checked.stdout.contains("node-b: ok"), "{}", checked.stdout);
+    assert!(!checked.stderr.contains("warning: "), "{}", checked.stderr);
+}
+
+#[test]
+fn every_refused_node_of_version_2_is_reported_and_the_others_still_pass() {
+    let config = minted();
+    edited(&config, |network| {
+        network["nodes"]["router1"]["wireguard"] = sliplib_yaml::Value::Null;
+    });
+    let checked = checked(&config);
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stdout, "node-b: ok\nnode-c: ok\n");
+    refusals(
+        &checked.stderr,
+        &[
+            &["for node \"node-a\"", "router1", "wireguard.private_key"],
+            &["for node \"router1\"", "router1", "wireguard.private_key"],
+        ],
+    );
+}
+
+#[test]
+fn a_link_of_version_2_without_its_obfuscation_refuses_both_its_ends_naming_it_and_mint() {
+    let config = minted();
+    edited(&config, |network| {
+        network["mesh"]["links"]["a-b"]["amneziawg"]["obfuscation"] = sliplib_yaml::Value::Null;
+    });
+    let checked = checked(&config);
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stdout, "node-c: ok\nrouter1: ok\n");
+    refusals(
+        &checked.stderr,
+        &[
+            &["for node \"node-a\"", "a-b", "`slipmesh mint`"],
+            &["for node \"node-b\"", "a-b", "`slipmesh mint`"],
+        ],
+    );
+}
+
+#[test]
+fn a_key_of_version_2_that_does_not_decode_is_refused_on_its_owners_line_and_its_peers() {
+    let config = minted();
+    edited(&config, |network| {
+        network["nodes"]["node-b"]["wireguard"]["private_key"] = "not a key".into();
+    });
+    let checked = checked(&config);
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stdout, "node-c: ok\nrouter1: ok\n");
+    refusals(
+        &checked.stderr,
+        &[
+            &["for node \"node-a\"", "node-b", "wireguard.private_key"],
+            &["for node \"node-b\"", "node-b", "wireguard.private_key"],
+        ],
+    );
+    assert!(
+        !checked.stderr.contains("slipmesh mint"),
+        "{}",
+        checked.stderr
+    );
+}
+
+#[test]
+fn files_of_version_2_with_a_key_the_loader_does_not_know_are_one_refusal_naming_the_file() {
+    let config = minted();
+    edited(&config, |network| {
+        network["mesh"]["no_such_setting"] = 1.into();
+    });
+    let checked = checked(&config);
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(checked.stdout, "");
+    refusals(
+        &checked.stderr,
+        &[&[&config.path.display().to_string(), "no_such_setting"]],
+    );
+    assert!(
+        !checked.stderr.contains("slipmesh mint"),
+        "{}",
+        checked.stderr
+    );
+}
+
+#[test]
+fn the_file_of_version_2_is_slipmesh_yaml_of_the_working_directory_unless_given() {
+    let config = minted();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("slipmesh.yaml"), config.text()).unwrap();
+    let checked: Ran = slipmesh()
+        .arg("check")
+        .current_dir(dir.path())
+        .output()
+        .unwrap()
+        .into();
+    assert_eq!(checked.code, Some(0), "{}", checked.stderr);
+    assert_eq!(
+        checked.stdout,
+        "node-a: ok\nnode-b: ok\nnode-c: ok\nrouter1: ok\n"
+    );
 }
