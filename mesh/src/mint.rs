@@ -79,14 +79,13 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
     let mut written = secrets::read(network);
     let mut minted = Minted::default();
 
+    let format = &network.format;
     for (index, node) in network.nodes.iter().enumerate() {
         if written.mesh_private_keys.contains_key(&node.name) || !network.needs_a_key(&node.name) {
             continue;
         }
         minted.node_keys.push((index, PrivateKey::generate()));
-        minted
-            .names
-            .push(format!("nodes[{}].mesh_private_key", node.name));
+        minted.names.push(format.node_key(&node.name));
     }
 
     for (index, link) in network.links.iter().enumerate() {
@@ -98,14 +97,14 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
             .mesh_link_obfuscation
             .entry(pair.clone())
             .or_default();
-        let entry = format!("mesh.links[{pair}].obfuscation");
+        let entry = format.link_obfuscation(link);
         if let Some(generated) = mint_obfuscation(obfuscation, &entry)? {
             minted.link_obfuscation.push((index, generated));
             minted.names.push(entry);
         }
     }
 
-    for pool in network.v1.iter().flat_map(|v1| &v1.pools) {
+    for pool in network.format.v1().into_iter().flat_map(|v1| &v1.pools) {
         let private_key =
             (!written.roadwarrior_private_keys.contains_key(&pool.name)).then(PrivateKey::generate);
         if private_key.is_some() {
@@ -355,5 +354,47 @@ roadwarriors:
                 "{pool:?}"
             );
         }
+    }
+
+    /// The example of the specification as it is before anything is minted, with `overlay` laid
+    /// over it.
+    fn unminted(overlay: &str) -> Network {
+        let files = crate::test_support::laid(&[crate::test_support::EXAMPLE_MESH, overlay]);
+        crate::v2::lower(&files).unwrap()
+    }
+
+    #[test]
+    fn what_is_minted_for_version_2_is_named_as_that_version_writes_it() {
+        let minted = super::create(&unminted("{}")).unwrap();
+        assert_eq!(
+            minted.routes(),
+            [
+                "nodes.node-a.wireguard.private_key",
+                "nodes.node-b.wireguard.private_key",
+                "nodes.node-c.wireguard.private_key",
+                "nodes.router1.wireguard.private_key",
+                "mesh.links.a-b.amneziawg.obfuscation",
+                "mesh.links.a-c.amneziawg.obfuscation",
+            ]
+        );
+        // By their positions in the network: the link of type `wireguard` is the third.
+        let links: Vec<usize> = minted
+            .link_obfuscation
+            .iter()
+            .map(|(link, _)| *link)
+            .collect();
+        assert_eq!(links, [0, 1]);
+    }
+
+    #[test]
+    fn a_link_of_version_2_with_no_header_left_is_named_as_that_version_writes_it() {
+        let full = "{mesh: {links: {a-b: {amneziawg: {obfuscation: {h1: 0-4294967295}}}}}}";
+        let refusal = super::create(&unminted(full)).err();
+        assert_eq!(
+            refusal,
+            Some(NoHeaderLeft(
+                "mesh.links.a-b.amneziawg.obfuscation".to_owned()
+            ))
+        );
     }
 }

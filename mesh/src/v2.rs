@@ -2,7 +2,7 @@
 //! the addresses its `node_id` gives it, every link with what the loader found in force on it.
 
 use crate::addressing;
-use crate::model::{Endpoint, Keys, Link, MetricsPorts, Network, Node};
+use crate::model::{Endpoint, Format, Link, MetricsPorts, Network, Node};
 use crate::mtu::DEFAULT_UPLINK_MTU;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::v2::File;
@@ -221,9 +221,7 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             .map(|(name, class)| (name.to_string(), class.protocol))
             .collect(),
         metrics: MetricsPorts::default(),
-        keys: Keys::V2,
-        key_on_a_link_only: true,
-        v1: None,
+        format: Format::V2,
     })
 }
 
@@ -234,24 +232,16 @@ fn prefixes(list: &[network::Prefix4]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Family;
+    use crate::model::{Family, Format};
     use crate::render::node_configs;
     use crate::secrets;
+    use crate::test_support::{EXAMPLE_MESH, EXAMPLE_SECRETS};
     use sliplib_config::v2::Platform;
-    use sliplib_yaml::{Value, merge};
 
     /// The example of the specification, its secrets laid over its mesh as the two files are
     /// read, and `overlay` over both.
     fn files(overlay: &str) -> File {
-        let layers = [
-            include_str!("../../docs/example/mesh.yaml"),
-            include_str!("../../docs/example/secrets.yaml"),
-            overlay,
-        ];
-        let tree = layers.iter().fold(Value::Null, |tree, layer| {
-            merge(tree, &sliplib_yaml::from_str::<Value>(layer).unwrap())
-        });
-        File::parse(&sliplib_yaml::to_string(&tree).unwrap()).unwrap()
+        crate::test_support::laid(&[EXAMPLE_MESH, EXAMPLE_SECRETS, overlay])
     }
 
     fn lowered(overlay: &str) -> Network {
@@ -567,7 +557,7 @@ mod tests {
         );
         let mesh = mtu_refusal("{mesh: {mtu: 0}}");
         assert!(
-            matches!(mesh, MtuError::BelowMinimum { key, mtu: 0 } if key == Keys::V2.mtu),
+            matches!(mesh, MtuError::BelowMinimum { key, mtu: 0 } if key == Format::V2.mtu()),
             "{mesh:?}"
         );
     }
@@ -580,6 +570,7 @@ mod tests {
         let network = lowered(&format!("{{nodes: {{node-d: {NODE_D}}}}}"));
         let configs = node_configs(&network, "node-d", &secrets::read(&network)).unwrap();
         assert!(configs.awg.interfaces.is_empty());
+        assert_eq!(configs.router.bgp_peers.len(), 4);
         // A node on a link still needs its own.
         let keyless = lowered("{nodes: {node-b: {wireguard: null}}}");
         let refusal = node_configs(&keyless, "node-b", &secrets::read(&keyless)).unwrap_err();
@@ -706,7 +697,7 @@ mod tests {
         let refusal = refused(&keyless, "node-a");
         let missing = refusal.missing_secret().map(ToString::to_string);
         assert!(
-            missing.is_some_and(|missing| missing.contains(Keys::V2.private_key)),
+            missing.is_some_and(|missing| missing.contains(Format::V2.private_key())),
             "{refusal:?}"
         );
         let above = refused(&lowered("{mesh: {mtu: 9000}}"), "node-a");
@@ -716,9 +707,30 @@ mod tests {
                 crate::render::Error::RenderingAwg {
                     source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit { key, mtu: 9000, .. }),
                     ..
-                } if *key == Keys::V2.mtu
+                } if *key == Format::V2.mtu()
             ),
             "{above:?}"
+        );
+    }
+
+    #[test]
+    fn a_node_on_no_link_is_still_stopped_by_what_stops_every_node() {
+        let network = lowered(&format!(
+            "{{mesh: {{mtu: 9000}}, nodes: {{node-d: {NODE_D}}}}}"
+        ));
+        let refusal = refused(&network, "node-d");
+        assert!(
+            matches!(
+                &refusal,
+                crate::render::Error::RenderingAwg {
+                    source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit {
+                        mtu: 9000,
+                        ..
+                    }),
+                    ..
+                }
+            ),
+            "{refusal:?}"
         );
     }
 

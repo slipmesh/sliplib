@@ -122,7 +122,7 @@ pub fn read_pools(topology: &MeshConfig) -> ResolvedSecrets {
 }
 
 pub fn read(network: &Network) -> ResolvedSecrets {
-    let pools = match &network.v1 {
+    let pools = match network.format.v1() {
         Some(v1) => of_pools(&v1.pools, &v1.obfuscation),
         None => of_pools(&[], &Obfuscation::default()),
     };

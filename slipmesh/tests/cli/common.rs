@@ -2,6 +2,7 @@
 
 use sliplib_config::v1::mesh_config::MeshConfig;
 use sliplib_config::v1::slipmesh_file::SlipmeshFile;
+use sliplib_yaml::{MultiDoc, Value};
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
@@ -41,6 +42,16 @@ impl Config {
 
     pub fn text(&self) -> String {
         std::fs::read_to_string(&self.path).unwrap()
+    }
+
+    /// Every document of the file, as its value.
+    pub fn documents(&self) -> Vec<Value> {
+        MultiDoc::parse(&self.text())
+            .unwrap()
+            .documents()
+            .iter()
+            .map(|document| document.value.clone())
+            .collect()
     }
 
     /// `slipmesh <command>` on the file, its path given as the last argument.

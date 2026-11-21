@@ -5,10 +5,12 @@ use crate::file::{read_slipmesh, write_edits};
 use crate::{edit, roadwarrior};
 use anyhow::{Context, Result};
 use clap::Subcommand;
+use sliplib_config::slipmesh_file::SlipmeshFile as AnyVersion;
 use sliplib_config::v1::mesh_config;
 use sliplib_config::v1::slipmesh_file::SlipmeshFile;
 use sliplib_mesh::secrets::{self, ResolvedSecrets};
 use sliplib_secrets::wireguard::PrivateKey;
+use sliplib_yaml::MultiDoc;
 use std::path::{Path, PathBuf};
 
 #[derive(Subcommand)]
@@ -151,7 +153,7 @@ fn rw_add(
     keep_private: bool,
     config_path: &Path,
 ) -> Result<()> {
-    let (mut yaml, file) = read_slipmesh(config_path)?;
+    let (mut yaml, file) = read_version_1(config_path)?;
     let topology = file.topology();
     let document = pool_document(&file, topology, if_)?;
     let secrets = written_secrets(topology, if_, config_path)?;
@@ -187,7 +189,7 @@ fn rw_add(
 }
 
 fn rw_del(if_: &str, name: &str, config_path: &Path) -> Result<()> {
-    let (mut yaml, file) = read_slipmesh(config_path)?;
+    let (mut yaml, file) = read_version_1(config_path)?;
     let topology = file.topology();
     let document = pool_document(&file, topology, if_)?;
 
@@ -213,7 +215,7 @@ fn rw_inspect(
     invert: bool,
     config_path: &Path,
 ) -> Result<()> {
-    let (_, file) = read_slipmesh(config_path)?;
+    let (_, file) = read_version_1(config_path)?;
     let topology = file.topology();
     let secrets = written_secrets(topology, if_, config_path)?;
 
@@ -256,4 +258,15 @@ fn written_secrets(
         config_path.display()
     );
     Ok(secrets::read_pools(topology))
+}
+
+/// The file, which has to be of format version 1: only that version holds pools.
+fn read_version_1(config_path: &Path) -> Result<(MultiDoc, SlipmeshFile)> {
+    match read_slipmesh(config_path)? {
+        (yaml, AnyVersion::V1(file)) => Ok((yaml, file)),
+        (_, AnyVersion::V2(_)) => anyhow::bail!(
+            "{} is of format version 2, which holds no roadwarriors pools - the `rw` commands work on a file of format version 1 alone",
+            config_path.display()
+        ),
+    }
 }

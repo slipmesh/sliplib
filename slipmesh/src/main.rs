@@ -35,7 +35,8 @@ enum Command {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,
     },
-    /// Write the secrets and the defaults slipmesh.yaml lacks into it.
+    /// Write the secrets slipmesh.yaml lacks into it, and the defaults (version 1) or reference
+    /// values (version 2) of the keys it leaves out.
     Mint {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,

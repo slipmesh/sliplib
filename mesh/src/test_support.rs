@@ -1,5 +1,6 @@
-//! Secrets for the fixtures, which set none of their own: keys generated here, and an
-//! obfuscation with every minted field, so that a fixture renders the way a minted file does.
+//! What the tests share: secrets for the fixtures, which set none of their own (keys generated
+//! here, and an obfuscation with every minted field, so that a fixture renders the way a minted
+//! file does), and the example of the specification.
 
 use crate::secrets::{self, ResolvedSecrets};
 use sliplib_config::Obfuscation;
@@ -52,4 +53,19 @@ pub fn minted(mesh: &MeshConfig) -> ResolvedSecrets {
         }
     }
     resolved
+}
+
+/// The network of the specification's example.
+pub const EXAMPLE_MESH: &str = include_str!("../../docs/example/mesh.yaml");
+/// The secrets of the specification's example, laid over its network.
+pub const EXAMPLE_SECRETS: &str = include_str!("../../docs/example/secrets.yaml");
+
+/// `layers` laid over each other in order, as the files of version 2 are, read as one file.
+pub fn laid(layers: &[&str]) -> sliplib_config::v2::File {
+    let tree = layers
+        .iter()
+        .fold(sliplib_yaml::Value::Null, |tree, layer| {
+            sliplib_yaml::merge(tree, &sliplib_yaml::from_str(layer).unwrap())
+        });
+    sliplib_config::v2::File::parse(&sliplib_yaml::to_string(&tree).unwrap()).unwrap()
 }
