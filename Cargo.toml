@@ -33,7 +33,7 @@ tokio-graceful-shutdown = "0.20.0"
 tokio-util = { version = "0.7.20", default-features = false }
 tempfile = "3.27.0"
 # The signals of the runtime's tests, at the version atomic-write-file builds on.
-nix = { version = "0.31.3", default-features = false, features = ["signal"] }
+nix = { version = "0.32.0", default-features = false, features = ["signal"] }
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
 # The keys a derived reader passes over: a link's obfuscation refuses them, the daemons' does not.
