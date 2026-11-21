@@ -66,8 +66,8 @@ error; one that holds nothing - empty, only comments, or `~` - is skipped.
 ### Several files
 
 A tool reads one file, given with `--config`. It holds one `network` document, which is required,
-and at most one `groups` document: a second of either is refused, naming the lines of the first two. Every `network`
-document carries `version` and `revision`.
+and at most one `groups` document: a second of either is refused, naming the lines of the first two.
+Every `network` document carries `version` and `revision`.
 
 Before the body of any document is parsed, the documents are sorted by `order`, `1000` where it is
 left out; documents of one `order` keep the place they have in the file. That is "the order of the
@@ -153,9 +153,9 @@ slipmesh:
 `version` is the syntax of the format as a whole, 2 in this document. It changes only when the
 syntax is replaced, which means converting every file. A `network` document without `version` is
 version 1, which [Converting a file by hand](slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand)
-turns into version 2. A tool refuses it, and a `version` that is an integer below 2 or `null`, naming that document and
-pointing at that conversion. A `version` that is no integer is refused by the block as a value of
-the wrong type.
+turns into version 2. A tool refuses it, and a `version` that is an integer below 2 or `null`,
+naming that document and pointing at that conversion. A `version` that is no integer is refused by
+the block as a value of the wrong type.
 
 `revision` is the generation of the rules that turn the files into configs. It grows when the same
 data has to give a different result, for instance when what a document configures on a node passes
@@ -216,15 +216,14 @@ the one for all wherever it stands, and an `order` set on purpose moves either p
 Only `template` and `patch` take the two keys, both optional. The other kinds are about no node in
 particular, and there the keys are an error.
 
-A document written in the terms of one platform names it with `platform`, one value: a
-[platform of the nodes](#who-serves-a-document). Its `all`, wherever it stands in its own `include`
-or `exclude`, is every node of that platform: `include: [all, node-a]` reaches those nodes and `node-a`, but
-ranks as aimed at some nodes, since its `include` is not `all` alone, and `exclude: [all]` leaves
-the document reaching no node, which is refused. Every node the document is left reaching once
-`exclude` is taken out has to be of that platform, and a node of another makes the document an
-error, not something passed over. Inside a group there is no platform, and `all` there is every
-node: a group that names it holds nodes of every platform, and makes such a document an error in
-the same way.
+A document written in the terms of one platform names it with `platform`, one value: a [platform of
+the nodes](#who-serves-a-document). Its `all`, wherever it stands in its own `include` or `exclude`,
+is every node of that platform: `include: [all, node-a]` reaches those nodes and `node-a`, but ranks
+as aimed at some nodes, since its `include` is not `all` alone, and `exclude: [all]` leaves the
+document reaching no node, which is refused. Every node the document is left reaching once `exclude`
+is taken out has to be of that platform, and a node of another makes the document an error, not
+something passed over. Inside a group there is no platform, and `all` there is every node: a group
+that names it holds nodes of every platform, and makes such a document an error in the same way.
 
 ### Strict parsing
 
@@ -848,8 +847,9 @@ between. With the default `fe80::/64`, a `node_id` of `0.0.0.5` gives `fe80::5`.
 A network that leaves fewer than 32 bits free takes only the low bits of `node_id`, so those bits
 have to differ between nodes: two nodes with the same derived address on the links, link-local or
 IPv4, are refused, across the whole network and not only between the ends of one link. Unlike the
-IPv6 loopback, `link_local` may be longer than /96. Every node gets such a link-local address, a node on no link
-too, and such a node is refused for a duplicate or for a host part of zeros as any other.
+IPv6 loopback, `link_local` may be longer than /96. Every node gets such a link-local address, a
+node on no link too, and such a node is refused for a duplicate or for a host part of zeros as any
+other.
 
 **A host part of zeros.** An address whose host part is all zeros is refused only where the prefix
 it stands with on its interface makes it special. On an IPv4 prefix shorter than /31 the host part
@@ -1140,7 +1140,7 @@ document with the `version` and `revision` of the ones read.
 slipmesh mint --in mesh.yaml --edit secrets.yaml
 ```
 
-Then refused:
+With several files, refused:
 
 - an `--edit` file that exists and does not hold exactly one `network` document, since the command
   would not know which to write into;
