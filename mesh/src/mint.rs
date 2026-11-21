@@ -418,8 +418,10 @@ roadwarriors:
         let network = unminted("{}");
         let minted = super::create(&network).unwrap();
         for (link, generated) in &minted.link_obfuscation {
-            let in_force = secrets::layer(generated, &network.links[*link].obfuscation);
-            assert!(secrets::unminted(&in_force).is_empty(), "{link}");
+            let lacked = secrets::unminted(&network.links[*link].obfuscation);
+            let left = secrets::unminted(generated);
+            assert!(!lacked.is_empty(), "{link}");
+            assert!(lacked.iter().all(|field| !left.contains(field)), "{link}");
         }
         // What the link writes by hand is not minted again.
         let a_c = &minted.link_obfuscation[1];
