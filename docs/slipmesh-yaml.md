@@ -7,10 +7,10 @@ its rules, which traffic leaves through which node - is described where it runs;
 file](slipmesh-yaml-v1-to-v2.md#what-leaves-the-file) says where the two such parts of version 1 go.
 
 This is the specification of the format. A part no tool serves yet is marked **Planned** where it
-will stand, as [Planned](#planned) explains. No released tool reads version 2 yet: the releases so
-far read version 1, which [Differences from version
-1](slipmesh-yaml-v1-to-v2.md#differences-from-version-1) starts from. What this document says a tool
-does, the first release that reads version 2 does, and it reads no file of version 1.
+will stand, as [Planned](#planned) explains. sliplib v0.19 and the releases before it read version
+1, which [Differences from version 1](slipmesh-yaml-v1-to-v2.md#differences-from-version-1) starts
+from; from v0.20.0 on, the tools read version 2 alone. What this document says a tool does, v0.20.0
+does.
 
 ## The files
 

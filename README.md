@@ -238,8 +238,9 @@ What a node's daemons are configured with, computed from the file `sliplib-confi
 every tool that configures a node of any platform.
 
 A refusal is a `render::Error`, which names the node and which of its configs it is about, with
-its cause as its `source`, or an `mtu::MtuError`. A file that reads and gives no network to
-compute from is refused as a `v2::Error`.
+its cause as its `source`, or an `mtu::MtuError`. Files that read and give no network to compute
+from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those that do not read.
+`Network::node` refuses a name the network does not hold as `model::UnknownNode`.
 
 - `model::Network` is what the configs are computed from: every node with the addresses derived
   for it and its platform, every link with the obfuscation and the keepalive in force on it, the
@@ -250,16 +251,18 @@ compute from is refused as a `v2::Error`.
   `model::link_obfuscation` name where the files hold a node's key and a link's obfuscation.
 - `secrets::read` takes the secrets the network holds: each node's private key and each link's
   obfuscation. It never creates one: a key the file lacks is absent from `ResolvedSecrets`, while
-  every link gets an obfuscation entry, empty when nothing is set or it is `plain`.
+  every link gets an obfuscation entry, empty when nothing is set or the link is of type
+  `wireguard`.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
   node checks it. It needs the node's own key, but on a node on no link; and for each of its links,
-  the peer's key and the link's obfuscation. It refuses what of these is missing, or an obfuscation
-  not `plain` without one of `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`, naming what lacks
-  what; it refuses nothing for the secrets of nodes and links the node is not on. Such a refusal gives its
-  `secrets::MissingSecret` through `render::Error::missing_secret`, so a tool can add how its user
-  creates the secret. A peer the node dials is given the keepalive of its link where that differs
-  from what `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes
-  of `talos`.
+  the peer's key and the link's obfuscation. It refuses what of these is missing, or the
+  obfuscation of a link of type `amneziawg` without one of `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1`
+  to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes and links the node
+  is not on. Such a refusal gives its `secrets::MissingSecret` through
+  `render::Error::missing_secret`, so a tool can add how its user creates the secret. A peer the
+  node dials is given the keepalive of its link where that differs from what
+  `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes of
+  `talos`.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
   each by the entry it belongs to, and no key for a node on no link, or `NoHeaderLeft`
   when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a
@@ -369,8 +372,10 @@ networks of format version 1 gave every node, with derived public keys named by 
 first set every key of that format, the second the other side of each key a file sets once. `v2`
 and `v2-alternate` are the same two networks converted to version 2 by hand, and every node of each
 gets those configs, but for what [a conversion
-changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand). A change that moves a config
-of a node changes the files, and the difference is reviewed with the rest of the pull request.
+changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand). The files hold values: the
+test reads each into its type and writes it back, and the text has to come out the same. A change
+of what a node gets fails the twins; a change of how a config is written fails the read-back until
+the files are rewritten in the new form, which the pull request then shows.
 
 [`fuzz/`](fuzz) holds a target for [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz.html),
 which needs a nightly toolchain: `read_slipmesh` gives a text to `v2::File`, lowers what reads into

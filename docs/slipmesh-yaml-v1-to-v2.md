@@ -1,8 +1,9 @@
 # `slipmesh.yaml` from version 1 to version 2
 
-Version 1 is the format every release so far reads; [version 2](slipmesh-yaml.md) is the one its
-document describes. A release reads one of them: from the first that reads version 2 on, a file of
-version 1 is refused. This document says what differs between them and how a file is converted.
+Version 1 is the format sliplib v0.19 and the releases before it read. [Version
+2](slipmesh-yaml.md), which its document describes, is the one from v0.20.0 on, and those releases
+refuse a file of version 1. This document says what differs between them and how a file is
+converted.
 
 ## Differences from version 1
 
@@ -112,8 +113,7 @@ mesh through a node, under the key `bypass` of the `network` document with
 Kubernetes cluster, read by the operators that serve them: a list becomes an egress list, and a pool
 a roadwarriors pool with its clients.
 
-The `slipmesh rw` commands of the releases that read version 1 edit its pools; the releases that
-read version 2 have none.
+The `slipmesh rw` commands of v0.19 and before edit its pools; from v0.20.0 on there are none.
 
 **Planned:** the operators, and the command each of them has to write its resources out of a
 version 1 file, once.
@@ -121,11 +121,11 @@ version 1 file, once.
 ## Converting a file by hand
 
 No command converts a file. It is edited by hand, and the tools then show that nothing changed that
-was not meant to. Step 1 runs the tools of the last release that reads version 1, on the file as it
-is; steps 5 to 7 run those of the first release that reads version 2, on the converted file. Every
-node of a network converted this way gets the configs version 1 gave it, but for the differences
-step 6 lists, which [`mesh/tests/golden.rs`](../mesh/tests/golden.rs) pins for two networks: what
-else step 6 shows comes from the conversion.
+was not meant to. Step 1 runs the tools of the last release that reads version 1, built on sliplib
+v0.19, on the file as it is; steps 5 to 7 run those built on v0.20.0 or later, on the converted
+file. Every node of a network converted this way gets the configs version 1 gave it, but for the
+differences step 6 lists, which [`mesh/tests/golden.rs`](../mesh/tests/golden.rs) pins for two
+networks: what else step 6 shows comes from the conversion.
 
 1. Before editing, leave nothing pending: `slipmesh-taloscfg generate --diff` prints no change to a
    patch file, and `slipmesh-routeros --node <name> --check --diff` plans none on its device.
@@ -200,8 +200,8 @@ else step 6 shows comes from the conversion.
    out moves it to the end, and the node's routing configuration changes with it.
 5. Run `slipmesh check`. It parses every document strictly, but the text of a `template` and the
    body of a `patch`, which the generator checks, and it checks every node's configs.
-6. Run the two commands of step 1 again, with the tools of the release that reads version 2. They
-   show these differences and no other:
+6. Run the two commands of step 1 again, with the tools built on v0.20.0 or later. They show these
+   differences and no other:
    - in the patch file of every `talos` node, the `awg` config holds no pool interfaces,
      `router.yaml` holds no `bypass`, and its `announce` holds no label, so the node's routing
      configuration loses the comment the label made;
