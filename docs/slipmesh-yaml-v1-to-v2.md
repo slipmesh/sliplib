@@ -51,9 +51,11 @@ In general:
 - A link of a type that the tool of one of its ends does not serve is refused, which makes a link to
   a `routeros` node one of type `wireguard`. Version 1 did not know a node's platform and rendered
   an obfuscated link to such a node with obfuscation on one end alone.
-- The keepalive of a link is a key, `persistent_keepalive`. Version 1 had none and sent one every
-  25 seconds on either type; left out, it is now still 25 on a link of type `wireguard`, and `20-30`
-  on one of type `amneziawg`.
+- The keepalive of a link is a key, `persistent_keepalive`. Version 1 had none: the `awg` daemon
+  that reads a peer's keepalive from its config entry sends 25 seconds to a peer it dials on an
+  interface without obfuscation and `20-30` on one with it, and a file of version 1 gets that from
+  it as well. Version 2 gives the same where no key is written, and the generator writes the key
+  only where a link's value differs from it.
 - BFD is on where its block is. Version 1 had `bfd.enable`.
 - The numbers of route classes are checked against each other and against `200`. Version 1 checked
   one number, against `0` to `4`.
@@ -129,7 +131,9 @@ networks: what else step 6 shows comes from the conversion.
 
 1. Before editing, leave nothing pending: `slipmesh-taloscfg generate --diff` prints no change to a
    patch file, and `slipmesh-routeros --node <name> --check --diff` plans none on its device.
-   Whatever shows later then comes from the conversion.
+   Whatever shows later then comes from the conversion. The patch files these tools leave are the
+   ones the last release that reads version 1 gives: keep them, for a rollback and for step 6 to be
+   compared against.
 2. Move what the file's comments say to where it will be kept: the first write by `slipmesh` drops
    them.
 3. Have the pools and the lists written out as resources of the cluster, as
@@ -149,9 +153,7 @@ networks: what else step 6 shows comes from the conversion.
       `enable` was `false` or absent, delete the block. `classes.egress.protocol` is
       `cluster.route_proto_id.egress`, which a file that passes step 1 always has.
    4. Write `mesh`: `interface_prefix` is `cluster.interface_prefix.mesh`, `mtu` is
-      `cluster.mesh_mtu`, and `amneziawg.obfuscation` is the network's `obfuscation`. To keep the
-      keepalive of the links of type `amneziawg` where it was, write
-      `amneziawg.persistent_keepalive: 25`.
+      `cluster.mesh_mtu`, and `amneziawg.obfuscation` is the network's `obfuscation`.
    5. Move `awg_metrics_port` and `router_metrics_port` into a new `platform` document for `talos`,
       as `metrics.mesh.port` and `metrics.router.port`. Delete `cluster`.
    6. Turn `nodes` into a mapping: each node's `name` becomes its key. A name outside [the
@@ -200,22 +202,27 @@ networks: what else step 6 shows comes from the conversion.
    out moves it to the end, and the node's routing configuration changes with it.
 5. Run `slipmesh check`. It parses every document strictly, but the text of a `template` and the
    body of a `patch`, which the generator checks, and it checks every node's configs.
-6. Run the two commands of step 1 again, with the tools built on v0.20.0 or later. They show these
-   differences and no other:
+6. Run the two commands of step 1 again, with the tools built on v0.20.0 or later, and compare the
+   patch files with the ones kept. Nothing of the mesh changes of itself: not the addresses, the
+   keys, the link-local addresses of the tunnels, the MTU, OSPF, BFD or the iBGP sessions to the
+   routers. The differences are of two kinds, and of no other.
+
+   What version 2 does not carry over, as [What leaves the file](#what-leaves-the-file) says:
    - in the patch file of every `talos` node, the `awg` config holds no pool interfaces,
      `router.yaml` holds no `bypass`, and its `announce` holds no label, so the node's routing
-     configuration loses the comment the label made;
+     configuration loses the comment the label made.
+
+   What step 4 changed on purpose:
    - a node given `learn: []` in step 4.8 no longer announces what it held inside the pod range,
      and one given `announce: []` no longer announces the service range;
    - where a node's endpoint had a port or the brackets of an IPv6 address, its annotation
      `slipmesh.net/endpoint` carries the bare address or name; where that port differed from the
      link's `port`, every peer's endpoint for that node, in the `awg` config and on a RouterOS peer;
    - where step 4.2 changed a network, the addresses derived from it;
-   - unless step 4.4 wrote `persistent_keepalive: 25`, the keepalive of every link of type
-     `amneziawg` is `20-30` where it was 25;
    - where a node was renamed in step 4.6, the interfaces named after it, and what refers to them.
 
-   Anything else is a mistake in the conversion. The generator no longer writes a patch file for a
-   node of another platform, which never used it: delete the one version 1 left.
+   Any other difference is an error in the conversion, or in this document: do not roll out until
+   it is explained. The generator no longer writes a patch file for a node of another platform,
+   which never used it: delete the one version 1 left.
 7. Run `slipmesh mint`, which writes nothing where nothing is missing, then `slipmesh fmt` on each
    file, and commit that rewrite on its own.

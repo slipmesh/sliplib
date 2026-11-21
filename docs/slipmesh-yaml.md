@@ -114,7 +114,11 @@ It is used in three places:
   `null` at any depth of it, a key of the block or a field of its `obfuscation`, takes the
   network's value away for that link, whichever document it is written in: it is how a link drops
   one field of `mesh.amneziawg.obfuscation`. A `null` at a field `slipmesh mint` writes leaves the
-  link without it, and the link is refused as any link that lacks the field is.
+  link without it, and the link is refused as any link that lacks the field is; `slipmesh mint`
+  then writes that field over the `null`, as it writes into any link that lacks it once the
+  defaults are laid under. Where the link's whole `obfuscation` is `null`, which takes away every
+  field laid under it, `mint` writes the fields it mints and a `null` at each other field of
+  `mesh.amneziawg.obfuscation`, so the link goes without those still.
 
 Every key of these two places takes `null`, besides the type its table gives.
 
@@ -140,7 +144,8 @@ slipmesh:
 `version` is the syntax of the format as a whole, 2 in this document. It changes only when the
 syntax is replaced, which means converting every file. A `network` document without `version` is
 version 1, which [Converting a file by hand](slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand)
-turns into version 2. A tool refuses it, and a `version` below 2 or `null`, naming that document.
+turns into version 2. A tool refuses it, and a `version` below 2 or `null`, naming that document and
+pointing at that conversion.
 
 `revision` is the generation of the rules that turn the files into configs. It grows when the same
 data has to give a different result, for instance when what a document configures on a node passes
@@ -202,8 +207,9 @@ Only `template` and `patch` take the two keys, both optional. The other kinds ar
 particular, and there the keys are an error.
 
 A document written in the terms of one platform names it with `platform`, one value: a
-[platform of the nodes](#who-serves-a-document). Its `all`, written as the word or as a list of it
-alone, is every node of that platform. With any other `include`, every node it is left reaching
+[platform of the nodes](#who-serves-a-document). Its `all`, wherever it stands in its own `include`
+or `exclude`, is every node of that platform: `include: [all, node-a]` is those nodes and
+`node-a`, and `exclude: [all]` takes them all back out. Every node the document is left reaching
 once `exclude` is taken out has to be of that platform, and a node of another makes the document an
 error, not something passed over. Inside a group there is no platform, and `all` there is every
 node: a group that names it holds nodes of every platform, and makes such a document an error in
@@ -272,7 +278,7 @@ These keys default to a value, each with one consumer chain and nothing to agree
 | `order` of a `slipmesh:` block | `1000` | the place of every document that does not set one |
 | `addressing.tunnel.link_local` | `fe80::/64` | the link-local prefix of every interface |
 | `nodes.<name>.underlay.<entry>.mtu` | `1500` | the MTU of Ethernet |
-| `mesh.<type>.persistent_keepalive` and a link's own | `25` on `wireguard`, `20-30` on `amneziawg` | the interval version 1 sends, on `amneziawg` drawn around it at each timer |
+| `mesh.<type>.persistent_keepalive` and a link's own | `25` on `wireguard`, `20-30` on `amneziawg` | the interval WireGuard's own tools suggest behind a NAT, on `amneziawg` drawn around it at each timer |
 | `routing.bfd.min_rx_ms`, `min_tx_ms`, `multiplier` | `300`, `300`, `5` | a link is a tunnel, some of them long: detection in about 1.5 s, where a tighter timer would flap |
 
 For an absent required key `slipmesh mint` may write a *reference value*: the value a network takes
@@ -502,7 +508,10 @@ A host name says no family, so the key says it. A peer dials the first address t
 returns, and a `routeros` device resolves the name itself, so a name with addresses of both
 families has to resolve to the family of its key first, or the links carry an MTU counted for the
 other family's header. `endpoint` takes no port, since each link adds its own; one written with a
-port is refused.
+port is refused. A host name is as [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) has it:
+labels of letters, digits and `-` joined by dots, no label empty, longer than 63 bytes or starting
+or ending with `-`, the whole at most 253 bytes, and the last label not all digits. Anything that
+is neither such a name nor an IP address is refused.
 
 An entry without `endpoint` is a node behind NAT or without a fixed address. It is never dialed: it
 dials the other end of each of its links.
@@ -649,7 +658,9 @@ mesh:
 `0` switches it off. From a range the kernel module draws an interval each time it sets the timer;
 a range starts at 1 or above, since a draw of 0 would send at once. An end sends the keepalive to a
 peer it dials, one whose `underlay` has an `endpoint`; an end that only waits to be dialed sends
-none. `talos` serves it on both types, and `routeros` on `wireguard`, the one type it serves.
+none. `talos` serves it on both types, and `routeros` on `wireguard`, the one type it serves. An
+`awg` daemon older than the one that takes a peer's keepalive from its config entry sends 25 to
+every peer it dials, whatever the file says.
 
 It is not `keepalive_timeout` of the obfuscation: that one is how long the module waits, once data
 came in, before it answers with an empty packet.
@@ -821,7 +832,8 @@ between. With the default `fe80::/64`, a `node_id` of `0.0.0.5` gives `fe80::5`.
 A network that leaves fewer than 32 bits free takes only the low bits of `node_id`, so those bits
 have to differ between nodes: two nodes with the same derived address on the links, link-local or
 IPv4, are refused, across the whole network and not only between the ends of one link. Unlike the
-IPv6 loopback, `link_local` may be longer than /96.
+IPv6 loopback, `link_local` may be longer than /96. Every node has one, a node on no link
+too, and such a node is refused for a duplicate or for a host part of zeros as any other.
 
 **A host part of zeros.** An address whose host part is all zeros is refused only where the prefix
 it stands with on its interface makes it special. On an IPv4 prefix shorter than /31 the host part
@@ -858,6 +870,15 @@ dialed over IPv6 and with no `s4`, give 1420. The MTU of the mesh is the least o
 links, whatever their type. `mesh.mtu` lowers it, and one above it is refused. A result below 1280,
 the least IPv6 allows a link, is an error, and so is a `mesh.mtu` with no links, which has no
 interface to give it to.
+
+Two refusals name the node and the key of the underlay `mtu` that causes them, such as
+`underlay.wan.mtu`:
+
+- An underlay `mtu` of either end below the least the family the link is dialed over allows a link:
+  68 for IPv4 ([RFC 791, section 3.1](https://www.rfc-editor.org/rfc/rfc791#section-3.1)), 1280 for
+  IPv6 ([RFC 8200, section 5](https://www.rfc-editor.org/rfc/rfc8200#section-5)).
+- An underlay `mtu` of the narrower end that the bytes the link adds, `32 + 8 + IP + S4` of the
+  formula above, reach or exceed: no room is left for a packet.
 
 ## `groups`
 
