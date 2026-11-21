@@ -31,14 +31,10 @@ pub(crate) fn ipv6_in(network: Ipv6Addr, prefix_len: u8, node_id: Ipv4Addr) -> I
     Ipv6Addr::from((u128::from(network) & mask) | (host & !mask))
 }
 
-/// `host`, `host:port`, an IP address, or a bracketed IPv6 with or without a port, as an
-/// endpoint to dial - `port` filling in a missing one.
+/// A host name or an IP address with `port`, as an endpoint to dial: an IPv6 address in brackets.
 pub fn endpoint(endpoint: &str, port: u16) -> String {
-    if let Ok(IpAddr::V6(v6)) = endpoint.parse() {
-        return format!("[{v6}]:{port}");
-    }
-    match endpoint.rsplit_once(':') {
-        Some((_, given)) if given.parse::<u16>().is_ok() => endpoint.to_owned(),
+    match endpoint.parse() {
+        Ok(IpAddr::V6(v6)) => format!("[{v6}]:{port}"),
         _ => format!("{endpoint}:{port}"),
     }
 }
@@ -99,24 +95,12 @@ mod tests {
     }
 
     #[test]
-    fn an_endpoint_keeps_its_own_port_and_takes_the_given_one_otherwise() {
-        assert_eq!(
-            endpoint("node-a.example.com:51821", 51820),
-            "node-a.example.com:51821"
-        );
+    fn an_endpoint_takes_the_port_and_an_ipv6_address_its_brackets() {
         assert_eq!(
             endpoint("node-a.example.com", 51820),
             "node-a.example.com:51820"
         );
-        assert_eq!(
-            endpoint("node-a.example.com:x", 51820),
-            "node-a.example.com:x:51820"
-        );
-        assert_eq!(endpoint("192.0.2.10:51821", 51820), "192.0.2.10:51821");
+        assert_eq!(endpoint("192.0.2.10", 51820), "192.0.2.10:51820");
         assert_eq!(endpoint("2001:db8::10", 51820), "[2001:db8::10]:51820");
-        assert_eq!(
-            endpoint("[2001:db8::10]:51821", 51820),
-            "[2001:db8::10]:51821"
-        );
     }
 }

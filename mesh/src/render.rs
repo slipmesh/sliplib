@@ -37,12 +37,6 @@ pub enum Error {
         #[source]
         source: ObfuscationError,
     },
-    #[error("rendering router config for node {node:?}")]
-    RenderingRouter {
-        node: String,
-        #[source]
-        source: RenderError,
-    },
     #[error("rendered router config for node {node:?} is invalid")]
     InvalidRouter {
         node: String,
@@ -75,11 +69,9 @@ pub enum RenderError {
     UnknownNode(#[from] UnknownNode),
     #[error(transparent)]
     Mtu(#[from] MtuError),
-    #[error("node {node:?}: {key}")]
+    #[error("node {node:?}: {PRIVATE_KEY}")]
     Key {
         node: String,
-        /// How the files name a node's private key.
-        key: &'static str,
         #[source]
         source: KeyError,
     },
@@ -109,15 +101,14 @@ fn mesh_glob(mesh: &Network) -> String {
     format!("{}*", mesh.interface_prefix)
 }
 
-pub(crate) fn render_router_config(mesh: &Network, node_name: &str) -> Result<RouterConfig> {
-    let node = mesh.node(node_name)?;
+pub(crate) fn render_router_config(mesh: &Network, node: &Node) -> RouterConfig {
     let (v4, v6) = node.loopback;
-    Ok(RouterConfig {
+    RouterConfig {
         node: NodeIdentity {
             loopback_addresses: vec![format!("{v4}/32"), format!("{v6}/128")],
         },
         bgp_as: mesh.bgp_as,
-        bgp_peers: bgp_peers_for(mesh, node_name),
+        bgp_peers: bgp_peers_for(mesh, &node.name),
         bfd: mesh.bfd.clone(),
         ospf_interfaces: ospf_interfaces(mesh),
         direct_interfaces: node.direct_interfaces.clone(),
@@ -125,13 +116,12 @@ pub(crate) fn render_router_config(mesh: &Network, node_name: &str) -> Result<Ro
         announce: node.announce.clone(),
         bypass: None,
         metrics: metrics_for(node, mesh.metrics.router),
-    })
+    }
 }
 
-fn key_of(node: &str, key: &'static str) -> impl Fn(KeyError) -> RenderError {
+fn key_of(node: &str) -> impl Fn(KeyError) -> RenderError {
     move |source| RenderError::Key {
         node: node.to_owned(),
-        key,
         source,
     }
 }
@@ -145,17 +135,14 @@ fn mesh_interfaces_for(
     resolved: &ResolvedSecrets,
 ) -> Result<Vec<InterfaceEntry>> {
     let node = mesh.node(node_name)?;
-    let key = PRIVATE_KEY;
     let own_private_key = resolved.mesh_private_keys.get(node_name);
     if own_private_key.is_none() && mesh.needs_a_key(node_name) {
-        return Err(MissingSecret(format!("node {node_name:?}: {key} is not set")).into());
+        return Err(MissingSecret(format!("node {node_name:?}: {PRIVATE_KEY} is not set")).into());
     }
     // Decoded for every node, whether or not a link uses its key: where one does, the daemon
     // would otherwise be the first to decode it, and refuse a config it is already running on.
     if let Some(own_private_key) = own_private_key {
-        own_private_key
-            .public_key()
-            .map_err(key_of(node_name, key))?;
+        own_private_key.public_key().map_err(key_of(node_name))?;
     }
 
     // Before the node's links: what refuses the MTU of the mesh stops a node on no link too.
@@ -174,10 +161,9 @@ fn mesh_interfaces_for(
             continue;
         };
         let peer_node = mesh.node(peer_name)?;
-        let peer_private_key = resolved
-            .mesh_private_keys
-            .get(peer_name)
-            .ok_or_else(|| MissingSecret(format!("node {peer_name:?}: {key} is not set")))?;
+        let peer_private_key = resolved.mesh_private_keys.get(peer_name).ok_or_else(|| {
+            MissingSecret(format!("node {peer_name:?}: {PRIVATE_KEY} is not set"))
+        })?;
         let obfuscation = minted_obfuscation(
             resolved.mesh_link_obfuscation.get(&link_key(&link.ends)),
             link.plain,
@@ -198,9 +184,7 @@ fn mesh_interfaces_for(
             handshake_stale_secs: None,
             mtu,
             peers: vec![PeerEntry {
-                public_key: peer_private_key
-                    .public_key()
-                    .map_err(key_of(peer_name, key))?,
+                public_key: peer_private_key.public_key().map_err(key_of(peer_name))?,
                 name: Some(peer_name.clone()),
                 endpoint: peer_node
                     .endpoint
@@ -247,6 +231,11 @@ pub fn node_configs(
     resolved: &ResolvedSecrets,
 ) -> std::result::Result<NodeConfigs, Error> {
     let node = || host.to_owned();
+    // Refused as the `awg` config, computed first, refuses a node it does not know.
+    let found = model.node(host).map_err(|source| Error::RenderingAwg {
+        node: node(),
+        source: source.into(),
+    })?;
     let awg_cfg =
         render_awg_config(model, host, resolved).map_err(|source| Error::RenderingAwg {
             node: node(),
@@ -268,11 +257,7 @@ pub fn node_configs(
                 source,
             })?;
     }
-    let router_cfg =
-        render_router_config(model, host).map_err(|source| Error::RenderingRouter {
-            node: node(),
-            source,
-        })?;
+    let router_cfg = render_router_config(model, found);
     sliplib_config::router::validate(&router_cfg).map_err(|source| Error::InvalidRouter {
         node: node(),
         source,
@@ -399,7 +384,7 @@ mod tests {
         );
         assert_eq!(
             configs.router,
-            super::render_router_config(&network, "node-a").unwrap()
+            super::render_router_config(&network, network.node("node-a").unwrap())
         );
     }
 

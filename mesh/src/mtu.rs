@@ -29,17 +29,12 @@ pub enum MtuError {
         #[source]
         source: LinkError,
     },
-    #[error("{key} is set, but the mesh has no link to give it to")]
-    NoLink { key: &'static str },
-    #[error("{key} {mtu} is above {limit}, the limit of mesh link {link}")]
-    AboveLimit {
-        key: &'static str,
-        mtu: u32,
-        limit: u32,
-        link: String,
-    },
-    #[error("{key} {mtu} is below {MIN_MESH_MTU}, the least IPv6 allows a link")]
-    BelowMinimum { key: &'static str, mtu: u32 },
+    #[error("mesh.mtu is set, but the mesh has no link to give it to")]
+    NoLink,
+    #[error("mesh.mtu {mtu} is above {limit}, the limit of mesh link {link}")]
+    AboveLimit { mtu: u32, limit: u32, link: String },
+    #[error("mesh.mtu {mtu} is below {MIN_MESH_MTU}, the least IPv6 allows a link")]
+    BelowMinimum { mtu: u32 },
     #[error(
         "mesh link {link} limits the mesh MTU to {limit}, below {MIN_MESH_MTU}, the least IPv6 allows a link"
     )]
@@ -83,7 +78,6 @@ pub enum LinkError {
 /// else the least link limit. None for a mesh without links, which has no mesh interface to give
 /// it to.
 pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32>, MtuError> {
-    let key = "mesh.mtu";
     let mut least: Option<(u32, &Link)> = None;
     for link in &mesh.links {
         let limit = link_limit(mesh, link, resolved).map_err(|source| MtuError::Link {
@@ -96,7 +90,7 @@ pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32
     }
     let Some((limit, link)) = least else {
         if mesh.mtu.is_some() {
-            return Err(MtuError::NoLink { key });
+            return Err(MtuError::NoLink);
         }
         return Ok(None);
     };
@@ -104,14 +98,13 @@ pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32
         Some(mtu) => {
             if mtu > limit {
                 return Err(MtuError::AboveLimit {
-                    key,
                     mtu,
                     limit,
                     link: link.name.clone(),
                 });
             }
             if mtu < MIN_MESH_MTU {
-                return Err(MtuError::BelowMinimum { key, mtu });
+                return Err(MtuError::BelowMinimum { mtu });
             }
             mtu
         }
@@ -314,7 +307,7 @@ mod tests {
         assert_eq!(mtu_of(AT_V4, UNDIALED, WIREGUARD, ", mtu: 1440"), 1440);
         let above = refusal_of(AT_V4, UNDIALED, WIREGUARD, ", mtu: 1441");
         assert!(
-            matches!(&above, MtuError::AboveLimit { key: "mesh.mtu", mtu: 1441, limit: 1440, link }
+            matches!(&above, MtuError::AboveLimit { mtu: 1441, limit: 1440, link }
                 if link == "a-b"),
             "{above:?}"
         );
@@ -330,13 +323,7 @@ mod tests {
         );
         let set = refusal_of(AT_V4, UNDIALED, WIREGUARD, ", mtu: 1279");
         assert!(
-            matches!(
-                set,
-                MtuError::BelowMinimum {
-                    key: "mesh.mtu",
-                    mtu: 1279
-                }
-            ),
+            matches!(set, MtuError::BelowMinimum { mtu: 1279 }),
             "{set:?}"
         );
     }
@@ -351,10 +338,7 @@ mod tests {
         };
         assert_eq!(of(&unlinked("")).unwrap(), None);
         let refusal = of(&unlinked(", mtu: 1400")).unwrap_err();
-        assert!(
-            matches!(refusal, MtuError::NoLink { key: "mesh.mtu" }),
-            "{refusal:?}"
-        );
+        assert!(matches!(refusal, MtuError::NoLink), "{refusal:?}");
     }
 
     #[test]
@@ -396,7 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn across_the_grid_a_full_size_packet_of_version_2_fits_and_one_byte_more_does_not() {
+    fn across_the_grid_a_full_size_packet_fits_and_one_byte_more_does_not() {
         for s4 in [0, 12, 20, 89, 150] {
             for underlay in [1400, 1460, 1500, 9000] {
                 for (endpoint, ip) in [("ipv4: 192.0.2.10", 20), ("ipv6: '2001:db8::10'", 40)] {

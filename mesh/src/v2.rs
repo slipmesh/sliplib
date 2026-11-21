@@ -544,7 +544,7 @@ mod tests {
         );
         let mesh = mtu_refusal("{mesh: {mtu: 0}}");
         assert!(
-            matches!(mesh, MtuError::BelowMinimum { key, mtu: 0 } if key == "mesh.mtu"),
+            matches!(mesh, MtuError::BelowMinimum { mtu: 0 }),
             "{mesh:?}"
         );
     }
@@ -679,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_names_the_keys_as_version_2_writes_them() {
+    fn a_refusal_names_the_keys_as_the_files_write_them() {
         let keyless = lowered("{nodes: {node-b: {wireguard: null}}}");
         let refusal = refused(&keyless, "node-a");
         let missing = refusal.missing_secret().map(ToString::to_string);
@@ -692,9 +692,12 @@ mod tests {
             matches!(
                 &above,
                 crate::render::Error::RenderingAwg {
-                    source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit { key, mtu: 9000, .. }),
+                    source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit {
+                        mtu: 9000,
+                        ..
+                    }),
                     ..
-                } if *key == "mesh.mtu"
+                }
             ),
             "{above:?}"
         );
