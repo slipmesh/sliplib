@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.20.0] - 2026-11-21
+
+### Breaking changes 💥
+
+- Compute a node's configs from one model of the network, from files of either version (#70)
+- Read only files of format version 2 (#73)
+
+### Added ✨
+
+- Read the names, the blocks and the groups of format version 2 (#63)
+- Read the network and the platform documents of format version 2 (#66)
+- Read the files of format version 2 as a whole (#67)
+- Check, mint, rekey and fmt a file of format version 2 (#71)
+
+### Build system 🛠️
+
+- Raise the minor version for a breaking change before 1.0 (#61)
+- Update rust crate clap to 4.6.9 (main) (#68)
+- Update rust crate nix to 0.32.0 (main) (#69)
+
+### CI/CD ⚙️
+
+- Move the shared workflows to v4.0.2 (#62)
+
+### Tests ✅
+
+- Send the test's SIGTERM through nix, not a kill process (#65)
+- Pin on format version 2 what only version 1 pinned (#72)
+
 ## [0.19.0] - 2026-11-18
 
 ### Breaking changes 💥
