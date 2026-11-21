@@ -1,7 +1,7 @@
-# The network of ../v1-alternate converted to format version 2 by hand, as
-# docs/slipmesh-yaml-v1-to-v2.md says: the test beside it shows that every node gets what it got
-# from the file of version 1, but for what that document lists. The pool and the bypass list of
-# ../v1-alternate have no place here.
+# A network of format version 1 converted to version 2 by hand, as docs/slipmesh-yaml-v1-to-v2.md
+# says. ../v1-alternate holds the configs version 1 gave its nodes, and the test beside it shows
+# that every node gets them, but for what that document lists. The pool and the bypass list of the
+# file of version 1 have no place here.
 #
 # Every network and address is from a range reserved for documentation; a node_id is an identity,
 # not an address. Every name stands for nothing and every key is one letter repeated.
@@ -31,7 +31,7 @@ mesh:
       amneziawg:
         port: 51830
         obfuscation: {jc: 4, jmin: 40, jmax: 400, s1: 64, s2: 48, h1: 1101, h2: 2202, h3: 3303, h4: 4404}
-    # ../v1-alternate marked it `plain` and gave it an obfuscation, which reached nothing.
+    # The file of version 1 marked it `plain` and gave it an obfuscation, which reached nothing.
     west-south:
       type: wireguard
       ends: {west: {}, south: {}}

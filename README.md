@@ -20,14 +20,16 @@ the tag for all of them; for a consumer of another crate that update changes not
 
 `slipmesh` works on `slipmesh.yaml` whatever platform its nodes run, and is the one tool that
 writes into it: the tools that configure a node only read the file. It takes the file as plain
-text: a file kept encrypted is decrypted by whatever runs the tool.
+text: a file kept encrypted is decrypted by whatever runs the tool. It reads [format version
+2](docs/slipmesh-yaml.md), in one file given with `--config`, and refuses a file of version 1,
+which [the conversion document](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand) turns
+into version 2.
 
 ```bash
 slipmesh check --config slipmesh.yaml
 slipmesh mint --config slipmesh.yaml
 slipmesh fmt --config slipmesh.yaml
 slipmesh rekey --node node-a --config slipmesh.yaml
-slipmesh rw add --if plain --name laptop --allowed-ips 203.0.113.5/32 --export --config slipmesh.yaml
 ```
 
 `--config` is `slipmesh.yaml` of the working directory unless given. A command that writes
@@ -54,9 +56,10 @@ refused. What the loader refuses is one refusal for the whole file, with no node
 when it concerns one node - a `node_id` that is not an address, two links on one port. It writes
 nothing.
 
-It also refuses a file that leaves `cluster.interface_prefix.mesh` or
-`cluster.route_proto_id.egress` to its default, and still checks its nodes: a tool that publishes
-them to the nodes takes them only as written. A refusal that `mint` cures says so.
+What leaves no network to compute from is one refusal for the file as well: two nodes that get one
+address, or a file without `mesh.interface_prefix`, naming `mint`, which writes it. It reads the
+settings of each platform and the keys of each `template`, refuses each of those that does not
+read, and still checks the nodes. A refusal that `mint` cures says so.
 
 Where nothing was refused, it then prints a warning, on a line that starts with `warning:`, for
 every link that loses data packets it should deliver. A warning refuses nothing and leaves the
@@ -64,40 +67,40 @@ exit code as it is. There are two, both for a link with `random_trailers` on: on
 is a range, with the share of data packets dropped at most where the bytes read are random; and
 the link has no `header_protection_key` while one of `s1` to `s3` stands 1 to 15 bytes above `s4`.
 A file with a refusal gets none: what a link loses is counted from settings that pass the checks.
-A pool gets none either, whatever its obfuscation: the warnings are of the links.
 
 What only one platform's tool knows is that tool's own check - the Talos generator's `--check`
-for the templates and patches of a Talos node.
+for the text of a template and the body of a `patch` of a Talos node.
 
 ### `mint`
 
 Keys cannot be derived, so `mint` creates them once and writes them into the fields an operator
-would otherwise fill in by hand: `nodes[].mesh_private_key`, a pool document's `private_key`, and
-the fields `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4` of the `obfuscation` of a link or pool
-that leaves them unset. A `plain` link or pool gets no obfuscation. It writes the defaults of
-`cluster.interface_prefix.mesh` (`mesh-`) and `cluster.route_proto_id.egress` (`152`) where the
-file leaves them out, and prints each entry it wrote into - `nodes[node-a].mesh_private_key`,
-`mesh.links[node-a|node-b].obfuscation` - never a value.
+would otherwise fill in by hand: the `wireguard.private_key` of every node on a link, and the
+fields `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4` of the `obfuscation` of every link of type
+`amneziawg` that leaves them unset, once `mesh.amneziawg.obfuscation` is laid under its own. A
+link of type `wireguard` gets no obfuscation, and a node on no link no key. It writes the reference
+value of `mesh.interface_prefix`, `mesh-`, where the file leaves it out, and prints each entry it
+wrote into - `nodes.node-a.wireguard.private_key`, `mesh.links.a-b.amneziawg.obfuscation` - never a
+value.
 
-A magic header is created outside every header the link or pool already holds, its own and the
-ones the network's `obfuscation` gives it. When those leave fewer values than the headers it lacks,
-`mint` writes nothing and names the entry, `mesh.links[node-a|node-b].obfuscation`: narrow the
-ranges written for it or for the network, or write all four of its headers.
+A magic header is created outside every header the link already holds, its own and the ones its
+type's obfuscation gives it. When those leave fewer values than the headers it lacks, `mint` writes
+nothing and names the entry, `mesh.links.a-b.amneziawg.obfuscation`: narrow the ranges written for
+it or for its type, or write all four of its headers.
 
-`s1` and `s2` are created so that neither stands 1 to 15 bytes above the `s4` the link or pool
-holds, its own or the network's: such an offset is what [`check`](#check) warns about on a link
+`s1` and `s2` are created so that neither stands 1 to 15 bytes above the `s4` the link holds, its
+own or its type's: such an offset is what [`check`](#check) warns about on a link
 with `random_trailers` on and no `header_protection_key`, and either can be switched after the
 offsets are written. They are also created so that `s2` is not `s1` + 56, which would give the
-two handshake messages one length, whichever of the two the link or pool already holds.
+two handshake messages one length, whichever of the two the link already holds.
 
 Before it writes, `mint` checks every node on the file as it would become, as `check` does, and
 writes nothing when one would be refused: a value that is written is never minted again. Where a
 setting of the file's own narrows what fits beside it, a further run draws again.
 
 Written, a value is the operator's like any other: `mint` never replaces one, and deleting one
-gives that node, link or pool a new identity on the next run, and every peer of it a config that
-changes with it. Only what was created is written: a field set on the entry or in the global
-`obfuscation` is not copied down.
+gives that node or link a new identity on the next run, and every peer of it a config that changes
+with it. Only what was created is written: a field set on the link or on its type is not copied
+down.
 
 The file holds private keys in the clear; keep it where such files are kept.
 
@@ -107,79 +110,17 @@ The file holds private keys in the clear; keep it where such files are kept.
 reads the text it is about to write and refuses to write it if any document's values differ from
 the file's. What a hand-written file loses is its layout, its comments outside block scalars, its
 documents that hold nothing - only comments, empty, or `~` - and the link between an anchor and its
-aliases, each of which becomes a copy. Committed on its own, that rewrite keeps a later `rekey` or
-`rw add` down to the lines it edits. A file already in that form is not touched, and one that does
+aliases, each of which becomes a copy. Committed on its own, that rewrite keeps a later `mint` or
+`rekey` down to the lines it edits. A file already in that form is not touched, and one that does
 not read is refused as it is. One line says whether the file was rewritten.
 
 ### `rekey`
 
-`rekey --node <name>` gives one node a new mesh key, whether or not it had one. Every peer of the
-node dials it by the public half of that key, so the config of each of them changes with it and
-has to reach its node in the same pass.
-
-### `rw add`, `rw del`, `rw inspect`
-
-The clients of a roadwarriors pool, each in the pool's own document. `--if` names the pool,
-`--name` the client:
-
-```bash
-slipmesh rw add --if plain --name laptop --allowed-ips 203.0.113.5/32 --export --qr
-slipmesh rw inspect --if plain --name laptop --qr
-slipmesh rw del --if plain --name laptop
-```
-
-`rw add` generates the client's key pair, writes the public half into the pool and prints a
-ready-to-import config with `--export`, a QR code of it in the terminal with `--qr`; `--invert`
-swaps the code's dark and light for a terminal theme whose polarity a scanner refuses. A generated
-private key goes into that config, or with `--keep-private` into the file, and nowhere else: with
-none of `--export`, `--qr` and `--keep-private` the key would be lost, and `rw add` refuses to
-generate one. `--public-key` registers a client that has its own key pair. `--allowed-ips` takes
-networks separated by commas; an address without a prefix length is that one host.
-
-With `--keep-private` the entry holds the private key in place of the public one, never both, and
-`rw inspect` renders the config in full from it. Without it, `rw inspect` leaves a placeholder for
-the key unless `--private-key` gives it back, and refuses one that is not the client's. `rw
-inspect` prints the config when neither `--export` nor `--qr` is given, and writes nothing.
-
-A pool whose key or obfuscation is not written takes no client and shows none: `rw add` and
-`rw inspect` refuse it, whatever else they were asked for, until `mint` has written them. Only that
-pool's secrets matter to them. `rw add` creates nothing but the client's key pair. Both refuse a
-pool whose obfuscation the kernel module would refuse, with what a `check` of its node says.
-
-The config carries what the pool and its clients have to share - `S1` to `S4`, `H1` to `H4`, and
-`HeaderProtectionKey` and `RandomTrailers` when the pool sets them - and `Jc`, `Jmin`, `Jmax` for
-the client's own handshakes. A client has to be new enough for what the pool sets: `amneziawg-tools`
-reads `S3` and `S4` from its 2025 releases of 1.0 on, a header written as a range and the header
-protection key from 3.0 on, and the trailer switch from 3.1 on; an application with a parser of its
-own may differ. An older client cannot be given such a pool. The header protection key is the same
-in every client's config of a pool, so it is as secret as all of them together.
-
-The config's `Endpoint` is the first of the pool's `node_hostnames`, with the pool's
-`listen_port`. `--endpoint` picks another of them, or names anything else - a DNS name in front of
-the pool, say - taken as written, with the pool's port when it carries none. Its `DNS` is the
-pool's `dns`, else address 10 of `cluster.service_subnet`, else absent.
-
-### A file of format version 2
-
-The sections above describe a file of version 1, the one whose `network` document says no
-`version`. [Version 2](docs/slipmesh-yaml.md) is read by the same commands, each still on one
-file given with `--config`:
-
-- `check` refuses once for the file what the loader refuses and what leaves no network to compute
-  from: two nodes that get one address, or a file without `mesh.interface_prefix`, naming `mint`.
-  It reads the settings of each platform and the keys of each `template`, refuses those that do
-  not read, and still checks the nodes. The text of a template and the body of a `patch` are for
-  the Talos generator's `--check`.
-- `mint` writes the reference value of `mesh.interface_prefix`, `mesh-`, where the file leaves it
-  out, a `wireguard.private_key` for every node on a link, and the same nine fields into the
-  `obfuscation` of every link of type `amneziawg`, once `mesh.amneziawg.obfuscation` is laid under
-  its own. It names what it wrote as `nodes.node-a.wireguard.private_key` and
-  `mesh.links.a-b.amneziawg.obfuscation`.
-- `rekey` replaces a node's `wireguard.private_key`, writing its `wireguard` block where the node
-  has none. It refuses a node on no link, which nothing dials, and checks, as `mint` does, that the
-  file with the new key still gives a network before it writes it.
-- `fmt` rewrites the file as it does one of version 1.
-- The `rw` commands refuse the file: version 2 holds no pools.
+`rekey --node <name>` gives one node a new `wireguard.private_key`, whether or not it had one,
+writing its `wireguard` block where the node has none. Every peer of the node dials it by the
+public half of that key, so the config of each of them changes with it and has to reach its node in
+the same pass. It refuses a node on no link, which nothing dials, and checks, as `mint` does, that
+the file with the new key still gives a network before it writes it.
 
 ### Installing
 
@@ -248,33 +189,18 @@ for a node from it, and what its readers take - the daemons on the node, and the
 Types and their checks only; reading and writing the files is `sliplib-yaml`'s.
 
 Every check and the loader return an error type of their own, one variant for each refusal:
-`slipmesh_file::Error`, `v1::slipmesh_file::Error`, `v1::mesh_config::Invalid` and `UnknownNode`,
 `v2::Error`, `v2::Invalid`, `v2::NameError` and those of `v2::groups`, `v2::network` and
 `v2::platform`, `awg::Invalid`, `router::Invalid` and `LoopbackAddressError`, `ObfuscationError`,
-`MetricsError`. A variant's text
-is one line of the refusal. Where that line names its cause itself - an address that does not
-parse, with why - the variant holds the cause as a field and has no `source`; where the cause is a
-line of its own, it is the variant's `source`. A variant never does both, so printing the whole
-chain gives the whole message, each part once.
+`MetricsError`. A variant's text is one line of the refusal. Where that line names its cause
+itself - an address that does not parse, with why - the variant holds the cause as a field and has
+no `source`; where the cause is a line of its own, it is the variant's `source`. A variant never
+does both, so printing the whole chain gives the whole message, each part once.
 
-- `slipmesh_file::SlipmeshFile` reads `slipmesh.yaml` of either version (`parse`, `read`): a file
-  whose `network` document says no `version` with the reader of version 1, a `version` of 2 or
-  more with that of version 2. It refuses a `version` below 2 or `null`, saying to take the key
-  out, and a text that is not YAML; any other refusal is the reader's own.
-- `v1::slipmesh_file`: `SlipmeshFile` reads `slipmesh.yaml` from its text (`parse`) or from a
-  `MultiDoc` (`read`): the `slipmesh:` block of every document, the one `network` document, one pool per
-  `roadwarriors` document, and `patch` documents aimed at hosts by `include`/`exclude`. It gives the
-  hosts in order, the topology, and the `patch` documents as written: all of them (`patches`) or
-  those that reach one host (`patches_for`), in the order of the file. A `Patch` gives its
-  document, its `rank` among the documents that reach the same host, and reads as where it stands
-  in the file. What a `patch` holds is for the tool of its platform to read and merge.
-- `v1::mesh_config`: the topology - `MeshConfig` with its cluster settings, nodes, mesh links,
-  roadwarriors pools and bypass entries - and `validate`, the checks across them.
-  `missing_defaults` lists the network settings the topology leaves to a default that a node is
-  told, each with that default.
 - `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md).
   `v2::File` reads the files as a whole (`parse`, `read`) and refuses whatever its specification
-  has the loader refuse, as `v2::Error`. `missing_reference_values` lists the required keys the
+  has the loader refuse, as `v2::Error`. Among them are a text that is not YAML, and a `network`
+  document whose `version` is missing, below 2 or `null`: such files are of version 1, refused as
+  `VersionOne`, naming the document that converts them. `missing_reference_values` lists the required keys the
   files lack that `slipmesh mint` writes, and `network_document` says where the network stands
   in the file, for a write. It gives the `network` with what is in force for each
   node and each link written where they hold their own: a node's `routing`, a link's block of its
@@ -313,37 +239,29 @@ every tool that configures a node of any platform.
 
 A refusal is a `render::Error`, which names the node and which of its configs it is about, with
 its cause as its `source`, or an `mtu::MtuError`. A file that reads and gives no network to
-compute from is refused as a `model::Error`: a `v1::Error` or a `v2::Error`, as the lowering of its
-version says it.
+compute from is refused as a `v2::Error`.
 
-- `model::Network` is what the configs are computed from, whichever version of the format the file
-  is of: every node with the addresses derived for it, every link with the obfuscation and the
-  keepalive in force on it, the route classes, the ports of the metrics listeners, and what only a
-  file of version 1 describes, its pools and bypass lists. `model::lower` gives it for a
-  `SlipmeshFile`; `v1::lower` and `v2::lower` are the two it picks between. The lowering of
-  version 1 refuses a network or a `node_id` that does not read, a metrics port of 0, and an
-  `address_family` that contradicts the endpoint of a node on a link. That of version 2 refuses
-  files without `mesh.interface_prefix`, two nodes that get one address and a link-local no
-  interface takes. The metrics ports of a file of version 2 are the `talos` platform's settings,
-  which the lowering does not read: the Talos generator and `slipmesh check` set them on the
-  network.
-- `secrets::read` takes the secrets the network holds: each node's private key, each pool's
-  private key, and each link's and pool's obfuscation. It never creates one: a key the file lacks
-  is absent from `ResolvedSecrets`, while every link and pool gets an obfuscation entry, empty
-  when nothing is set or it is `plain`. `secrets::read_pools` takes those of the pools from a
-  topology of version 1 itself, for a client's config.
+- `model::Network` is what the configs are computed from: every node with the addresses derived
+  for it and its platform, every link with the obfuscation and the keepalive in force on it, the
+  route classes and the ports of the metrics listeners. `v2::lower` gives it for a `v2::File`, and
+  refuses files without `mesh.interface_prefix`, two nodes that get one address and a link-local no
+  interface takes. The metrics ports are the `talos` platform's settings, which the lowering does
+  not read: the Talos generator and `slipmesh check` set them on the network. `model::node_key` and
+  `model::link_obfuscation` name where the files hold a node's key and a link's obfuscation.
+- `secrets::read` takes the secrets the network holds: each node's private key and each link's
+  obfuscation. It never creates one: a key the file lacks is absent from `ResolvedSecrets`, while
+  every link gets an obfuscation entry, empty when nothing is set or it is `plain`.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
-  node checks it. It needs the node's own key, but on a node of version 2 that is on no link; for
-  each of its links, the peer's key and the link's obfuscation; for each pool on it, the pool's key
-  and obfuscation. It refuses what of these is missing, or an obfuscation not `plain` without one of
-  `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for
-  the secrets of nodes, links and pools the node is not on. Such a refusal gives its
+  node checks it. It needs the node's own key, but on a node on no link; and for each of its links,
+  the peer's key and the link's obfuscation. It refuses what of these is missing, or an obfuscation
+  not `plain` without one of `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`, naming what lacks
+  what; it refuses nothing for the secrets of nodes and links the node is not on. Such a refusal gives its
   `secrets::MissingSecret` through `render::Error::missing_secret`, so a tool can add how its user
   creates the secret. A peer the node dials is given the keepalive of its link where that differs
   from what `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes
-  of `talos`, and to every node of a file of version 1, which names no platform.
+  of `talos`.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
-  each by the entry it belongs to, and no key for a node of version 2 on no link, or `NoHeaderLeft`
+  each by the entry it belongs to, and no key for a node on no link, or `NoHeaderLeft`
   when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a
   tool that only reads the file leaves it off, and that function is not in its build.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
@@ -445,32 +363,24 @@ cargo mutants
 [`cargo-mutants`](https://mutants.rs) changes the code one place at a time and expects a test to
 fail each time; [`.cargo/mutants.toml`](.cargo/mutants.toml) lists what it skips and why.
 
-[`mesh/tests/golden.rs`](mesh/tests/golden.rs) pins what a file of format version 1 gives its
-nodes: the configs of every node of the two fixtures under
-[`mesh/tests/golden/`](mesh/tests/golden) are compared byte for byte with the files beside each,
-with derived public keys named by their owner. `v1` sets every key of the format, and
-`v1-alternate` takes the other side of each key a file sets once. The Talos generator pins its
-patch files on copies of the same fixtures, and both tests hold the hash of each, so the copies
-change together. A change meant to move the configs records the new ones, and the difference is
-reviewed with the rest of the pull request; the test refuses to record in CI:
-
-```bash
-UPDATE_EXPECT=1 cargo test -p sliplib-mesh --test golden
-```
-
-`v2` and `v2-alternate` beside them are the same two networks written in format version 2 by hand.
-The same test shows that every node of such a twin gets the configs the file of version 1 gave
-it, but for what [a conversion changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand).
+[`mesh/tests/golden.rs`](mesh/tests/golden.rs) pins what the files give their nodes. Under
+[`mesh/tests/golden/`](mesh/tests/golden), `v1` and `v1-alternate` hold the configs that two
+networks of format version 1 gave every node, with derived public keys named by their owner; the
+first set every key of that format, the second the other side of each key a file sets once. `v2`
+and `v2-alternate` are the same two networks converted to version 2 by hand, and every node of each
+gets those configs, but for what [a conversion
+changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand). A change that moves a config
+of a node changes the files, and the difference is reviewed with the rest of the pull request.
 
 [`fuzz/`](fuzz) holds a target for [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz.html),
-which needs a nightly toolchain: `read_slipmesh` gives a text to `SlipmeshFile`, which reads either
-version, lowers what reads into the network, and computes the configs of every node. It expects a
-refusal at any step, or a result that holds what each step promises - for version 2, each node's
-and each link's values in force as the format lays them, documents that reach nodes of their own
-platform, and each node given what reaches it, by rank and then as read; for either, every derived
-address in the network it is derived in - and never a panic. It is run before a pull request that
-changes how a file is read or lowered. Its first inputs are the specification's example, the
-network and the Talos documents joined into one text, and the golden fixture of version 1:
+which needs a nightly toolchain: `read_slipmesh` gives a text to `v2::File`, lowers what reads into
+the network, and computes the configs of every node. It expects a refusal at any step, or a result
+that holds what each step promises - each node's and each link's values in force as the format lays
+them, documents that reach nodes of their own platform, each node given what reaches it, by rank
+and then as read, and every derived address in the network it is derived in - and never a panic.
+It is run before a pull request that changes how a file is read or lowered. Its first inputs are
+the specification's example, the network and the Talos documents joined into one text, and the
+golden network of version 2:
 
 ```bash
 mkdir -p fuzz/corpus/read_slipmesh
@@ -481,7 +391,7 @@ for file in docs/example/mesh.yaml docs/example/talos.yaml; do echo ---; cat "$f
 ```
 
 ```bash
-cp mesh/tests/golden/v1/slipmesh.yaml fuzz/corpus/read_slipmesh/v1.yaml
+cp mesh/tests/golden/v2/slipmesh.yaml fuzz/corpus/read_slipmesh/golden.yaml
 ```
 
 ```bash
