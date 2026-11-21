@@ -8,7 +8,6 @@ use super::groups::{Groups, GroupsError, Resolved, Selection};
 use super::network::{AMNEZIAWG, Network, WIREGUARD};
 use super::platform::{RouterosSettings, TalosSettings, Template};
 use super::{Name, Platform};
-use crate::slipmesh_file::{BlockError, META_KEY, Place};
 use serde::de::DeserializeOwned;
 use sliplib_yaml::{Document, Mapping, MultiDoc, Value, merge};
 use std::fmt;
@@ -28,7 +27,43 @@ const PLATFORM: &str = "platform";
 const TEMPLATE: &str = "template";
 const PATCH: &str = "patch";
 
+/// The top-level block of every document: what the document is for and which nodes it reaches.
+pub const META_KEY: &str = "slipmesh";
+
 type Source = Box<dyn std::error::Error + Send + Sync>;
+
+/// Where a document stands in the files: its kind and the line it starts at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    kind: &'static str,
+    line: usize,
+}
+
+impl Place {
+    pub(crate) fn new(kind: &'static str, line: usize) -> Self {
+        Self { kind, line }
+    }
+}
+
+impl fmt::Display for Place {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the `kind: {}` document at line {}",
+            self.kind, self.line
+        )
+    }
+}
+
+/// What is wrong with a document's `slipmesh:` block.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum BlockError {
+    #[error("no `slipmesh:` block saying what the document is for")]
+    Missing,
+    #[error("its `slipmesh:` block")]
+    Malformed(#[source] Source),
+}
 
 /// Why the files do not read.
 #[derive(Debug, thiserror::Error)]
@@ -38,7 +73,7 @@ pub enum Error {
     #[error(transparent)]
     Yaml(Source),
     #[error(
-        "{place} has no `version`, or one below {VERSION}, so it is of format version 1, which the reader of version {VERSION} does not take - convert the files to version {VERSION} as `docs/slipmesh-yaml-v1-to-v2.md` of sliplib says under \"Converting a file by hand\""
+        "{place} has no `version`, or one below {VERSION}, so the files are of format version 1, which this release does not read - convert them to version {VERSION} as `docs/slipmesh-yaml-v1-to-v2.md` of sliplib says under \"Converting a file by hand\""
     )]
     VersionOne { place: Place },
     #[error(
@@ -1111,11 +1146,12 @@ mod tests {
 
     #[test]
     fn a_network_document_without_a_version_or_below_2_is_of_version_1() {
-        let v1 = include_str!("../../../mesh/tests/golden/v1/slipmesh.yaml");
-        let line = MultiDoc::parse(v1).unwrap().documents()[0].line;
+        let v1 = "# version 1\n\nslipmesh: {kind: network}\ncluster:\n  bgp_as: 64500\n  \
+            loopback_networks: {ipv4: 198.51.100.0/25, ipv6: '3fff:0:0:1::/64'}\nnodes:\n  - \
+            {name: node-a, node_id: 0.0.0.1}\n";
         let of_v1 = File::parse(v1).expect_err("version 1 reads");
         assert!(
-            matches!(&of_v1, Error::VersionOne { place } if *place == Place::new(NETWORK, line)),
+            matches!(&of_v1, Error::VersionOne { place } if *place == Place::new(NETWORK, 3)),
             "{of_v1:?}"
         );
         for block in [

@@ -6,8 +6,8 @@
 //! of whatever configures a host, aimed at hosts by `include`/`exclude`; what it holds is for that
 //! tool to read. The block is for the file's reader and never reaches a host.
 
-use crate::slipmesh_file::{BlockError, META_KEY, Place};
 use crate::v1::mesh_config::{self, Invalid, MeshConfig, RoadwarriorPool};
+use crate::v2::{BlockError, META_KEY, Place};
 use serde::Deserialize;
 use sliplib_yaml::{MultiDoc, Value};
 use std::fmt;

@@ -4,7 +4,7 @@
 use crate::file::{read_slipmesh, write_edits};
 use crate::{check, edit};
 use anyhow::{Context, Result};
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v2::File;
 use sliplib_secrets::wireguard::PrivateKey;
 use std::path::Path;
 
@@ -21,10 +21,10 @@ pub fn run(node: &str, config_path: &Path) -> Result<()> {
     }
     anyhow::ensure!(
         network.needs_a_key(node),
-        "node {node:?} is on no link, and a node of format version 2 holds a key only on a link - put it on one first"
+        "node {node:?} is on no link, and a node holds a key only on a link - put it on one first"
     );
     edit::set_node_key(&mut yaml, &file, node, &PrivateKey::generate())?;
-    let edited = SlipmeshFile::read(&yaml)
+    let edited = File::read(&yaml)
         .context("slipmesh.yaml with the new key does not read back - not written")?;
     check::network(&edited, None).context("slipmesh.yaml with the new key - not written")?;
     write_edits(config_path, &yaml)?;

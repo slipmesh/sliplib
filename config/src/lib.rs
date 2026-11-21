@@ -8,7 +8,6 @@ pub mod nftables;
 mod obfuscation;
 mod range;
 pub mod router;
-pub mod slipmesh_file;
 pub mod v1;
 pub mod v2;
 

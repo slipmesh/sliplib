@@ -8,7 +8,6 @@
 
 use crate::secrets::link_key;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
-use sliplib_config::slipmesh_file::SlipmeshFile;
 use sliplib_config::v1::mesh_config::{BypassEntry, RoadwarriorPool, UnknownNode};
 use sliplib_config::v2::Platform;
 pub use sliplib_config::v2::network::Family;
@@ -199,37 +198,9 @@ pub struct V1Only {
     pub bypass_refresh_interval_secs: Option<u64>,
 }
 
-/// Why a file that reads gives no network to compute from, as the lowering of its version says
-/// it.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    #[error(transparent)]
-    V1(#[from] crate::v1::Error),
-    #[error(transparent)]
-    V2(#[from] crate::v2::Error),
-}
-
-/// `file` as the network its nodes' configs are computed from, whichever version it is of.
-pub fn lower(file: &SlipmeshFile) -> Result<Network, Error> {
-    Ok(match file {
-        SlipmeshFile::V1(file) => crate::v1::lower(file.topology())?,
-        SlipmeshFile::V2(file) => crate::v2::lower(file)?,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const VERSION_1: &str = "slipmesh: {kind: network}\ncluster:\n  bgp_as: 64500\n  \
-        loopback_networks: {ipv4: 198.51.100.0/25, ipv6: '3fff:0:0:1::/64'}\nnodes:\n  - {name: \
-        node-a, node_id: 0.0.0.1}\n";
-    const VERSION_2: &str = include_str!("../../docs/example/mesh.yaml");
-
-    fn lowered(raw: &str) -> Result<Network, Error> {
-        lower(&SlipmeshFile::parse(raw).unwrap())
-    }
 
     #[test]
     fn the_metrics_ports_are_those_of_the_settings_of_talos() {
@@ -252,35 +223,5 @@ mod tests {
             }
         );
         assert_eq!(MetricsPorts::from(&settings("{}")), MetricsPorts::default());
-    }
-
-    #[test]
-    fn a_file_of_either_version_is_lowered_by_its_own() {
-        let of_version_1 = lowered(VERSION_1).unwrap();
-        assert!(matches!(of_version_1.format, Format::V1(_)));
-        let of_version_2 = lowered(VERSION_2).unwrap();
-        assert!(matches!(of_version_2.format, Format::V2));
-    }
-
-    #[test]
-    fn a_refusal_is_the_one_the_lowering_of_the_version_gives() {
-        let of_version_1 =
-            lowered(&VERSION_1.replace("198.51.100.0/25", "198.51.100.0")).unwrap_err();
-        assert!(
-            matches!(
-                of_version_1,
-                Error::V1(crate::v1::Error::Network {
-                    field: "cluster.loopback_networks.ipv4",
-                    ..
-                })
-            ),
-            "{of_version_1:?}"
-        );
-        let of_version_2 =
-            lowered(&VERSION_2.replace("  interface_prefix: mesh-\n", "")).unwrap_err();
-        assert!(
-            matches!(of_version_2, Error::V2(crate::v2::Error::NoInterfacePrefix)),
-            "{of_version_2:?}"
-        );
     }
 }

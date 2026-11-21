@@ -1,141 +1,69 @@
 //! Every edit made to `slipmesh.yaml`: minted secrets and a node's new key written into the
-//! fields they belong to, the values `mint` writes where the file leaves a key out (version 1's
-//! defaults, version 2's reference values).
+//! fields they belong to, and the reference values `mint` writes where the files leave a key out.
 //!
 //! Written, a minted value is the operator's like any other: the next run mints nothing, and
-//! deleting it mints a new identity for that node, link or pool, and for every peer that refers to
-//! it. Only what the run generated is written - a field set on the entry or in the global
-//! `obfuscation` is never copied down, and neither are the switches that are never generated.
+//! deleting it mints a new identity for that node or link, and for every peer that refers to it.
+//! Only what the run generated is written - a field set on the link or on its type is never copied
+//! down, and neither are the switches that are never generated.
 //!
 //! An edit changes one document's values. The file is written back from the values, so its
 //! comments are not kept.
 
 use anyhow::{Context, Result};
 use sliplib_config::Obfuscation;
-use sliplib_config::slipmesh_file::SlipmeshFile;
-use sliplib_config::v1::mesh_config::missing_defaults;
-use sliplib_config::v2::Name;
+use sliplib_config::v2::{File, Name};
 use sliplib_mesh::mint::Minted;
 use sliplib_mesh::model::Network;
 use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{Mapping, MultiDoc, Value};
 
-/// The position of the `network` document of `file`, where a value of the network is written.
-fn network_document(file: &SlipmeshFile) -> usize {
-    match file {
-        SlipmeshFile::V1(file) => file.network_document(),
-        SlipmeshFile::V2(files) => files.network_document(),
-    }
-}
-
-/// Writes every value of `minted` into its field of `yaml`, the `slipmesh.yaml` that `file` and
+/// Writes every value of `minted` into its field of `yaml`, the `slipmesh.yaml` that `files` and
 /// then `network` were read from: `minted` names nodes and links by their positions in `network`.
-pub fn record(
-    yaml: &mut MultiDoc,
-    file: &SlipmeshFile,
-    network: &Network,
-    minted: &Minted,
-) -> Result<()> {
+pub fn record(yaml: &mut MultiDoc, files: &File, network: &Network, minted: &Minted) -> Result<()> {
     for (node, key) in &minted.node_keys {
-        set_node_key(yaml, file, &network.nodes[*node].name, key)?;
+        set_node_key(yaml, files, &network.nodes[*node].name, key)?;
     }
-    let mesh = document(yaml, network_document(file))?.get_mut("mesh");
+    let mesh = document(yaml, files.network_document())?.get_mut("mesh");
     // The fields of the type's own obfuscation, which a link that writes `null` there goes
-    // without; version 1 lays nothing under a link's own.
-    let of_the_type: Vec<Value> = match file {
-        SlipmeshFile::V1(_) => Vec::new(),
-        SlipmeshFile::V2(_) => mesh
-            .as_deref()
-            .and_then(|mesh| mesh.get("amneziawg"))
-            .and_then(|block| block.get("obfuscation"))
-            .and_then(Value::as_mapping)
-            .into_iter()
-            .flatten()
-            .filter(|(_, value)| !value.is_null())
-            .map(|(key, _)| key.clone())
-            .collect(),
-    };
+    // without.
+    let of_the_type: Vec<Value> = mesh
+        .as_deref()
+        .and_then(|mesh| mesh.get("amneziawg"))
+        .and_then(|block| block.get("obfuscation"))
+        .and_then(Value::as_mapping)
+        .into_iter()
+        .flatten()
+        .filter(|(_, value)| !value.is_null())
+        .map(|(key, _)| key.clone())
+        .collect();
     let mut links = mesh.and_then(|mesh| mesh.get_mut("links"));
     for (link, generated) in &minted.link_obfuscation {
         let name = &network.links[*link].name;
-        // A list by position in version 1; in version 2 a mapping by name, each link with the
-        // block of its type, and only a link of type `amneziawg` is minted for.
-        let entry = match file {
-            SlipmeshFile::V1(_) => links.as_deref_mut().and_then(|links| links.get_mut(*link)),
-            SlipmeshFile::V2(_) => {
-                named(links.as_deref_mut(), name).and_then(|link| link.get_mut("amneziawg"))
-            }
-        }
-        .with_context(|| format!("the link {name} is not in the network document"))?;
+        // Only a link of type `amneziawg` is minted for, under the block of its type.
+        let entry = named(links.as_deref_mut(), name)
+            .and_then(|link| link.get_mut("amneziawg"))
+            .with_context(|| format!("the link {name} is not in the network document"))?;
         write_obfuscation(entry, generated, &of_the_type)?;
-    }
-
-    let SlipmeshFile::V1(file) = file else {
-        return Ok(());
-    };
-    for pool_minted in &minted.pools {
-        let name = &pool_minted.name;
-        let index = file
-            .pool_document(name)
-            .with_context(|| format!("pool {name:?} is in no document"))?;
-        let pool = document(yaml, index)?;
-        if let Some(key) = &pool_minted.private_key {
-            set(pool, "private_key", key.expose().into())?;
-        }
-        if let Some(generated) = &pool_minted.obfuscation {
-            write_obfuscation(pool, generated, &[])?;
-        }
     }
     Ok(())
 }
 
-/// Sets the key of `node` in `yaml`, the `slipmesh.yaml` `file` was read from, where the version
-/// of the file holds it.
-pub fn set_node_key(
-    yaml: &mut MultiDoc,
-    file: &SlipmeshFile,
-    node: &str,
-    key: &PrivateKey,
-) -> Result<()> {
-    let nodes = document(yaml, network_document(file))?.get_mut("nodes");
-    let missing = || format!("the node {node} is not in the network document");
-    match file {
-        SlipmeshFile::V1(file) => {
-            let position = file.hosts().iter().position(|host| *host == node);
-            let entry = nodes
-                .zip(position)
-                .and_then(|(nodes, position)| nodes.get_mut(position))
-                .with_context(missing)?;
-            set(entry, "mesh_private_key", key.expose().into())
-        }
-        SlipmeshFile::V2(_) => {
-            let entry = named(nodes, node).with_context(missing)?;
-            if entry.get("wireguard").is_none_or(Value::is_null) {
-                set(entry, "wireguard", Value::Mapping(Mapping::new()))?;
-            }
-            set(&mut entry["wireguard"], "private_key", key.expose().into())
-        }
+/// Sets the key of `node` in `yaml`, the `slipmesh.yaml` `files` was read from.
+pub fn set_node_key(yaml: &mut MultiDoc, files: &File, node: &str, key: &PrivateKey) -> Result<()> {
+    let nodes = document(yaml, files.network_document())?.get_mut("nodes");
+    let entry = named(nodes, node)
+        .with_context(|| format!("the node {node} is not in the network document"))?;
+    if entry.get("wireguard").is_none_or(Value::is_null) {
+        set(entry, "wireguard", Value::Mapping(Mapping::new()))?;
     }
-}
-
-/// The keys of the network that `file` leaves out and `mint` writes, each with its value: the
-/// defaults of version 1, the reference values of version 2.
-pub fn unset(file: &SlipmeshFile) -> Vec<(&'static str, Value)> {
-    match file {
-        SlipmeshFile::V1(file) => missing_defaults(file.topology()),
-        SlipmeshFile::V2(files) => files.missing_reference_values(),
-    }
+    set(&mut entry["wireguard"], "private_key", key.expose().into())
 }
 
 /// Writes each of `unset`, a key and its value, in the network document of `yaml`, the
-/// `slipmesh.yaml` `file` was read from. Indexing inserts each missing step, and panics on none:
+/// `slipmesh.yaml` `files` was read from. Indexing inserts each missing step, and panics on none:
 /// every step that is there is a mapping, or the file would not have parsed.
-pub fn write_unset(
-    yaml: &mut MultiDoc,
-    file: &SlipmeshFile,
-    unset: &[(&str, Value)],
-) -> Result<()> {
-    let network = document(yaml, network_document(file))?;
+pub fn write_unset(yaml: &mut MultiDoc, files: &File, unset: &[(&str, Value)]) -> Result<()> {
+    let network = document(yaml, files.network_document())?;
     for (key, value) in unset {
         *key.split('.')
             .fold(&mut *network, |value, step| &mut value[step]) = value.clone();
@@ -201,80 +129,17 @@ fn document(yaml: &mut MultiDoc, index: usize) -> Result<&mut Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sliplib_config::v1::mesh_config::MeshConfig;
     use sliplib_mesh::mint;
 
     const NINE: [&str; 9] = ["jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"];
 
-    const NETWORK: &str = "\
-slipmesh:
-    kind: network
-cluster:
-    bgp_as: 64512
-    loopback_networks:
-        ipv4: 198.51.100.0/25
-        ipv6: 3fff::/32
-nodes:
-    - name: node-a
-      node_id: 198.51.100.1
-    - name: node-b
-      node_id: 198.51.100.2
-    - name: node-c
-      node_id: 198.51.100.3
-mesh:
-    links:
-        - pair:
-            - node-b
-            - node-a
-          port: 51820
-        - pair:
-            - node-a
-            - node-c
-          port: 51821
-          plain: true
-";
-
-    const POOLS: &str = "\
----
-slipmesh:
-    kind: roadwarriors
-name: obfuscated
-node_hostnames:
-    - node-a
-address: 203.0.113.1/27
-listen_port: 51900
-obfuscation:
-    jc: 4
-    jmin: 10
-    jmax: 50
-    s1: 1
-    s2: 2
-    h1: 5
-    h2: 6
-    h3: 7
-    h4: 8
----
-slipmesh:
-    kind: roadwarriors
-name: plain
-node_hostnames:
-    - node-b
-address: 203.0.113.33/27
-listen_port: 51901
-plain: true
-";
-
-    fn slipmesh() -> String {
-        format!("{NETWORK}{POOLS}")
-    }
-
-    /// One run: resolve, write down what was minted.
+    /// One run: read, mint, write down what was minted.
     fn run(raw: &str) -> String {
         let mut yaml = MultiDoc::parse(raw).unwrap();
-        let file = SlipmeshFile::read(&yaml).unwrap();
-        let network = sliplib_mesh::model::lower(&file).unwrap();
+        let files = File::read(&yaml).unwrap();
+        let network = sliplib_mesh::v2::lower(&files).unwrap();
         let minted = mint::create(&network).unwrap();
-        record(&mut yaml, &file, &network, &minted).unwrap();
+        record(&mut yaml, &files, &network, &minted).unwrap();
         yaml.text().unwrap()
     }
 
@@ -329,99 +194,10 @@ plain: true
     #[test]
     fn a_node_named_like_a_number_is_rekeyed_under_its_own_key() {
         let mut yaml = MultiDoc::parse(&numbered()).unwrap();
-        let file = SlipmeshFile::read(&yaml).unwrap();
-        set_node_key(&mut yaml, &file, "7", &PrivateKey::generate()).unwrap();
+        let files = File::read(&yaml).unwrap();
+        set_node_key(&mut yaml, &files, "7", &PrivateKey::generate()).unwrap();
         let node = &yaml.documents()[0].value["nodes"][&Value::from(7)];
         assert!(node["wireguard"]["private_key"].is_string());
-    }
-
-    fn topology(raw: &str) -> MeshConfig {
-        sliplib_config::v1::slipmesh_file::SlipmeshFile::parse(raw)
-            .unwrap()
-            .into_topology()
-    }
-
-    fn keys_of(obfuscation: &Obfuscation) -> Vec<String> {
-        let value = sliplib_yaml::to_value(obfuscation).unwrap();
-        value
-            .as_mapping()
-            .unwrap()
-            .keys()
-            .map(|k| k.as_str().unwrap().to_owned())
-            .collect()
-    }
-
-    #[test]
-    fn every_node_gets_its_key_written_into_its_entry() {
-        for node in topology(&run(&slipmesh())).nodes {
-            assert!(node.mesh_private_key.is_some(), "{}", node.name);
-        }
-    }
-
-    #[test]
-    fn a_link_gets_the_nine_generated_fields_nested_under_it() {
-        let links = topology(&run(&slipmesh())).mesh.links;
-        assert_eq!(keys_of(&links[0].obfuscation), NINE);
-    }
-
-    #[test]
-    fn plain_links_and_pools_get_no_obfuscation() {
-        let topology = topology(&run(&slipmesh()));
-        assert_eq!(topology.mesh.links[1].obfuscation, Obfuscation::default());
-        let plain = &topology.roadwarriors[1];
-        assert!(plain.private_key.is_some());
-        assert_eq!(plain.obfuscation, Obfuscation::default());
-    }
-
-    #[test]
-    fn a_pool_with_all_nine_fields_written_gets_only_its_key() {
-        let recorded = run(&slipmesh());
-        let pool = &topology(&recorded).roadwarriors[0];
-        assert!(pool.private_key.is_some());
-        assert_eq!(pool.obfuscation.jc, Some(4));
-        assert_eq!(recorded.matches("jc:").count(), 2, "{recorded}");
-    }
-
-    #[test]
-    fn switches_that_are_never_generated_are_never_written() {
-        let raw = slipmesh().replace(
-            "cluster:\n",
-            "obfuscation:\n    random_trailers: true\n    disable_cookies: true\ncluster:\n",
-        );
-        let links = topology(&run(&raw)).mesh.links;
-        let written = keys_of(&links[0].obfuscation);
-        assert_eq!(written, NINE, "the link's own fields only");
-    }
-
-    #[test]
-    fn a_field_set_globally_is_not_written_down() {
-        let raw = slipmesh().replace("cluster:\n", "obfuscation:\n    jc: 5\ncluster:\n");
-        let recorded = run(&raw);
-        let links = topology(&recorded).mesh.links;
-        assert!(!keys_of(&links[0].obfuscation).contains(&"jc".to_owned()));
-        assert_eq!(keys_of(&links[0].obfuscation).len(), 8);
-    }
-
-    #[test]
-    fn a_field_set_on_the_link_stays_and_the_rest_join_it() {
-        let raw = slipmesh().replace(
-            "          port: 51820\n",
-            "          port: 51820\n          obfuscation:\n            jc: 9\n",
-        );
-        let recorded = run(&raw);
-        let obfuscation = &topology(&recorded).mesh.links[0].obfuscation;
-        assert_eq!(obfuscation.jc, Some(9));
-        assert_eq!(keys_of(obfuscation).len(), 9);
-    }
-
-    #[test]
-    fn every_value_written_before_stays() {
-        let raw = slipmesh();
-        let (before, after) = (values(&raw), values(&run(&raw)));
-        assert_eq!(before.len(), after.len());
-        for (before, after) in before.iter().zip(&after) {
-            assert!(within(before, after), "{before:?}\n{after:?}");
-        }
     }
 
     /// The example of version 2 with nothing minted.

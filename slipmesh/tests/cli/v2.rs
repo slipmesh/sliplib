@@ -331,3 +331,27 @@ fn rekey_refuses_files_that_give_no_network_and_writes_nothing() {
     assert_eq!(ran.code, Some(1), "{}", ran.stdout);
     assert_eq!(config.text(), before);
 }
+
+#[test]
+fn every_command_refuses_a_file_of_version_1_naming_how_to_convert_it_and_writes_nothing() {
+    let version_1 = "slipmesh: {kind: network}\ncluster:\n  bgp_as: 64512\n  \
+        loopback_networks: {ipv4: 198.51.100.0/25, ipv6: '3fff::/32'}\n  \
+        interface_prefix: {mesh: mesh-}\n  route_proto_id: {egress: 152}\nnodes:\n  - \
+        {name: a, node_id: 198.51.100.1}\n";
+    for command in [
+        &["check"][..],
+        &["mint"],
+        &["rekey", "--node", "a"],
+        &["fmt"],
+    ] {
+        let config = Config::holding(version_1);
+        let ran = config.run(command);
+        assert_eq!(ran.code, Some(1), "{command:?}: {}", ran.stdout);
+        assert!(
+            ran.stderr.contains("docs/slipmesh-yaml-v1-to-v2.md"),
+            "{command:?}: {}",
+            ran.stderr
+        );
+        assert_eq!(config.text(), version_1, "{command:?}");
+    }
+}
