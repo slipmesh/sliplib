@@ -52,8 +52,8 @@ fn node(network: &Network, host: &str, resolved: &ResolvedSecrets) -> Result<()>
     })
 }
 
-/// Every node of `network` in its order, each with what refuses its configs: one refusal says nothing
-/// about the next node, so all of them are checked.
+/// Every node of `network` in its order, each with what refuses its configs: one refusal says
+/// nothing about the next node, so all of them are checked.
 pub fn nodes<'n>(network: &'n Network, resolved: &ResolvedSecrets) -> Vec<(&'n str, Result<()>)> {
     network
         .nodes

@@ -221,15 +221,6 @@ fn rekey_of_an_unknown_node_is_refused_naming_the_nodes_and_writes_nothing() {
     assert_eq!(config.text(), before);
 }
 
-#[test]
-fn fmt_rewrites_a_file_of_version_2_and_changes_no_value() {
-    let config = Config::holding(&format!("{MESH}---\n{TALOS}"));
-    let before = config.documents();
-    let ran = config.run(&["fmt"]);
-    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
-    assert_ne!(config.text(), format!("{MESH}---\n{TALOS}"));
-    assert_eq!(config.documents(), before);
-}
 /// The link in force of `name` in the file, its obfuscation as the loader lays it.
 fn obfuscation_in_force(config: &Config, name: &str) -> sliplib_config::Obfuscation {
     let files = File::parse(&config.text()).unwrap();
@@ -324,7 +315,8 @@ fn rekey_refuses_files_that_give_no_network_and_writes_nothing() {
 
 #[test]
 fn every_command_refuses_a_file_of_version_1_naming_how_to_convert_it_and_writes_nothing() {
-    let version_1 = "slipmesh: {kind: network}\ncluster:\n  bgp_as: 64512\n  \
+    // The network document starts at line 3.
+    let version_1 = "# version 1\n\nslipmesh: {kind: network}\ncluster:\n  bgp_as: 64512\n  \
         loopback_networks: {ipv4: 198.51.100.0/25, ipv6: '3fff::/32'}\n  \
         interface_prefix: {mesh: mesh-}\n  route_proto_id: {egress: 152}\nnodes:\n  - \
         {name: a, node_id: 198.51.100.1}\n";
@@ -338,7 +330,9 @@ fn every_command_refuses_a_file_of_version_1_naming_how_to_convert_it_and_writes
         let ran = config.run(command);
         assert_eq!(ran.code, Some(1), "{command:?}: {}", ran.stdout);
         assert!(
-            ran.stderr.contains("docs/slipmesh-yaml-v1-to-v2.md"),
+            ran.stderr.contains("docs/slipmesh-yaml-v1-to-v2.md")
+                && ran.stderr.contains("`kind: network`")
+                && names_line(&ran.stderr, 3),
             "{command:?}: {}",
             ran.stderr
         );

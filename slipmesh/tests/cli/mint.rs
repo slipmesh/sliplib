@@ -56,7 +56,7 @@ fn mint_writes_nothing_and_names_the_link_whose_headers_leave_no_room() {
 }
 
 #[test]
-fn mint_writes_nothing_when_a_node_of_version_2_would_be_refused_with_what_it_minted() {
+fn mint_writes_nothing_when_a_node_would_be_refused_with_what_it_minted() {
     // No `jmax` the generator draws reaches this `jmin`, so the link's obfuscation is one the
     // kernel module refuses whatever is minted beside it.
     let config = Config::holding(MESH);
@@ -94,7 +94,7 @@ fn files_the_loader_refuses_are_left_as_they_are_by_mint_and_rekey() {
 }
 
 #[test]
-fn mint_with_nothing_to_write_leaves_files_of_version_2_and_their_comments_as_they_are() {
+fn mint_with_nothing_to_write_leaves_the_files_and_their_comments_as_they_are() {
     let config = minted();
     let commented = format!("# kept by hand\n{}", config.text());
     std::fs::write(&config.path, &commented).unwrap();

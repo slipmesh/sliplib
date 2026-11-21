@@ -166,10 +166,10 @@ mod tests {
         }
     }
 
-    /// The example of version 2 with nothing minted.
+    /// The example of the specification with nothing minted.
     const EXAMPLE: &str = include_str!("../../docs/example/mesh.yaml");
 
-    /// The example of version 2 with a node and a link whose names YAML reads as numbers: they
+    /// The example with a node and a link whose names YAML reads as numbers: they
     /// stand under keys that are numbers.
     fn numbered() -> String {
         format!(
@@ -258,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn every_value_files_of_version_2_wrote_before_stays() {
+    fn every_value_written_before_stays() {
         let (before, after) = (values(EXAMPLE), values(&run(EXAMPLE)));
         assert_eq!(before.len(), after.len());
         for (before, after) in before.iter().zip(&after) {

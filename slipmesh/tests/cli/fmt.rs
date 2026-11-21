@@ -20,10 +20,10 @@ fn inode(config: &Config) -> u64 {
     std::fs::metadata(&config.path).unwrap().ino()
 }
 
-/// Files of version 2 as a hand leaves them, with node `a`'s key: flow collections, quotes,
+/// Files as a hand leaves them, with node `a`'s key: flow collections, quotes,
 /// comments, and the shapes a rewrite could get wrong - a hexadecimal integer, a string that reads
 /// as a number, a block scalar, an alias, a document of only comments and one of only `~`.
-fn of_version_2_by_hand(key: &str) -> String {
+fn by_hand(key: &str) -> String {
     format!(
         r#"# The network, written by hand.
 slipmesh: {{kind: network, version: 2, revision: 1}}
@@ -73,9 +73,9 @@ fn network_of(text: &str) -> sliplib_config::v2::network::Network {
 }
 
 #[test]
-fn fmt_rewrites_hand_written_files_of_version_2_in_the_serializers_form_and_keeps_every_value() {
+fn fmt_rewrites_hand_written_files_in_the_serializers_form_and_keeps_every_value() {
     let key = PrivateKey::generate();
-    let by_hand = of_version_2_by_hand(key.expose());
+    let by_hand = by_hand(key.expose());
     let config = Config::holding(&by_hand);
     let ran = config.run(&["fmt"]);
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
@@ -99,8 +99,8 @@ fn fmt_rewrites_hand_written_files_of_version_2_in_the_serializers_form_and_keep
 }
 
 #[test]
-fn fmt_keeps_in_files_of_version_2_a_number_a_string_and_a_block_scalar_what_they_were() {
-    let config = Config::holding(&of_version_2_by_hand(PrivateKey::generate().expose()));
+fn fmt_keeps_a_number_a_string_and_a_block_scalar_what_they_were() {
+    let config = Config::holding(&by_hand(PrivateKey::generate().expose()));
     assert_eq!(config.run(&["fmt"]).code, Some(0));
     let rewritten = config.text();
     let installer = &values(&rewritten)[1]["installer"];
@@ -121,8 +121,8 @@ fn fmt_keeps_in_files_of_version_2_a_number_a_string_and_a_block_scalar_what_the
 }
 
 #[test]
-fn fmt_keeps_in_files_of_version_2_a_range_a_range_and_a_number_a_number() {
-    let by_hand = of_version_2_by_hand(PrivateKey::generate().expose()).replace(
+fn fmt_keeps_a_range_a_range_and_a_number_a_number() {
+    let by_hand = by_hand(PrivateKey::generate().expose()).replace(
         "amneziawg: {port: 51820}",
         "amneziawg: {port: 51820, obfuscation: {h1: 5-9, h2: 0xA, rekey_after_time: 100-140}}",
     );
@@ -149,8 +149,8 @@ fn fmt_keeps_in_files_of_version_2_a_range_a_range_and_a_number_a_number() {
 
 #[cfg(unix)]
 #[test]
-fn fmt_leaves_files_of_version_2_already_in_that_form_untouched_and_says_so() {
-    let config = Config::holding(&of_version_2_by_hand(PrivateKey::generate().expose()));
+fn fmt_leaves_files_already_in_that_form_untouched_and_says_so() {
+    let config = Config::holding(&by_hand(PrivateKey::generate().expose()));
     config.run(&["fmt"]);
     let (rewritten, replaced) = (config.text(), inode(&config));
 
@@ -168,9 +168,9 @@ fn fmt_leaves_files_of_version_2_already_in_that_form_untouched_and_says_so() {
 }
 
 #[test]
-fn fmt_refuses_files_of_version_2_the_loader_refuses_for_its_reason_and_names_no_key() {
+fn fmt_refuses_files_the_loader_refuses_for_its_reason_and_names_no_key() {
     let key = PrivateKey::generate();
-    let content = of_version_2_by_hand(key.expose()).replace(
+    let content = by_hand(key.expose()).replace(
         "  interface_prefix: mesh-\n",
         "  interface_prefix: mesh-\n  no_such_setting: 1\n",
     );

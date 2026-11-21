@@ -1,4 +1,4 @@
-//! What a topology does that the tools accept and whoever wrote it should still hear of. Nothing
+//! What the files do that the tools accept and whoever wrote them should still hear of. Nothing
 //! here refuses a file or changes what a node gets.
 
 use crate::model::Network;

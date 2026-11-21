@@ -37,8 +37,8 @@ pub(crate) fn link_key(pair: &[String; 2]) -> String {
     format!("{}|{}", sorted[0], sorted[1])
 }
 
-/// The obfuscation fields a link or pool that is not `plain` carries once its secrets are minted,
-/// each with the type of its value. One that lacks any of them has not been minted yet: a config
+/// The obfuscation fields a link of type `amneziawg` carries once its secrets are minted, each
+/// with the type of its value. One that lacks any of them has not been minted yet: a config
 /// rendered from it would differ from the one rendered after minting. What is looked for and what
 /// minting fills are generated from this one list, so they cannot differ.
 macro_rules! minted_fields {

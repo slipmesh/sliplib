@@ -1,7 +1,7 @@
-//! What every node of the fixtures under `golden/` gets: each file of format version 2 compared
-//! with the configs beside the file of version 1 it was converted from, as that version gave them,
-//! derived public keys named by their owner. A change that moves one of them changes what the
-//! nodes of a working network are configured with.
+//! What every node of the fixtures under `golden/` gets: each file of format version 2 is compared
+//! with the configs version 1 gave the network it was converted from, derived public keys named by
+//! their owner. A change of value fails here, and changes what the nodes of a working network are
+//! configured with.
 
 use sliplib_config::awg::AwgConfig;
 use sliplib_config::router::RouterConfig;

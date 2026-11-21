@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn what_is_minted_for_version_2_is_named_as_that_version_writes_it() {
+    fn what_is_minted_is_named_as_the_files_write_it() {
         let minted = super::create(&unminted("{}")).unwrap();
         assert_eq!(
             minted.routes(),
@@ -173,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn a_link_of_version_2_with_no_header_left_is_named_as_that_version_writes_it() {
+    fn a_link_with_no_header_left_is_named_as_the_files_write_it() {
         let full = "{mesh: {links: {a-b: {amneziawg: {obfuscation: {h1: 0-4294967295}}}}}}";
         let refusal = super::create(&unminted(full)).err();
         assert_eq!(
