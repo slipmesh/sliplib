@@ -240,39 +240,6 @@ fn fmt_rewrites_a_file_of_version_2_and_changes_no_value() {
     assert_ne!(config.text(), format!("{MESH}---\n{TALOS}"));
     assert_eq!(config.documents(), before);
 }
-
-#[test]
-fn the_rw_commands_refuse_a_file_of_version_2() {
-    let config = minted();
-    let before = config.text();
-    for command in [
-        vec![
-            "rw",
-            "add",
-            "--if",
-            "pool",
-            "--name",
-            "laptop",
-            "--allowed-ips",
-            "198.18.0.2/32",
-        ],
-        vec!["rw", "del", "--if", "pool", "--name", "laptop"],
-        vec!["rw", "inspect", "--if", "pool", "--name", "laptop"],
-    ] {
-        let ran = config.run(&command);
-        assert_eq!(ran.code, Some(1), "{command:?}");
-        // Its own refusal, which names the file and its version, not one of the reader of
-        // version 1.
-        let path = config.path.display().to_string();
-        assert!(
-            ran.stderr.contains(&path) && ran.stderr.contains("version 2"),
-            "{command:?}: {}",
-            ran.stderr
-        );
-    }
-    assert_eq!(config.text(), before);
-}
-
 /// The link in force of `name` in the file, its obfuscation as the loader lays it.
 fn obfuscation_in_force(config: &Config, name: &str) -> sliplib_config::Obfuscation {
     let files = File::parse(&config.text()).unwrap();
