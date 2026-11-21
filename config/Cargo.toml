@@ -9,7 +9,6 @@ publish.workspace = true
 description = "slipmesh.yaml, and the configs the slipmesh tools write from it for the daemons to read"
 
 [dependencies]
-anyhow.workspace = true
 indexmap.workspace = true
 serde.workspace = true
 serde_ignored.workspace = true
