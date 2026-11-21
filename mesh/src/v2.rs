@@ -2,7 +2,7 @@
 //! the addresses its `node_id` gives it, every link with what the loader found in force on it.
 
 use crate::addressing;
-use crate::model::{Endpoint, Format, Link, MetricsPorts, Network, Node};
+use crate::model::{Endpoint, Link, MetricsPorts, Network, Node};
 use crate::mtu::DEFAULT_UPLINK_MTU;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::v2::File;
@@ -126,7 +126,7 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             }
             Node {
                 name: name.to_string(),
-                platform: Some(node.platform),
+                platform: node.platform,
                 loopback: (
                     addressing::ipv4_in(ipv4.addr(), ipv4.prefix_len(), id),
                     addressing::ipv6_in(ipv6.addr(), ipv6.prefix_len(), id),
@@ -221,7 +221,6 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             .map(|(name, class)| (name.to_string(), class.protocol))
             .collect(),
         metrics: MetricsPorts::default(),
-        format: Format::V2,
     })
 }
 
@@ -232,7 +231,7 @@ fn prefixes(list: &[network::Prefix4]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Family, Format};
+    use crate::model::Family;
     use crate::render::node_configs;
     use crate::secrets;
     use sliplib_config::v2::Platform;
@@ -370,13 +369,10 @@ mod tests {
     #[test]
     fn a_node_has_its_platform_and_the_key_written_for_it() {
         let network = lowered("{nodes: {node-b: {wireguard: null}}}");
-        assert_eq!(
-            network.node("node-a").unwrap().platform,
-            Some(Platform::Talos)
-        );
+        assert_eq!(network.node("node-a").unwrap().platform, Platform::Talos);
         assert_eq!(
             network.node("router1").unwrap().platform,
-            Some(Platform::Routeros)
+            Platform::Routeros
         );
         assert!(network.node("node-a").unwrap().private_key.is_some());
         assert!(network.node("node-b").unwrap().private_key.is_none());
@@ -548,7 +544,7 @@ mod tests {
         );
         let mesh = mtu_refusal("{mesh: {mtu: 0}}");
         assert!(
-            matches!(mesh, MtuError::BelowMinimum { key, mtu: 0 } if key == Format::V2.mtu()),
+            matches!(mesh, MtuError::BelowMinimum { mtu: 0 }),
             "{mesh:?}"
         );
     }
@@ -683,12 +679,12 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_names_the_keys_as_version_2_writes_them() {
+    fn a_refusal_names_the_keys_as_the_files_write_them() {
         let keyless = lowered("{nodes: {node-b: {wireguard: null}}}");
         let refusal = refused(&keyless, "node-a");
         let missing = refusal.missing_secret().map(ToString::to_string);
         assert!(
-            missing.is_some_and(|missing| missing.contains(Format::V2.private_key())),
+            missing.is_some_and(|missing| missing.contains(crate::model::PRIVATE_KEY)),
             "{refusal:?}"
         );
         let above = refused(&lowered("{mesh: {mtu: 9000}}"), "node-a");
@@ -696,9 +692,12 @@ mod tests {
             matches!(
                 &above,
                 crate::render::Error::RenderingAwg {
-                    source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit { key, mtu: 9000, .. }),
+                    source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit {
+                        mtu: 9000,
+                        ..
+                    }),
                     ..
-                } if *key == Format::V2.mtu()
+                }
             ),
             "{above:?}"
         );

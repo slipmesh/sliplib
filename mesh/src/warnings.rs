@@ -1,4 +1,4 @@
-//! What a topology does that the tools accept and whoever wrote it should still hear of. Nothing
+//! What the files do that the tools accept and whoever wrote them should still hear of. Nothing
 //! here refuses a file or changes what a node gets.
 
 use crate::model::Network;
@@ -51,82 +51,6 @@ pub fn warnings(mesh: &Network, resolved: &ResolvedSecrets) -> Vec<Warning> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sliplib_config::v1::mesh_config::MeshConfig;
-
-    // The fixtures are topologies of format version 1, read through its lowering.
-    fn warnings_of(mesh: &MeshConfig) -> Vec<Warning> {
-        let network = crate::v1::lower(mesh).unwrap();
-        warnings(&network, &crate::secrets::read(&network))
-    }
-
-    fn mesh(obfuscation: &str, links: &str) -> MeshConfig {
-        sliplib_yaml::from_str(&format!(
-            r#"
-cluster:
-  bgp_as: 64512
-  loopback_networks: {{ipv4: "198.51.100.0/25", ipv6: "3fff::/32"}}
-obfuscation: {obfuscation}
-nodes:
-  - {{name: a, node_id: "198.51.100.1", endpoint: "192.0.2.10"}}
-  - {{name: b, node_id: "198.51.100.2"}}
-  - {{name: c, node_id: "198.51.100.3"}}
-mesh:
-  links: {links}
-"#
-        ))
-        .unwrap()
-    }
-
-    fn told(obfuscation: &str, links: &str) -> Vec<String> {
-        let mesh = mesh(obfuscation, links);
-        warnings_of(&mesh).iter().map(Warning::to_string).collect()
-    }
-
-    #[test]
-    fn a_link_is_warned_about_by_what_the_topology_and_the_link_give_it_together() {
-        let told = told(
-            "{random_trailers: true}",
-            "[{pair: [a, b], port: 51820, obfuscation: {h1: 10-19}}, {pair: [c, a], port: 51821}]",
-        );
-        assert_eq!(told.len(), 1, "{told:?}");
-        assert!(told[0].starts_with("mesh link a-b: "), "{told:?}");
-        assert!(told[0].contains("12 packets"), "{told:?}");
-    }
-
-    #[test]
-    fn a_link_that_turns_the_trailers_off_or_is_plain_is_not_warned_about() {
-        let told = told(
-            "{random_trailers: true, h1: 10-19, s1: 8}",
-            "[{pair: [a, b], port: 51820, obfuscation: {random_trailers: false}}, \
-              {pair: [a, c], port: 51821, plain: true}]",
-        );
-        assert_eq!(told, [] as [String; 0]);
-    }
-
-    #[test]
-    fn every_loss_of_every_link_is_told_in_the_order_of_the_links() {
-        let told = told(
-            "{random_trailers: true}",
-            "[{pair: [c, a], port: 51820, obfuscation: {s2: 4}}, \
-              {pair: [a, b], port: 51821, obfuscation: {h2: 20-29, s3: 15}}]",
-        );
-        let links: Vec<&str> = told
-            .iter()
-            .map(|warning| warning.split(": ").next().unwrap())
-            .collect();
-        assert_eq!(links, ["mesh link c-a", "mesh link a-b", "mesh link a-b"]);
-    }
-
-    #[test]
-    fn a_warning_concerns_the_two_ends_of_its_link_alone() {
-        let mesh = mesh(
-            "{random_trailers: true}",
-            "[{pair: [a, b], port: 51820, obfuscation: {h1: 10-19}}]",
-        );
-        let warnings = warnings_of(&mesh);
-        assert!(warnings[0].concerns("a") && warnings[0].concerns("b"));
-        assert!(!warnings[0].concerns("c"));
-    }
 
     /// The links of the example of the specification with its secrets, and `overlay` laid over
     /// both: what is told of them.

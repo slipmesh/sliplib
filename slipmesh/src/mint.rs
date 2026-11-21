@@ -1,21 +1,20 @@
 //! `mint`: writes whatever secrets the network lacks into the fields of `slipmesh.yaml` they
-//! belong to, and the values of the keys it leaves out that `mint` writes (version 1's defaults,
-//! version 2's reference values) - once every node's config passes with them. A run with nothing to write leaves the file as it is.
+//! belong to, and the reference values of the keys it leaves out - once every node's config passes
+//! with them. A run with nothing to write leaves the file as it is.
 
 use crate::file::{read_slipmesh, write_edits};
 use crate::{check, edit};
 use anyhow::{Context, Result};
-use sliplib_config::slipmesh_file::SlipmeshFile;
+use sliplib_config::v2::File;
 use std::path::Path;
 
 pub fn run(config_path: &Path) -> Result<()> {
     let (mut yaml, mut file) = read_slipmesh(config_path)?;
-    // Before anything is minted: a file of version 2 gives no network without its reference
-    // value, and one of version 1 gives the same network with its defaults written or not.
-    let unset = edit::unset(&file);
+    // Before anything is minted: the files give no network without the reference values.
+    let unset = file.missing_reference_values();
     edit::write_unset(&mut yaml, &file, &unset)?;
     if !unset.is_empty() {
-        file = SlipmeshFile::read(&yaml)
+        file = File::read(&yaml)
             .context("slipmesh.yaml with what it lacked does not read back - not written")?;
     }
     // The ports of the metrics change no secret, and refuse no node.
@@ -29,7 +28,7 @@ pub fn run(config_path: &Path) -> Result<()> {
 
     // What is written is the operator's from then on and is never minted again, so a value a
     // node's config is refused with must not reach the file.
-    let edited = SlipmeshFile::read(&yaml)
+    let edited = File::read(&yaml)
         .context("slipmesh.yaml with what was minted does not read back - not written")?;
     let network = check::network(&edited, None)?;
     let written = sliplib_mesh::secrets::read(&network);
@@ -52,11 +51,10 @@ pub fn run(config_path: &Path) -> Result<()> {
     }
     if !unset.is_empty() {
         let keys: Vec<&str> = unset.iter().map(|(key, _)| *key).collect();
-        let what = match file {
-            SlipmeshFile::V1(_) => "the defaults",
-            SlipmeshFile::V2(_) => "the reference value",
-        };
-        println!("wrote {what} of {} into {path}", keys.join(", "));
+        println!(
+            "wrote the reference value of {} into {path}",
+            keys.join(", ")
+        );
     }
     Ok(())
 }

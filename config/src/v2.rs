@@ -1,4 +1,5 @@
-//! `slipmesh.yaml` in format version 2, as `docs/slipmesh-yaml.md` describes it.
+//! `slipmesh.yaml` in format version 2, as `docs/slipmesh-yaml.md` describes it: every tool reads
+//! it here.
 
 /// Implements `Deserialize` for `$type`, whose `#[serde(remote = "Self")]` derive gives the reading
 /// of its keys, so that it is read from a mapping alone. serde reads an internally tagged enum
@@ -42,7 +43,10 @@ mod testing;
 
 pub use block::{ALL, Block, Exclude, Include, NONE, Order, Platform, Rank};
 pub use check::Invalid;
-pub use file::{Aim, Error, File, PatchDocument, REVISION, TemplateDocument, VERSION};
+pub use file::{
+    Aim, BlockError, Error, File, META_KEY, PatchDocument, Place, REVISION, TemplateDocument,
+    VERSION,
+};
 pub use name::{ClassName, Name, NameError};
 
 use serde::de::{self, MapAccess, Visitor};

@@ -13,15 +13,13 @@ mod file;
 mod fmt;
 mod mint;
 mod rekey;
-mod roadwarrior;
-mod rw;
 
 #[derive(Parser)]
 #[command(
     name = env!("CARGO_BIN_NAME"),
     bin_name = env!("CARGO_BIN_NAME"),
     version,
-    about = "Checks slipmesh.yaml, writes what it lacks and edits its road-warrior clients"
+    about = "Checks slipmesh.yaml and writes what it lacks"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -35,8 +33,8 @@ enum Command {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,
     },
-    /// Write the secrets slipmesh.yaml lacks into it, and the defaults (version 1) or reference
-    /// values (version 2) of the keys it leaves out.
+    /// Write the secrets slipmesh.yaml lacks into it, and the reference values of the keys it
+    /// leaves out.
     Mint {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,
@@ -54,11 +52,6 @@ enum Command {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,
     },
-    /// Add, remove or show a client of a roadwarriors pool.
-    Rw {
-        #[command(subcommand)]
-        command: rw::Command,
-    },
 }
 
 fn main() -> Result<ExitCode> {
@@ -67,7 +60,6 @@ fn main() -> Result<ExitCode> {
         Command::Mint { config } => mint::run(&config)?,
         Command::Fmt { config } => fmt::run(&config)?,
         Command::Rekey { node, config } => rekey::run(&node, &config)?,
-        Command::Rw { command } => rw::run(command)?,
     }
     Ok(ExitCode::SUCCESS)
 }

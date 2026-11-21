@@ -11,10 +11,8 @@ description = "The tool for slipmesh.yaml itself: checks the file the way the to
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-qrcode.workspace = true
 sliplib-config.workspace = true
 sliplib-mesh = { workspace = true, features = ["mint"] }
-sliplib-net.workspace = true
 sliplib-secrets.workspace = true
 sliplib-yaml.workspace = true
 

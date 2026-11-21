@@ -1,15 +1,8 @@
-//! The network as the configs of its nodes are computed from it, whatever version of the format
-//! it was written in: every node with the addresses derived for it, every link with what is in
-//! force on it. Each version of the format is lowered into this, and nothing else is computed
-//! from.
-//!
-//! It refuses nothing: it can hold every file of version 1 that reads. What only one version
-//! refuses is refused where that version is read and lowered.
+//! The network as the configs of its nodes are computed from it: every node with the addresses
+//! derived for it, every link with what is in force on it. The files are lowered into this, and
+//! nothing else is computed from.
 
-use crate::secrets::link_key;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
-use sliplib_config::slipmesh_file::SlipmeshFile;
-use sliplib_config::v1::mesh_config::{BypassEntry, RoadwarriorPool, UnknownNode};
 use sliplib_config::v2::Platform;
 pub use sliplib_config::v2::network::Family;
 use sliplib_config::v2::platform::TalosSettings;
@@ -34,74 +27,25 @@ pub struct Network {
     /// The classes of routes by name, each with its protocol number.
     pub classes: Vec<(String, u8)>,
     pub metrics: MetricsPorts,
-    pub format: Format,
 }
 
-/// The version of the format a network was read from, where what is computed or said of it
-/// depends on that: how a message names a key, which nodes have one, and what only version 1
-/// holds.
-#[derive(Debug)]
-pub enum Format {
-    V1(Box<V1Only>),
-    V2,
+/// How the files name a node's private key, under the node.
+pub const PRIVATE_KEY: &str = "wireguard.private_key";
+
+/// Where the files hold the key of `node`, as a message names it.
+pub fn node_key(node: &str) -> String {
+    format!("nodes.{node}.{PRIVATE_KEY}")
 }
 
-impl Format {
-    /// What only a file of version 1 holds.
-    pub fn v1(&self) -> Option<&V1Only> {
-        match self {
-            Self::V1(v1) => Some(v1),
-            Self::V2 => None,
-        }
-    }
-
-    /// How the files name a node's private key, under the node.
-    pub fn private_key(&self) -> &'static str {
-        match self {
-            Self::V1(_) => "mesh_private_key",
-            Self::V2 => "wireguard.private_key",
-        }
-    }
-
-    /// How the files name the MTU set for the mesh.
-    pub fn mtu(&self) -> &'static str {
-        match self {
-            Self::V1(_) => "cluster.mesh_mtu",
-            Self::V2 => "mesh.mtu",
-        }
-    }
-
-    /// How the files name the network the links' IPv4 addresses come from.
-    pub fn tunnel_ipv4(&self) -> &'static str {
-        match self {
-            Self::V1(_) => "cluster.tunnel_networks",
-            Self::V2 => "addressing.tunnel.ipv4",
-        }
-    }
-
-    /// Whether every node has a key: version 2 has one created only for a node on a link.
-    pub fn keys_every_node(&self) -> bool {
-        matches!(self, Self::V1(_))
-    }
-
-    /// Where the files hold the key of `node`, as a message names it.
-    pub fn node_key(&self, node: &str) -> String {
-        let key = self.private_key();
-        match self {
-            Self::V1(_) => format!("nodes[{node}].{key}"),
-            Self::V2 => format!("nodes.{node}.{key}"),
-        }
-    }
-
-    /// Where the files hold the obfuscation of `link`, as a message names it. Version 1 gives a
-    /// link no name, and it is named by its two nodes, sorted.
-    pub fn link_obfuscation(&self, link: &Link) -> String {
-        match self {
-            Self::V1(_) => format!("mesh.links[{}].obfuscation", link_key(&link.ends)),
-            Self::V2 => format!("mesh.links.{}.amneziawg.obfuscation", link.name),
-        }
-    }
+/// Where the files hold the obfuscation of `link`, as a message names it.
+pub fn link_obfuscation(link: &Link) -> String {
+    format!("mesh.links.{}.amneziawg.obfuscation", link.name)
 }
+
+/// A name that is not one of `nodes`.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("unknown node {0:?}")]
+pub struct UnknownNode(pub String);
 
 impl Network {
     pub fn node(&self, name: &str) -> Result<&Node, UnknownNode> {
@@ -111,13 +55,11 @@ impl Network {
             .ok_or_else(|| UnknownNode(name.to_owned()))
     }
 
-    /// Whether the node needs a private key: it is on a link, or the version says every node does.
+    /// Whether the node needs a private key: it is on a link.
     pub fn needs_a_key(&self, node: &str) -> bool {
-        self.format.keys_every_node()
-            || self
-                .links
-                .iter()
-                .any(|link| link.ends.iter().any(|end| end == node))
+        self.links
+            .iter()
+            .any(|link| link.ends.iter().any(|end| end == node))
     }
 }
 
@@ -146,8 +88,8 @@ impl From<&TalosSettings> for MetricsPorts {
 #[derive(Debug)]
 pub struct Node {
     pub name: String,
-    /// Whose tool configures the node. A file of version 1 does not say.
-    pub platform: Option<Platform>,
+    /// Whose tool configures the node.
+    pub platform: Platform,
     pub loopback: (Ipv4Addr, Ipv6Addr),
     /// The IPv6 link-local of every link's interface on the node.
     pub link_local: Ipv6Addr,
@@ -189,47 +131,9 @@ pub struct Link {
     pub persistent_keepalive: Option<Range<u16>>,
 }
 
-/// What a file of version 1 describes besides the mesh.
-#[derive(Debug)]
-pub struct V1Only {
-    pub pools: Vec<RoadwarriorPool>,
-    /// The obfuscation a pool starts from.
-    pub obfuscation: Obfuscation,
-    pub bypass: Vec<BypassEntry>,
-    pub bypass_refresh_interval_secs: Option<u64>,
-}
-
-/// Why a file that reads gives no network to compute from, as the lowering of its version says
-/// it.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    #[error(transparent)]
-    V1(#[from] crate::v1::Error),
-    #[error(transparent)]
-    V2(#[from] crate::v2::Error),
-}
-
-/// `file` as the network its nodes' configs are computed from, whichever version it is of.
-pub fn lower(file: &SlipmeshFile) -> Result<Network, Error> {
-    Ok(match file {
-        SlipmeshFile::V1(file) => crate::v1::lower(file.topology())?,
-        SlipmeshFile::V2(file) => crate::v2::lower(file)?,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const VERSION_1: &str = "slipmesh: {kind: network}\ncluster:\n  bgp_as: 64500\n  \
-        loopback_networks: {ipv4: 198.51.100.0/25, ipv6: '3fff:0:0:1::/64'}\nnodes:\n  - {name: \
-        node-a, node_id: 0.0.0.1}\n";
-    const VERSION_2: &str = include_str!("../../docs/example/mesh.yaml");
-
-    fn lowered(raw: &str) -> Result<Network, Error> {
-        lower(&SlipmeshFile::parse(raw).unwrap())
-    }
 
     #[test]
     fn the_metrics_ports_are_those_of_the_settings_of_talos() {
@@ -252,35 +156,5 @@ mod tests {
             }
         );
         assert_eq!(MetricsPorts::from(&settings("{}")), MetricsPorts::default());
-    }
-
-    #[test]
-    fn a_file_of_either_version_is_lowered_by_its_own() {
-        let of_version_1 = lowered(VERSION_1).unwrap();
-        assert!(matches!(of_version_1.format, Format::V1(_)));
-        let of_version_2 = lowered(VERSION_2).unwrap();
-        assert!(matches!(of_version_2.format, Format::V2));
-    }
-
-    #[test]
-    fn a_refusal_is_the_one_the_lowering_of_the_version_gives() {
-        let of_version_1 =
-            lowered(&VERSION_1.replace("198.51.100.0/25", "198.51.100.0")).unwrap_err();
-        assert!(
-            matches!(
-                of_version_1,
-                Error::V1(crate::v1::Error::Network {
-                    field: "cluster.loopback_networks.ipv4",
-                    ..
-                })
-            ),
-            "{of_version_1:?}"
-        );
-        let of_version_2 =
-            lowered(&VERSION_2.replace("  interface_prefix: mesh-\n", "")).unwrap_err();
-        assert!(
-            matches!(of_version_2, Error::V2(crate::v2::Error::NoInterfacePrefix)),
-            "{of_version_2:?}"
-        );
     }
 }

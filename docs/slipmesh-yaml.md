@@ -7,10 +7,10 @@ its rules, which traffic leaves through which node - is described where it runs;
 file](slipmesh-yaml-v1-to-v2.md#what-leaves-the-file) says where the two such parts of version 1 go.
 
 This is the specification of the format. A part no tool serves yet is marked **Planned** where it
-will stand, as [Planned](#planned) explains. No released tool reads version 2 yet: the releases so
-far read version 1, which [Differences from version
-1](slipmesh-yaml-v1-to-v2.md#differences-from-version-1) starts from. What this document says a tool
-does, the first release that reads version 2 does.
+will stand, as [Planned](#planned) explains. sliplib v0.19 and the releases before it read version
+1, which [Differences from version 1](slipmesh-yaml-v1-to-v2.md#differences-from-version-1) starts
+from; from v0.20.0 on, the tools read version 2 alone. What this document says a tool does, v0.20.0
+does.
 
 ## The files
 
@@ -140,7 +140,7 @@ slipmesh:
 `version` is the syntax of the format as a whole, 2 in this document. It changes only when the
 syntax is replaced, which means converting every file. A `network` document without `version` is
 version 1, which [Converting a file by hand](slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand)
-turns into version 2.
+turns into version 2. A tool refuses it, and a `version` below 2 or `null`, naming that document.
 
 `revision` is the generation of the rules that turn the files into configs. It grows when the same
 data has to give a different result, for instance when what a document configures on a node passes

@@ -1,7 +1,7 @@
-# The network of ../v1 converted to format version 2 by hand, as docs/slipmesh-yaml-v1-to-v2.md
-# says: the test beside it shows that every node gets what it got from the file of version 1, but
-# for what that document lists. The pools and the bypass lists of ../v1 have no place here, and
-# the port its `node-d` wrote into its endpoint is gone.
+# A network of format version 1 converted to version 2 by hand, as docs/slipmesh-yaml-v1-to-v2.md
+# says. ../v1 holds the configs version 1 gave its nodes, and the test beside it shows that every
+# node gets them, but for what that document lists. The pools and the bypass lists of the file of
+# version 1 have no place here, and the port its `node-d` wrote into its endpoint is gone.
 #
 # Every network and address is from a range reserved for documentation, but the link-local
 # network of the links; a node_id is an identity, not an address. Every name stands for nothing
@@ -80,8 +80,8 @@ mesh:
           rekey_after_time: 100-140
           keepalive_timeout: 12
           random_trailers: false
-    # ../v1 wrote `s3: null` here, which version 1 read as the key left out. In version 2 a
-    # `null` would take the network's `s3` away from the link, so the key is left out.
+    # The file of version 1 wrote `s3: null` here, which version 1 read as the key left out. In
+    # version 2 a `null` would take the network's `s3` away from the link, so the key is left out.
     a-d:
       type: amneziawg
       ends: {node-a: {}, node-d: {}}
@@ -152,7 +152,7 @@ nodes:
         mtu: 1420
     wireguard:
       private_key: IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII=
-  # ../v1 dialed it at the port 51999 of its endpoint; a peer now dials the port of the link.
+  # Version 1 dialed it at the port 51999 of its endpoint; a peer now dials the port of the link.
   node-d:
     platform: talos
     node_id: 0.0.0.4
@@ -161,7 +161,7 @@ nodes:
         endpoint: {ipv4: 192.0.2.4}
     wireguard:
       private_key: MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM=
-  # A host name that ../v1 gave no family, which version 1 counted for IPv6.
+  # A host name the file of version 1 gave no family, which version 1 counted for IPv6.
   node-e:
     platform: talos
     node_id: 0.0.0.5
