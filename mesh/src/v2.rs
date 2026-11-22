@@ -410,7 +410,7 @@ mod tests {
         use crate::mtu::MtuError;
         let underlay = mtu_refusal("{nodes: {node-b: {underlay: {wan: {mtu: 0}}}}}");
         assert!(
-            matches!(&underlay, MtuError::AboveLimit { limit: 0, link, .. } if link == "a-b"),
+            matches!(&underlay, MtuError::LimitBelowMinimum { link, limit: 0 } if link == "a-b"),
             "{underlay:?}"
         );
         let mesh = mtu_refusal("{mesh: {mtu: 0}}");

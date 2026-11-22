@@ -33,7 +33,7 @@ pub enum MtuError {
     #[error("mesh.mtu {mtu} is below {MIN_MESH_MTU}, the least IPv6 allows a link")]
     BelowMinimum { mtu: u32 },
     #[error(
-        "mesh link {link} limits the mesh MTU to {limit}, below {MIN_MESH_MTU}, the least IPv6 allows a link"
+        "mesh link {link} limits the mesh MTU to {limit}, below {MIN_MESH_MTU}, the least IPv6 allows a link - raise the underlay `mtu` of its narrower end, or lower its `s4`"
     )]
     LimitBelowMinimum { link: String, limit: u32 },
 }
@@ -72,30 +72,25 @@ pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32
         }
         return Ok(None);
     };
-    let mtu = match mesh.mtu {
-        Some(mtu) => {
-            if mtu > limit {
-                return Err(MtuError::AboveLimit {
-                    mtu,
-                    limit,
-                    link: link.name.clone(),
-                });
-            }
-            if mtu < MIN_MESH_MTU {
-                return Err(MtuError::BelowMinimum { mtu });
-            }
-            mtu
-        }
-        None => {
-            if limit < MIN_MESH_MTU {
-                return Err(MtuError::LimitBelowMinimum {
-                    link: link.name.clone(),
-                    limit,
-                });
-            }
-            limit
-        }
+    if limit < MIN_MESH_MTU {
+        return Err(MtuError::LimitBelowMinimum {
+            link: link.name.clone(),
+            limit,
+        });
+    }
+    let Some(mtu) = mesh.mtu else {
+        return Ok(Some(limit));
     };
+    if mtu > limit {
+        return Err(MtuError::AboveLimit {
+            mtu,
+            limit,
+            link: link.name.clone(),
+        });
+    }
+    if mtu < MIN_MESH_MTU {
+        return Err(MtuError::BelowMinimum { mtu });
+    }
     Ok(Some(mtu))
 }
 
@@ -308,18 +303,14 @@ mod tests {
             (AT_V6, UNDIALED, amneziawg("{s4: 1420}"), 0),
             (AT_V6, UNDIALED, amneziawg("{s4: 1500}"), 0),
         ] {
-            let unset = refusal_of(a, b, &link, "");
-            assert!(
-                matches!(&unset, MtuError::LimitBelowMinimum { link, limit: l }
-                    if link == "a-b" && *l == limit),
-                "{b} {link}: {unset:?}"
-            );
-            let set = refusal_of(a, b, &link, ", mtu: 1280");
-            assert!(
-                matches!(&set, MtuError::AboveLimit { mtu: 1280, limit: l, link }
-                    if link == "a-b" && *l == limit),
-                "{b} {link}: {set:?}"
-            );
+            for mesh in ["", ", mtu: 1280", ", mtu: 1279", ", mtu: 1"] {
+                let refusal = refusal_of(a, b, &link, mesh);
+                assert!(
+                    matches!(&refusal, MtuError::LimitBelowMinimum { link, limit: l }
+                        if link == "a-b" && *l == limit),
+                    "{b} {link} {mesh}: {refusal:?}"
+                );
+            }
         }
     }
 
