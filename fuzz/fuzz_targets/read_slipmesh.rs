@@ -5,10 +5,10 @@ use serde::de::DeserializeOwned;
 use sliplib_config::v2::network::LinkKind;
 use sliplib_config::v2::{Aim, File, Name};
 use sliplib_config::{Obfuscation, Range};
+use sliplib_mesh::addressing::link_local_from_loopback;
 use sliplib_mesh::model::Network;
-use sliplib_net::Ipv6Net;
 use sliplib_yaml::{Mapping, MultiDoc, Value};
-use std::net::Ipv6Addr;
+use std::net::IpAddr;
 
 /// What the loader holds of a document's aim: it reaches nodes, each of the document's platform.
 fn assert_aimed(files: &File, aim: &Aim) {
@@ -149,18 +149,14 @@ fn written_network(text: &str) -> Value {
         .clone()
 }
 
-/// Where a link-local comes from when the files name no network for it.
-const DEFAULT_LINK_LOCAL: Ipv6Net =
-    Ipv6Net::new_assert(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 64);
-
 /// Every address the lowering derived lies in the network it is derived in: a node's loopbacks,
-/// its link-local, and the IPv4 of its links where the links carry one.
+/// its link-local, and the IPv4 of its links where the links carry one. Without a network for the
+/// link-locals, a node's is that of its IPv6 loopback. The loader's rule on `node_id`s leaves every
+/// kind of address distinct between nodes.
 fn assert_derived(files: &File, network: &Network) {
     let addressing = &files.network().addressing;
     let tunnel = addressing.tunnel.as_ref();
-    let link_local = tunnel
-        .and_then(|tunnel| tunnel.link_local)
-        .map_or(DEFAULT_LINK_LOCAL, |prefix| prefix.0);
+    let link_local = tunnel.and_then(|tunnel| tunnel.link_local);
     let tunnel_ipv4 = tunnel.and_then(|tunnel| tunnel.ipv4).map(|prefix| prefix.0);
     for node in &network.nodes {
         let name = &node.name;
@@ -172,13 +168,46 @@ fn assert_derived(files: &File, network: &Network) {
             addressing.loopback.ipv6.0.contains(&node.loopback.1),
             "{name}"
         );
-        assert!(link_local.contains(&node.link_local), "{name}");
+        match link_local {
+            Some(network) => assert!(network.0.contains(&node.link_local), "{name}"),
+            None => assert_eq!(
+                node.link_local,
+                link_local_from_loopback(node.loopback.1),
+                "{name}"
+            ),
+        }
         match (tunnel_ipv4, node.tunnel_ipv4) {
             (Some(net), Some(address)) => assert!(net.contains(&address), "{name}"),
             (None, None) => {}
             other => panic!("{name}: the IPv4 of its links {other:?}"),
         }
     }
+    let distinct = |kind: &str, addresses: Vec<IpAddr>| {
+        let mut seen = std::collections::BTreeSet::new();
+        for address in addresses {
+            assert!(seen.insert(address), "two nodes with the {kind} {address}");
+        }
+    };
+    let nodes = &network.nodes;
+    distinct(
+        "IPv4 loopback",
+        nodes.iter().map(|n| n.loopback.0.into()).collect(),
+    );
+    distinct(
+        "IPv6 loopback",
+        nodes.iter().map(|n| n.loopback.1.into()).collect(),
+    );
+    distinct(
+        "link-local",
+        nodes.iter().map(|n| n.link_local.into()).collect(),
+    );
+    distinct(
+        "IPv4 on the links",
+        nodes
+            .iter()
+            .filter_map(|n| n.tunnel_ipv4.map(IpAddr::from))
+            .collect(),
+    );
 }
 
 /// What a tool reads of a file of format version 2, and what the loader promises of it.
