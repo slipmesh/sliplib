@@ -130,29 +130,17 @@ fn check_refuses_a_file_without_the_interface_prefix_once_naming_mint() {
 }
 
 #[test]
-fn check_reads_the_settings_of_every_platform_and_the_keys_of_every_template() {
-    for document in [
-        "slipmesh: {kind: platform, platform: talos}\nlisten: true\n",
-        "slipmesh: {kind: platform, platform: routeros}\nmetrics: {}\n",
-        "slipmesh: {kind: template, platform: talos}\ndaemon: router\ncontent: x\n",
-    ] {
-        // Without the documents of the example: it holds the one `platform` document of `talos`.
-        let config = Config::holding(MESH);
-        mint(&config);
-        let before = config.text();
-        std::fs::write(&config.path, format!("{before}---\n{document}")).unwrap();
-        let checked = config.run(&["check"]);
-        assert_eq!(checked.code, Some(1), "{document}");
-        // Refused by the line the document starts at, the one after its `---`.
-        let line = before.lines().count() + 2;
-        assert!(
-            names_line(&checked.stderr, line),
-            "{line}: {}",
-            checked.stderr
-        );
-        // The network is still checked: a document of a platform stops no node.
-        assert!(checked.stdout.contains("node-a: ok"), "{}", checked.stdout);
-    }
+fn check_reads_the_block_of_a_platform_or_template_document_and_not_its_body() {
+    // Without the documents of the example: it holds the one `platform` document of `talos`.
+    let config = Config::holding(MESH);
+    mint(&config);
+    let bodies = "slipmesh: {kind: platform, platform: talos}\nlisten: true\n---\n\
+                  slipmesh: {kind: platform, platform: routeros}\nmetrics: {}\n---\n\
+                  slipmesh: {kind: template, platform: talos}\ndaemon: router\ncontent: x\n";
+    std::fs::write(&config.path, format!("{}---\n{bodies}", config.text())).unwrap();
+    let checked = config.run(&["check"]);
+    assert_eq!(checked.code, Some(0), "{}", checked.stderr);
+    assert!(checked.stdout.contains("node-a: ok"), "{}", checked.stdout);
 }
 
 #[test]
@@ -262,25 +250,6 @@ fn mint_and_rekey_write_a_key_under_a_wireguard_written_null() {
     });
     assert_eq!(config.run(&["rekey", "--node", "node-c"]).code, Some(0));
     assert!(config.documents()[0]["nodes"]["node-c"]["wireguard"]["private_key"].is_string());
-}
-
-#[test]
-fn check_reports_every_platform_document_that_does_not_read_naming_the_file() {
-    let config = minted();
-    let bad = "slipmesh: {kind: platform, platform: routeros}\nmetrics: {}\n---\n\
-               slipmesh: {kind: template, platform: talos}\ndaemon: router\ncontent: x\n";
-    std::fs::write(&config.path, format!("{}---\n{bad}", config.text())).unwrap();
-    let checked = config.run(&["check"]);
-    assert_eq!(checked.code, Some(1));
-    let refusals: Vec<&str> = checked.stderr.lines().collect();
-    assert_eq!(refusals.len(), 2, "{}", checked.stderr);
-    let path = config.path.display().to_string();
-    assert!(
-        refusals.iter().all(|refusal| refusal.starts_with(&path)),
-        "{}",
-        checked.stderr
-    );
-    assert!(checked.stdout.contains("node-a: ok"), "{}", checked.stdout);
 }
 
 #[test]

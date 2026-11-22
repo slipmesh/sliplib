@@ -1,16 +1,11 @@
-//! `slipmesh.yaml`, which every tool reads, and the daemons' configs: what a generator writes for a
-//! node from it and what reads that - the daemons on the node, and the RouterOS side. Types and
-//! their checks only; reading and writing files is `sliplib-yaml`'s.
+//! `slipmesh.yaml`, and what every platform's daemons share of their configs.
 
 pub mod awg;
-mod metrics;
-pub mod nftables;
 mod obfuscation;
 mod range;
 pub mod router;
 pub mod v2;
 
-pub use metrics::{MetricsConfig, MetricsError};
 pub use obfuscation::{
     DEFAULT_MAGIC_HEADERS, HEADER_PROTECTION_NONCE_SIZE, Obfuscation, ObfuscationError, TrailerLoss,
 };

@@ -5,11 +5,9 @@
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::v2::Platform;
 pub use sliplib_config::v2::network::Family;
-use sliplib_config::v2::platform::TalosSettings;
 use sliplib_config::{Obfuscation, Range};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::num::NonZeroU16;
 
 #[derive(Debug)]
 pub struct Network {
@@ -26,7 +24,6 @@ pub struct Network {
     pub mtu: Option<u32>,
     /// The classes of routes by name, each with its protocol number.
     pub classes: Vec<(String, u8)>,
-    pub metrics: MetricsPorts,
 }
 
 /// How the files name a node's private key, under the node.
@@ -60,28 +57,6 @@ impl Network {
         self.links
             .iter()
             .any(|link| link.ends.iter().any(|end| end == node))
-    }
-}
-
-/// The ports a node's daemons serve their metrics on, on its own IPv4 loopback. None, no
-/// listener.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct MetricsPorts {
-    pub awg: Option<NonZeroU16>,
-    pub router: Option<NonZeroU16>,
-}
-
-impl From<&TalosSettings> for MetricsPorts {
-    fn from(settings: &TalosSettings) -> Self {
-        let metrics = settings.metrics.as_ref();
-        Self {
-            awg: metrics
-                .and_then(|metrics| metrics.mesh.as_ref())
-                .map(|listener| listener.port),
-            router: metrics
-                .and_then(|metrics| metrics.router.as_ref())
-                .map(|listener| listener.port),
-        }
     }
 }
 
@@ -128,32 +103,4 @@ pub struct Link {
     /// The keepalive the files set for the link. None, each end takes the default of what its
     /// interface speaks.
     pub persistent_keepalive: Option<Range<u16>>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_metrics_ports_are_those_of_the_settings_of_talos() {
-        let settings = |yaml: &str| -> TalosSettings { sliplib_yaml::from_str(yaml).unwrap() };
-        let port = NonZeroU16::new;
-        assert_eq!(
-            MetricsPorts::from(&settings(
-                "metrics: {mesh: {port: 9586}, router: {port: 9324}}"
-            )),
-            MetricsPorts {
-                awg: port(9586),
-                router: port(9324)
-            }
-        );
-        assert_eq!(
-            MetricsPorts::from(&settings("metrics: {router: {port: 9324}}")),
-            MetricsPorts {
-                awg: None,
-                router: port(9324)
-            }
-        );
-        assert_eq!(MetricsPorts::from(&settings("{}")), MetricsPorts::default());
-    }
 }

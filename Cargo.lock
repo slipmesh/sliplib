@@ -621,6 +621,7 @@ version = "0.20.0"
 dependencies = [
  "anyhow",
  "rand",
+ "serde",
  "sliplib-config",
  "sliplib-secrets",
  "sliplib-yaml",

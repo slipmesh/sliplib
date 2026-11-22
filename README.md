@@ -10,7 +10,7 @@ the command-line tool for `slipmesh.yaml` itself.
 | [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and written back |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
-| [`sliplib-config`](config) | `slipmesh.yaml`, its schema and its loader, and the configs of the daemons, each with its checks |
+| [`sliplib-config`](config) | `slipmesh.yaml`, its schema and its loader, and what every platform's daemons share of their configs, with its checks |
 | [`sliplib-mesh`](mesh) | A node's `awg` and `router` configs, computed from `slipmesh.yaml` |
 
 The crates and the tool are one workspace with one version and one tag. A change to one crate moves
@@ -52,9 +52,7 @@ when it concerns one node - a `node_id` that is not an address, is `0.0.0.0` or 
 network it is added to, two links on one port. It writes nothing.
 
 What leaves no network to compute from is one refusal for the file as well: a file without
-`mesh.interface_prefix`, naming `mint`, which writes it. It reads the
-settings of each platform and the keys of each `template`, refuses each of those that does not
-read, and still checks the nodes. A refusal that `mint` cures says so.
+`mesh.interface_prefix`, naming `mint`, which writes it. A refusal that `mint` cures says so.
 
 Where nothing was refused, it then prints a warning, on a line that starts with `warning:`, for
 every link that loses data packets it should deliver. A warning refuses nothing and leaves the
@@ -63,8 +61,8 @@ is a range, with the share of data packets dropped at most where the bytes read 
 the link has no `header_protection_key` while one of `s1` to `s3` stands 1 to 15 bytes above `s4`.
 A file with a refusal gets none: what a link loses is counted from settings that pass the checks.
 
-What only one platform's tool knows is that tool's own check - the Talos generator's `--check`
-for the text of a template and the body of a `patch` of a Talos node.
+It reads the block of a `platform`, `template` or `patch` document and not its body: that is the
+platform's tool's own check, such as the Talos generator's `--check`.
 
 ### `mint`
 
@@ -175,17 +173,18 @@ mean.
 
 ### `sliplib-config`
 
-`slipmesh.yaml`, which every tool reads, and the daemons' configs: what a config generator writes
-for a node from it, and what its readers take - the daemons on the node, and the RouterOS tool.
-Types and their checks only; reading and writing the files is `sliplib-yaml`'s.
+`slipmesh.yaml`, which every tool reads, and what every platform's daemons share of their configs:
+what a config generator writes for a node from it, and what its readers take - the daemons on the
+node, and the RouterOS tool. A key of one daemon alone, such as where it serves its metrics, is its
+platform's tool's. Types and their checks only; reading and writing the files is `sliplib-yaml`'s.
 
 Every check and the loader return an error type of their own, one variant for each refusal:
-`v2::Error`, `v2::Invalid`, `v2::NameError` and those of `v2::groups`, `v2::network` and
-`v2::platform`, `awg::Invalid`, `router::Invalid` and `LoopbackAddressError`, `ObfuscationError`,
-`MetricsError`. A variant's text is one line of the refusal. Where that line names its cause
-itself - an address that does not parse, with why - the variant holds the cause as a field and has
-no `source`; where the cause is a line of its own, it is the variant's `source`. A variant never
-does both, so printing the whole chain gives the whole message, each part once.
+`v2::Error`, `v2::Invalid`, `v2::NameError` and those of `v2::groups` and `v2::network`,
+`awg::Invalid`, `router::Invalid` and `LoopbackAddressError`, `ObfuscationError`. A variant's text
+is one line of the refusal. Where that line names its cause itself - an address that does not parse,
+with why - the variant holds the cause as a field and has no `source`; where the cause is a line of
+its own, it is the variant's `source`. A variant never does both, so printing the whole chain gives
+the whole message, each part once.
 
 - `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md).
   `v2::File` reads the files as a whole (`parse`, `read`) and refuses whatever its specification
@@ -196,13 +195,12 @@ does both, so printing the whole chain gives the whole message, each part once.
   in the file, for a write. It gives the `network` with what is in force for each
   node and each link written where they hold their own: a node's `routing`, a link's block of its
   type. The `template` and `patch` documents come with their `Aim`: the nodes each reaches, and
-  its rank among those that reach one node (`templates_for`, `patches_for`). The settings of a
-  platform (`talos_settings`, `routeros_settings`) and the keys of a `template`
-  (`TemplateDocument::read`) are read when asked for, so a tool reads only its own platform's.
-  The text of a template and the body of a `patch` are their platform's tool's to read. This
+  its rank among those that reach one node (`templates_for`, `patches_for`), as an
+  `AimedDocument`; a `platform` document as a `PlatformDocument` (`platform`). The body is its
+  platform's tool's: `read` gives it as the tool's type, a refusal naming the document and the line,
+  and a template or patch also gives its `value`. This
   release reads one `network` and one `groups` document, and refuses a second, which the format
   lays over the first, until the tools read several files.
-- `nftables::TEMPLATE_PATH`, where the `nftables` service reads its ruleset template.
 - `awg`: `AwgConfig` with its interfaces and peers, and `validate`. A peer's `persistent_keepalive`
   is a number of seconds or a range of them. `InterfaceEntry::keepalive_of` gives what a peer ends
   up with: none for a peer without an `endpoint`, which is only waited for; for a dialed one its
@@ -213,10 +211,9 @@ does both, so printing the whole chain gives the whole message, each part once.
   sources, and `validate`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would
   otherwise fail on. `Obfuscation::trailer_loss` says how a tunnel with `random_trailers` on loses
-  data packets, as `TrailerLoss`: a share of them where one of `h1` to `h3` is a range, or by
-  their own header where an offset reads it. `Obfuscation::bytes_into_clear_header` says whether
-  an offset does, for the warning and for whatever creates an offset. `MetricsConfig` is where a
-  daemon serves its Prometheus endpoint.
+  data packets, as `TrailerLoss`: a share of them where one of `h1` to `h3` is a range, or by their
+  own header where an offset reads it. `Obfuscation::bytes_into_clear_header` says whether an offset
+  does, for the warning and for whatever creates an offset.
 - `Range`, the type of the magic headers and the timing and padding values of `Obfuscation`. The
   kernel module draws each of them from a range, written as one number or as `lo-hi`. A number
   is rendered into a node's config as a number and a range as a string, which a daemon built
@@ -235,19 +232,17 @@ from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those t
 
 - `model::Network`, what the configs are computed from: each node with its derived addresses,
   platform and key; each link with its keepalive and obfuscation in force, the obfuscation empty on
-  a `wireguard` link; the route classes; the ports of the metrics listeners. `v2::lower` gives it
-  from a `v2::File`, refusing one without `mesh.interface_prefix`. The metrics ports are the `talos`
-  settings, which lowering does not read: the Talos generator and `slipmesh check` set them.
-  `model::node_key` and `model::link_obfuscation` name where the files hold a node's key and a
-  link's obfuscation.
+  a `wireguard` link; the route classes. `v2::lower` gives it from a `v2::File`, refusing one
+  without `mesh.interface_prefix`. `model::node_key` and `model::link_obfuscation` name where the
+  files hold a node's key and a link's obfuscation.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig` from the network, each
   checked as the node checks it. It refuses a missing key of the node, unless it is on no link, or
   of a peer, and a link of type `amneziawg` whose obfuscation lacks one of `jc`, `jmin`, `jmax`,
   `s1`, `s2` and `h1` to `h4`, naming what lacks what; nothing of nodes and links the node is not
   on. Such a refusal gives its `secrets::MissingSecret` through `render::Error::missing_secret`, for
   a tool to say how to create it. A dialed peer gets its link's keepalive where that differs from
-  what `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes of
-  `talos`.
+  what `InterfaceEntry::keepalive_of` gives without it. No metrics listener: the Talos generator
+  adds it to its daemons' own configs.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
   each by the entry it belongs to, and no key for a node on no link, or `NoHeaderLeft`
   when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a
@@ -354,13 +349,13 @@ fail each time; [`.cargo/mutants.toml`](.cargo/mutants.toml) lists what it skips
 [`mesh/tests/golden.rs`](mesh/tests/golden.rs) pins what the files give their nodes. Under
 [`mesh/tests/golden/`](mesh/tests/golden), `v1` and `v1-alternate` hold the configs that two
 networks of format version 1 gave every node, with derived public keys named by their owner; the
-first set every key of that format, the second the other side of each key a file sets once. `v2`
-and `v2-alternate` are the same two networks converted to version 2 by hand, and every node of each
-gets those configs, but for what [a conversion
-changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand). The files hold values: the
-test reads each into its type and writes it back, and the text has to come out the same. A change
-of what a node gets fails the twins; a change of how a config is written fails the read-back until
-the files are rewritten in the new form, which the pull request then shows.
+first set every key of that format, the second the other side of each key a file sets once. `v2` and
+`v2-alternate` are the same two networks converted to version 2 by hand, and every node of each gets
+those configs, but for what [a conversion
+changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand) and the keys of a daemon's own
+config, `metrics` and `handshake_stale_secs`. The files hold values: the test reads each into the
+shared type with those keys beside it and writes it back, and the values have to come out the same.
+A change of what a node gets fails the twins; a key the types do not take fails the read-back.
 
 ## Releasing
 
