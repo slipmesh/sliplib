@@ -14,10 +14,11 @@ does.
 
 ## The files
 
-A network is written in one file or several, read as one. A tool takes each file as plain text: a
-file kept encrypted is decrypted by whatever runs the tool, and the format knows nothing of how.
-The nodes' private keys are written in the clear, so the file that holds them is kept where such
-files are kept; [several files](#several-files) let it be a file of its own.
+A network is written in one file, which a tool takes with `--config`; [several
+files](#several-files) are **Planned**. A tool takes the file as plain text: a file kept encrypted
+is decrypted by whatever runs the tool, and the format knows nothing of how. The nodes' private keys
+are written in the clear, so the file that holds them is kept where such files are kept; with
+several files it could be a file of its own.
 
 People write the documents. Only [`slipmesh`](../README.md#slipmesh) writes values into them - the
 keys nobody can derive, and reference values - and it checks the files as a whole. Every other
@@ -52,8 +53,8 @@ The kinds:
 
 | kind | how many | `include`, `exclude` | `platform` | what it holds |
 | --- | --- | --- | --- | --- |
-| [`network`](#the-network-document) | at least one, laid over each other | not taken | not taken | The mesh: its addressing, routing, links and nodes. |
-| [`groups`](#groups) | any, laid over each other | not taken | not taken | Named sets of nodes, for documents to be aimed at. |
+| [`network`](#the-network-document) | one; **Planned:** several, laid over each other | not taken | not taken | The mesh: its addressing, routing, links and nodes. |
+| [`groups`](#groups) | at most one; **Planned:** several, laid over each other | not taken | not taken | Named sets of nodes, for documents to be aimed at. |
 | [`platform`](#platform) | at most one for a platform | not taken | required | Settings only that platform's tool reads. |
 | [`template`](#template) | any | optional | required | The template a daemon on the node makes its config from. |
 | [`patch`](#patch) | any | optional | required | A document in the platform's own format. |
@@ -63,6 +64,18 @@ misspelled `include` cannot aim a document at every node. A document without the
 error; one that holds nothing - empty, only comments, or `~` - is skipped.
 
 ### Several files
+
+A tool reads one file, given with `--config`. It holds one `network` document, which is required,
+and at most one `groups` document: a second of either is refused, naming the lines of the first two.
+Every `network` document carries `version` and `revision`.
+
+Before the body of any document is parsed, the documents are sorted by `order`, `1000` where it is
+left out; documents of one `order` keep the place they have in the file. That is "the order of the
+documents" below. Where documents are merged or chosen between for a node, their
+[rank](#aiming-a-document-at-nodes) puts one more rule between `order` and that place.
+
+**Planned:** several files, which the rest of this section describes as they will be read, and
+which the tools do not read yet.
 
 A tool takes its files with `--in`, which takes several values and may be repeated:
 `--in cfg/*.yaml` reads every such file of the directory. A command that writes also reads the file
@@ -74,21 +87,17 @@ yet is taken at the canonical path of its directory. Files in one directory ther
 name, and files in different directories by where the directories are, which differs between
 machines.
 
-Before the body of any document is parsed, the documents are sorted by `order`, `1000` where it is
-left out; documents of one `order` keep the order they were read in, by file and then by place in
-the file. That is "the order of the documents" below, and nothing else decides what is laid over
-what. A document that has to come first or last whatever the paths say sets its `order`. Where
-documents are merged or chosen between for a node, their [rank](#aiming-a-document-at-nodes) puts
-one more rule between `order` and the order they were read in.
+The documents are then sorted by `order`, those of one `order` keeping the order they were read in,
+by file and then by place in the file. A document that has to come first or last whatever the
+paths say sets its `order`.
 
 The `network` documents, any number in one file or in several, are
 [laid over each other](#laying-one-value-over-another) in that order from an empty tree, and so
 are the `groups` documents. The result, one network and one set of groups, is what is checked: a
 single document need not be valid alone, so one file may hold the architecture of the mesh and
 another, laid over it, its secrets. The format does not know which keys are secret: a file of
-secrets is an ordinary layer. Every `network` document carries `version` and `revision`, the same
-in all of them; without any `network` document there is no network, which is an error. Documents
-of the other kinds are not laid over each other, only collected in the same order.
+secrets is an ordinary layer. Documents of the other kinds are not laid over each other, only
+collected in the same order.
 
 ### Laying one value over another
 
@@ -103,18 +112,22 @@ other.
 
 It is used in three places:
 
-- **Between documents:** the `network` documents in order over an empty tree, and the `groups`
-  documents likewise, so a `null` in any of them, the first included, means the key is absent,
-  but for the two cases below.
+- **Between documents, Planned with [several files](#several-files):** the `network` documents in
+  order over an empty tree, and the `groups` documents likewise, so a `null` in any of them, the
+  first included, means the key is absent, but for the two cases below.
 - **For a node:** `nodes.<name>.routing` over [`routing`](#routing), by
   [the same path](#a-nodes-routing). A `null` at one of its keys takes the network's value away
-  for that node, whichever document it is written in.
+  for that node.
 - **For a link:** `mesh.links.<name>.<type>` over `mesh.<type>`, the defaults of the type: today
   the [keepalive](#keepalive) of both types and the [obfuscation](#obfuscation) of `amneziawg`. A
   `null` at any depth of it, a key of the block or a field of its `obfuscation`, takes the
-  network's value away for that link, whichever document it is written in: it is how a link drops
+  network's value away for that link: it is how a link drops
   one field of `mesh.amneziawg.obfuscation`. A `null` at a field `slipmesh mint` writes leaves the
-  link without it, and the link is refused as any link that lacks the field is.
+  link without it, and the link is refused as any link that lacks the field is; `slipmesh mint`
+  then writes that field over the `null`, as it writes into any link that lacks it once the
+  defaults are laid under. Where the link's whole `obfuscation` is `null`, which takes away every
+  field laid under it, `mint` writes the fields it mints and a `null` at each other field of
+  `mesh.amneziawg.obfuscation`, so the link goes without those still.
 
 Every key of these two places takes `null`, besides the type its table gives.
 
@@ -140,7 +153,9 @@ slipmesh:
 `version` is the syntax of the format as a whole, 2 in this document. It changes only when the
 syntax is replaced, which means converting every file. A `network` document without `version` is
 version 1, which [Converting a file by hand](slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand)
-turns into version 2. A tool refuses it, and a `version` below 2 or `null`, naming that document.
+turns into version 2. A tool refuses it, and a `version` that is an integer below 2 or `null`,
+naming that document and pointing at that conversion. A `version` that is no integer is refused by
+the block as a value of the wrong type.
 
 `revision` is the generation of the rules that turn the files into configs. It grows when the same
 data has to give a different result, for instance when what a document configures on a node passes
@@ -201,13 +216,14 @@ the one for all wherever it stands, and an `order` set on purpose moves either p
 Only `template` and `patch` take the two keys, both optional. The other kinds are about no node in
 particular, and there the keys are an error.
 
-A document written in the terms of one platform names it with `platform`, one value: a
-[platform of the nodes](#who-serves-a-document). Its `all`, written as the word or as a list of it
-alone, is every node of that platform. With any other `include`, every node it is left reaching
-once `exclude` is taken out has to be of that platform, and a node of another makes the document an
-error, not something passed over. Inside a group there is no platform, and `all` there is every
-node: a group that names it holds nodes of every platform, and makes such a document an error in
-the same way.
+A document written in the terms of one platform names it with `platform`, one value: a [platform of
+the nodes](#who-serves-a-document). Its `all`, wherever it stands in its own `include` or `exclude`,
+is every node of that platform: `include: [all, node-a]` reaches those nodes and `node-a`, but ranks
+as aimed at some nodes, since its `include` is not `all` alone, and `exclude: [all]` leaves the
+document reaching no node, which is refused. Every node the document is left reaching once `exclude`
+is taken out has to be of that platform, and a node of another makes the document an error, not
+something passed over. Inside a group there is no platform, and `all` there is every node: a group
+that names it holds nodes of every platform, and makes such a document an error in the same way.
 
 ### Strict parsing
 
@@ -216,8 +232,8 @@ depends on whose the document is:
 
 - **Every tool, in every document:** the `slipmesh:` block - the kind, the keys it takes, the names
   in `include` and `exclude` - and the version and revision.
-- **Every tool, in the network and the groups:** every key and every value at any depth, once each
-  kind is laid over itself. Every tool serves both.
+- **Every tool, in the network and the groups:** every key and every value at any depth. Every
+  tool serves both.
 - **The tool of a platform, in that platform's documents:** every key and every value of the body,
   an unknown key being an error at any depth.
 - **A tool, in a document of another platform:** the block alone, so a key added to the body does
@@ -272,7 +288,7 @@ These keys default to a value, each with one consumer chain and nothing to agree
 | `order` of a `slipmesh:` block | `1000` | the place of every document that does not set one |
 | `addressing.tunnel.link_local` | `fe80::/64` | the link-local prefix of every interface |
 | `nodes.<name>.underlay.<entry>.mtu` | `1500` | the MTU of Ethernet |
-| `mesh.<type>.persistent_keepalive` and a link's own | `25` on `wireguard`, `20-30` on `amneziawg` | the interval version 1 sends, on `amneziawg` drawn around it at each timer |
+| `mesh.<type>.persistent_keepalive` and a link's own | `25` on `wireguard`, `20-30` on `amneziawg` | the interval WireGuard's own tools suggest behind a NAT, on `amneziawg` drawn around it at each timer |
 | `routing.bfd.min_rx_ms`, `min_tx_ms`, `multiplier` | `300`, `300`, `5` | a link is a tunnel, some of them long: detection in about 1.5 s, where a tighter timer would flap |
 
 For an absent required key `slipmesh mint` may write a *reference value*: the value a network takes
@@ -309,8 +325,8 @@ platforms there are.
 
 ## The network document
 
-The network is one tree, held whole by one `network` document or by several
-[laid over each other](#several-files). It is about no node in particular, and the tool of every
+The network is one tree, held whole by one `network` document; several, laid over each other, are
+[Planned](#several-files). It is about no node in particular, and the tool of every
 platform serves it.
 
 ```yaml
@@ -502,7 +518,12 @@ A host name says no family, so the key says it. A peer dials the first address t
 returns, and a `routeros` device resolves the name itself, so a name with addresses of both
 families has to resolve to the family of its key first, or the links carry an MTU counted for the
 other family's header. `endpoint` takes no port, since each link adds its own; one written with a
-port is refused.
+port is refused. A host name is read as follows: labels of ASCII
+letters, digits and `-` joined by dots, as [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) has
+its labels, none empty, longer than 63 bytes or starting or ending with `-`; at most 253 bytes in
+all, the limit of [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035); and the last label not all
+digits, which RFC 1123 does not require. Anything that is neither such a name nor an IP address is
+refused.
 
 An entry without `endpoint` is a node behind NAT or without a fixed address. It is never dialed: it
 dials the other end of each of its links.
@@ -518,8 +539,7 @@ at its [end](#meshlinks); and both families in one `endpoint`.
 `nodes.<name>.routing` holds the node's own values of [`routing`](#routing) by the same path,
 [laid over](#laying-one-value-over-another) the network's. Today it takes `direct_interfaces`,
 `learn` and `announce`. Each is a list, so the node's list replaces the network's rather than
-extending it: the node gets exactly what it wrote, nothing with `[]`, and nothing with `null`, in
-whichever document it stands.
+extending it: the node gets exactly what it wrote, nothing with `[]`, and nothing with `null`.
 
 ### `mesh`
 
@@ -649,7 +669,13 @@ mesh:
 `0` switches it off. From a range the kernel module draws an interval each time it sets the timer;
 a range starts at 1 or above, since a draw of 0 would send at once. An end sends the keepalive to a
 peer it dials, one whose `underlay` has an `endpoint`; an end that only waits to be dialed sends
-none. `talos` serves it on both types, and `routeros` on `wireguard`, the one type it serves.
+none. `talos` serves it on both types, and `routeros` on `wireguard`, the one type it serves. An
+`awg` daemon older than the one that takes a peer's keepalive from its config entry sends 25 to
+every peer it dials, whatever the file says.
+
+The generator writes `persistent_keepalive` into a peer's entry only where the value differs from
+what the consumer gives a peer without it: 25 on a link of type `wireguard`, `20-30` on one of type
+`amneziawg`.
 
 It is not `keepalive_timeout` of the obfuscation: that one is how long the module waits, once data
 came in, before it answers with an empty packet.
@@ -821,7 +847,9 @@ between. With the default `fe80::/64`, a `node_id` of `0.0.0.5` gives `fe80::5`.
 A network that leaves fewer than 32 bits free takes only the low bits of `node_id`, so those bits
 have to differ between nodes: two nodes with the same derived address on the links, link-local or
 IPv4, are refused, across the whole network and not only between the ends of one link. Unlike the
-IPv6 loopback, `link_local` may be longer than /96.
+IPv6 loopback, `link_local` may be longer than /96. Every node gets such a link-local address, a
+node on no link too, and such a node is refused for a duplicate or for a host part of zeros as any
+other.
 
 **A host part of zeros.** An address whose host part is all zeros is refused only where the prefix
 it stands with on its interface makes it special. On an IPv4 prefix shorter than /31 the host part
@@ -859,14 +887,23 @@ links, whatever their type. `mesh.mtu` lowers it, and one above it is refused. A
 the least IPv6 allows a link, is an error, and so is a `mesh.mtu` with no links, which has no
 interface to give it to.
 
+Two refusals name the node and the key of the underlay `mtu` that causes them, such as
+`underlay.wan.mtu`:
+
+- An underlay `mtu` of either end below the least the family the link is dialed over allows a link:
+  68 for IPv4 ([RFC 791, section 3.1](https://www.rfc-editor.org/rfc/rfc791#section-3.1)), 1280 for
+  IPv6 ([RFC 8200, section 5](https://www.rfc-editor.org/rfc/rfc8200#section-5)).
+- An underlay `mtu` of the narrower end that the bytes the link adds, `32 + 8 + IP + S4` of the
+  formula above, reach or exceed: no room is left for a packet.
+
 ## `groups`
 
 Named sets of nodes, for documents to be [aimed at](#aiming-a-document-at-nodes). They are not the
 architecture of the mesh but what other documents name, so they can be written beside those
-documents, in the same file or in their own. The block of a `groups` document takes `kind` and
-`order` alone, and any number of them are [laid over each other](#several-files) into one set of
-groups. The loader turns a group into its nodes, so every tool understands it; a group configures
-nothing by itself.
+documents, in the same file or, once several files are read, in their own. The block of a `groups`
+document takes `kind` and `order` alone. One is read; several, laid over each other into one set of
+groups, are [Planned](#several-files). The loader turns a group into its nodes, so every tool
+understands it; a group configures nothing by itself.
 
 ```yaml
 slipmesh:
@@ -1059,7 +1096,8 @@ mesh as computed.
 
 ## Example
 
-[`example/`](example) holds a whole network in version 2, in three files read together:
+[`example/`](example) holds a whole network in version 2, written in three files as it will be once
+[several files](#several-files) are read:
 
 - [`mesh.yaml`](example/mesh.yaml), the architecture: three `talos` nodes and a `routeros` one,
   three links and a route class;
@@ -1069,9 +1107,9 @@ mesh as computed.
   patches, and two groups: `workers`, which one patch is aimed with, and `core`, which `workers` is
   made of.
 
-They lie in one directory and sort in that order, so `secrets.yaml` is laid over `mesh.yaml`; the
-same documents in one file would give the same configs. They hold no Planned part, since a file
-with one is refused. One link has a header, a timer and its [keepalive](#keepalive) written as
+A tool reads one file today, so the three are given to it as one, their documents in that order,
+which is what laying `secrets.yaml` over `mesh.yaml` comes to. They hold no Planned part, since a
+file with one is refused. One link has a header, a timer and its [keepalive](#keepalive) written as
 ranges.
 
 Their networks and addresses are from the ranges reserved for documentation, but for the
@@ -1089,17 +1127,20 @@ repeated.
   `mesh.interface_prefix`;
 - `rekey` replaces one node's `wireguard.private_key`.
 
-A command that writes takes one file with `--edit` and writes what it creates there. It reads the
-file too, among the files of `--in`, so it sees what was already written in it; the file may stand
-in `--in` as well, and is [one file](#several-files), read once, either way. An `--edit` file that
-does not exist yet is created, holding one `network` document with the `version` and `revision`
-of the ones read.
+A command that writes replaces the one file it reads, given with `--config`, with what it
+creates in it.
+
+**Planned:** with [several files](#several-files), a command that writes takes one file with
+`--edit` and writes what it creates there. It reads the file too, among the files of `--in`, so it
+sees what was already written in it; the file may stand in `--in` as well, and is one file, read
+once, either way. An `--edit` file that does not exist yet is created, holding one `network`
+document with the `version` and `revision` of the ones read.
 
 ```bash
 slipmesh mint --in mesh.yaml --edit secrets.yaml
 ```
 
-Refused:
+With several files, refused:
 
 - an `--edit` file that exists and does not hold exactly one `network` document, since the command
   would not know which to write into;
@@ -1112,7 +1153,7 @@ groups, templates, every document - is written by hand.
 
 ### A write rewrites the whole file
 
-A command that writes reads its `--edit` file into values, changes the ones it is about, and writes
+A command that writes reads its file into values, changes the ones it is about, and writes
 the file back from the values, in the layout of the YAML serializer. The values survive. Of a file
 written by hand, this does not:
 
@@ -1126,6 +1167,7 @@ written by hand, this does not:
 
 So the first write to a file written by hand changes most of its lines. `slipmesh fmt` makes that
 change alone: it rewrites a file in the form every write leaves it in and changes no value. It takes
+the file given with `--config` and rewrites it in place. **Planned:** with several files, it takes
 the files to rewrite as its arguments, not `--in` and `--edit`, and rewrites each in place, laying
 nothing over anything. It reads back the text it is about to write, and refuses to write it if the
 values of any document differ from the file's. Run once and committed on its own, it keeps every
@@ -1135,18 +1177,3 @@ for instance into a README beside the files.
 A command with nothing to write leaves the file as it is. Before it replaces the file, a command
 other than `fmt` checks that the files, with the result in its place, still read as a valid
 network. Every command replaces the file in one step, keeping its permissions.
-
-### Writing into a file kept encrypted
-
-Whatever decrypts a file for editing hands its editor command one path, that of the decrypted copy,
-as the last word. `--edit` takes that path, and the other files are given with `--in` before it.
-The file itself is not among them: the copy stands in its place.
-
-```bash
-EDITOR="slipmesh mint --in mesh.yaml --edit"
-```
-
-The copy lies in a temporary directory, not beside the file, so its place among the other files
-depends on where that directory is, which differs between machines. Where the files set the same
-keys, the file kept encrypted gives its documents an `order`, so that their place does not depend
-on where the copy lies.

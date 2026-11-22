@@ -33,12 +33,7 @@ slipmesh rekey --node node-a --config slipmesh.yaml
 ```
 
 `--config` is `slipmesh.yaml` of the working directory unless given. A command that writes
-replaces the file in place, so it can be given as an editor command, with `--config` as its last
-word and the path after it:
-
-```bash
-EDITOR="slipmesh mint --config"
-```
+replaces the file in place.
 
 Writing anything rewrites the whole file from its values, in the layout of the YAML serializer.
 Comments outside block scalars are not kept; a document that holds nothing - only comments, empty,
