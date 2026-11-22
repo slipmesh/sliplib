@@ -34,9 +34,9 @@ In general:
   `address_family` it counted a host name for IPv6.
 - One rule for names, which version 1 did not have: ASCII letters, digits, `-`, `_` and `.`, with a
   letter or a digit first and last. `all` and `none` are reserved.
-- New refusals among the nodes, none of which version 1 checked: two nodes with the same loopback
-  address; two nodes with the same address on the links, link-local or IPv4; a link-local whose low
-  64 bits are all zeros.
+- New refusals among the nodes, none of which version 1 checked: a `node_id` wider than the host
+  part of a network it is added to, which version 1 cut to the bits that network leaves free; and
+  `0.0.0.0`.
 - The network of the link-local addresses on the links is a key of its own,
   `addressing.tunnel.link_local`, written with or without an IPv4 network beside it. Version 1 took
   it from `tunnel_networks.ipv6`, which came only together with `ipv4`, and did not check that it
@@ -160,7 +160,12 @@ networks: what else step 6 shows comes from the conversion.
       rule](slipmesh-yaml.md#names), or `all` or `none`, has to change, and so do the names of the
       interfaces named after it on the node's peers. Give every node its `platform`. Its
       `mesh_private_key` becomes `wireguard.private_key`, and its `direct_interfaces` moves under
-      its `routing`.
+      its `routing`. A `node_id` wider than the host part of a network it is added to, which
+      version 1 cut there, and `0.0.0.0`, are refused by step 5. Give such a node the `node_id`
+      version 1 used for its IPv4 loopback, the low bits of the old one that the narrowest of its
+      IPv4 networks leaves free, where no other node holds it, and otherwise any free one that
+      fits every network: `198.51.100.133` under a /25 becomes `0.0.0.5`. Where that network is
+      the IPv4 loopback's, that loopback stays.
    7. Give every node one `underlay` entry, named as you like. Its `mtu` is the node's `uplink_mtu`,
       left out where that was. Its `endpoint` holds the node's `endpoint` without any port and
       without the brackets of an IPv6 address, under the key of its family: the family of the
@@ -222,6 +227,9 @@ networks: what else step 6 shows comes from the conversion.
      link's `port`, every peer's endpoint for that node, in the `awg` config and on a RouterOS peer;
    - where step 4.2 changed a network, the addresses derived from it;
    - where a node was renamed in step 4.6, the interfaces named after it, and what refers to them;
+   - where step 4.6 gave a node another `node_id`, the addresses derived from it that move: its
+     IPv6 loopback, its link-local, any address the old `node_id` did not already give in the new
+     one's place, and what other nodes hold of them, the address of its iBGP sessions among them;
    - where step 4.9 made a link to a `routeros` node, which version 1 could have marked as
      obfuscated, a link of type `wireguard`, the interface of its `talos` end has no obfuscation,
      and the peer's keepalive is 25 where an obfuscated link gave it `20-30`;

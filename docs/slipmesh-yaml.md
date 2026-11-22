@@ -288,7 +288,7 @@ These keys default to a value, each with one consumer chain and nothing to agree
 | key | default | |
 | --- | --- | --- |
 | `order` of a `slipmesh:` block | `1000` | the place of every document that does not set one |
-| `addressing.tunnel.link_local` | `fe80::/64` | the link-local prefix of every interface |
+| `addressing.tunnel.link_local` | none: a node's link-local is `fe80::` and the low 32 bits of its IPv6 loopback | the link-local of every interface |
 | `nodes.<name>.underlay.<entry>.mtu` | `1500` | the MTU of Ethernet |
 | `mesh.<type>.persistent_keepalive` and a link's own | `25` on `wireguard`, `20-30` on `amneziawg` | the interval WireGuard's own tools suggest behind a NAT, on `amneziawg` drawn around it at each timer |
 | `routing.bfd.min_rx_ms`, `min_tx_ms`, `multiplier` | `300`, `300`, `5` | a link is a tunnel, some of them long: detection in about 1.5 s, where a tighter timer would flap |
@@ -377,8 +377,9 @@ interface carries an address from it, derived the way the IPv4 loopback is, and 
 announced as [`direct_interfaces`](#routing) says.
 
 `tunnel.link_local` is the network of the IPv6 link-local address of every link's interface, on
-which OSPFv3 runs. It lies inside `fe80::/10`, and one outside it is refused; left out, it is
-`fe80::/64`. Either of the two keys may be written without the other.
+which OSPFv3 runs. It lies inside `fe80::/10`, and one outside it is refused; left out, a node's
+link-local is `fe80::` and the low 32 bits of its IPv6 loopback. Either of the two keys may be
+written without the other.
 
 **Planned:** `addressing.tunnel.ipv6`, a routable IPv6 address on the links' interfaces.
 
@@ -490,7 +491,7 @@ nodes:
 | key | type | required | what it is |
 | --- | --- | --- | --- |
 | `platform` | `talos` or `routeros` | yes | [Who configures the node](#who-serves-a-document). Any other value is an error. |
-| `node_id` | string in the form of an IPv4 address | yes | The node's identity, from which [its addresses are derived](#what-a-node-gets). Unique among nodes, and so are the addresses derived from it. |
+| `node_id` | string in the form of an IPv4 address | yes | The node's identity, from which [its addresses are derived](#what-a-node-gets). Unique among nodes, not `0.0.0.0`, and no wider than the host part of any network it is added to. |
 | `underlay` | mapping | yes | [What the node reaches the world through](#underlay), exactly one entry. |
 | `wireguard` | mapping | written by `slipmesh mint` | Its one key, `private_key`, is a WireGuard private key: the node's one identity on every link of type `wireguard` or `amneziawg`. |
 | `routing` | mapping | no | [The node's own routing values](#a-nodes-routing). |
@@ -829,10 +830,13 @@ result into what its platform takes.
 a network of `addressing.loopback` with `node_id` in its host part, the same way in both families:
 the network's own bits, then as many low bits of `node_id` as the network leaves free, at most all
 32 as the address's low 32 bits, and in IPv6 zeros between. With the networks `198.51.100.0/25` and
-`3fff:0:0:1::/64`, a `node_id` of `0.0.0.5` gives `198.51.100.5` and `3fff:0:0:1::5`. A unique
-`node_id` does not make the addresses unique: in a /25, `0.0.0.5` and `0.0.0.133` give the same
-IPv4 loopback, and in a /120 `0.0.1.5` and `0.0.0.5` the same IPv6 one. Two nodes with the same
-address in either family are refused.
+`3fff:0:0:1::/64`, a `node_id` of `0.0.0.5` gives `198.51.100.5` and `3fff:0:0:1::5`.
+
+**The rule of `node_id`.** A `node_id` is refused where its significant bits, those up to its
+highest bit set, are more than the host bits of a network it is added to: `addressing.loopback.ipv4`,
+`addressing.loopback.ipv6`, and `addressing.tunnel.ipv4` and `addressing.tunnel.link_local` where
+written. In a /25, `0.0.0.127` is the widest it takes, and `0.0.0.133` is refused. `0.0.0.0` is
+refused too. So two nodes never get one address, and no address has a host part of zeros.
 
 **One interface for each link.** On each end of a link of either type, it is named by
 `mesh.interface_prefix` and the name of the other end, listens on the `port` of the link's block,
@@ -841,31 +845,17 @@ of that node's key, and dialed at that node's `endpoint` and that `port` when it
 The peer is allowed every address: what goes into a link is decided by routing, not by the tunnel.
 
 **The addresses on a link.** An IPv6 link-local, the same on every link of the node, on which
-OSPFv3 runs. It is the network of [`addressing.tunnel.link_local`](#addressing) with `node_id` in
-its host part, derived as the IPv4 loopback is: the network's own bits, then as many low bits of
-`node_id` as the network leaves free, at most all 32 as the address's low 32 bits, and zeros
-between. With the default `fe80::/64`, a `node_id` of `0.0.0.5` gives `fe80::5`. With
-`addressing.tunnel.ipv4` the interface also carries the IPv4 address derived from it.
+OSPFv3 runs. With [`addressing.tunnel.link_local`](#addressing) it is that network with `node_id`
+in its host part, derived as the loopbacks are. Without it, it is `fe80::` and the low 32 bits of
+the node's IPv6 loopback, the address `router` puts on `router-lo`: with the loopback network
+`3fff:0:0:1::/64`, a `node_id` of `0.0.0.5` gives `fe80::5`, and under `3fff::1:0/120` it gives
+`fe80::1:5`. With `addressing.tunnel.ipv4` the interface also carries the IPv4 address derived from
+it. Every node gets a link-local address, a node on no link too.
 
-A network that leaves fewer than 32 bits free takes only the low bits of `node_id`, so those bits
-have to differ between nodes: two nodes with the same derived address on the links, link-local or
-IPv4, are refused, across the whole network and not only between the ends of one link. Every node
-gets such a link-local address, a node on no link too, and such a node is refused for a duplicate
-or for a host part of zeros as any other.
-
-**A host part of zeros.** An address whose host part is all zeros is refused only where the prefix
-it stands with on its interface makes it special. On an IPv4 prefix shorter than /31 the host part
-of all zeros names the network and that of all ones its broadcast address
-([RFC 1812, section 4.2.3](https://www.rfc-editor.org/rfc/rfc1812#section-4.2.3)), and neither is
-taken. On an IPv6 prefix shorter than /127 the host part of all zeros is the Subnet-Router anycast
-address ([RFC 4291, section 2.6.1](https://www.rfc-editor.org/rfc/rfc4291#section-2.6.1)), and is
-not taken. A /31 ([RFC 3021](https://www.rfc-editor.org/rfc/rfc3021)), a /127
-([RFC 6164](https://www.rfc-editor.org/rfc/rfc6164)), a /32 and a /128 have no such address. The
-tools put the loopbacks on their interface as /32 and /128 and the IPv4 address of a link as /32,
-so none of them is refused for its bits. The link-local of a link stands as /64, and so does the
-link-local `router` puts on `router-lo`, `fe80::` and the low 32 bits of the IPv6 loopback: one
-whose low 64 bits are all zeros is refused. Under a loopback network longer than /96, a `node_id`
-whose bits below that network are all zeros gives it.
+**A host part of zeros.** No derived address has one, since a `node_id` is not `0.0.0.0` and fits
+every network it is added to: none is the Subnet-Router anycast address of IPv6
+([RFC 4291, section 2.6.1](https://www.rfc-editor.org/rfc/rfc4291#section-2.6.1)) or the address of
+an IPv4 network.
 
 **Routing.** Every node runs OSPFv3 over its links, which carries the IPv6 loopbacks, and an iBGP
 session with every other node between those loopbacks, under `routing.bgp.as`. iBGP carries IPv4
