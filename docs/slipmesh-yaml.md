@@ -520,9 +520,8 @@ The key under `endpoint` is the family the links to the node are dialed over, an
 A host name says no family, so the key says it. A peer dials the first address the resolver
 returns, and a `routeros` device resolves the name itself, so a name with addresses of both
 families has to resolve to the family of its key first, or the links carry an MTU counted for the
-other family's header. `endpoint` takes no port and no brackets, since each link adds its own
-port: what is not an IP address is a name, given to the resolver as written, and an empty one, or
-one holding `:`, `[` or `]`, is refused.
+other family's header. What is not an IP address is a name, which the loader takes as written and
+the consumer resolves. Each link dials the endpoint at its own port, so `endpoint` holds no port.
 
 An entry without `endpoint` is a node behind NAT or without a fixed address. It is never dialed: it
 dials the other end of each of its links.

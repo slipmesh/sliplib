@@ -29,9 +29,11 @@ In general:
   version 1 ignored there is refused now.
 - The AS number is required. Version 1 read a missing one as 0, which it refused only when a node's
   configs were computed.
-- A node's endpoint says its family by its key, and takes no port. Version 1 dialed a port written
+- A node's endpoint says its family by its key, and holds no port. Version 1 dialed a port written
   there, and counted the MTU of the link as if the endpoint were a host name; without
-  `address_family` it counted a host name for IPv6.
+  `address_family` it counted a host name for IPv6. The loader takes a name as written, so step 4.7
+  takes a port and the brackets of an IPv6 address out, and step 6 shows one left behind in every
+  peer's endpoint for that node.
 - One rule for names, which version 1 did not have: ASCII letters, digits, `-`, `_` and `.`, with a
   letter or a digit first and last. `all` and `none` are reserved.
 - New refusals among the nodes, none of which version 1 checked: a `node_id` wider than the host
