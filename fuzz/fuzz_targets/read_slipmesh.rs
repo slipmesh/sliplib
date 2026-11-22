@@ -5,10 +5,9 @@ use serde::de::DeserializeOwned;
 use sliplib_config::v2::network::LinkKind;
 use sliplib_config::v2::{Aim, File, Name};
 use sliplib_config::{Obfuscation, Range};
-use sliplib_mesh::addressing::link_local_from_loopback;
 use sliplib_mesh::model::Network;
 use sliplib_yaml::{Mapping, MultiDoc, Value};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 /// What the loader holds of a document's aim: it reaches nodes, each of the document's platform.
 fn assert_aimed(files: &File, aim: &Aim) {
@@ -149,35 +148,72 @@ fn written_network(text: &str) -> Value {
         .clone()
 }
 
-/// Every address the lowering derived lies in the network it is derived in: a node's loopbacks,
-/// its link-local, and the IPv4 of its links where the links carry one. Without a network for the
-/// link-locals, a node's is that of its IPv6 loopback. The loader's rule on `node_id`s leaves every
-/// kind of address distinct between nodes.
+/// The host bits of `address` in a network of `prefix_len`, out of `width` bits.
+fn host_bits(address: u128, prefix_len: u8, width: u8) -> u128 {
+    let host = width - prefix_len;
+    if host == 0 {
+        0
+    } else {
+        address & (u128::MAX >> (128 - u32::from(host)))
+    }
+}
+
+/// Every address the lowering derived is the network it is derived in with the whole `node_id` in
+/// its host bits: a node's loopbacks, its link-local, and the IPv4 of its links where the links
+/// carry one. Without a network for the link-locals, a node's is `fe80::` and the low 32 bits of
+/// its IPv6 loopback. With `node_id`s unique, not `0.0.0.0` and fitting, the loader's rule, every
+/// kind of address is distinct between nodes and none has a host part of zeros.
 fn assert_derived(files: &File, network: &Network) {
-    let addressing = &files.network().addressing;
+    let written = files.network();
+    let addressing = &written.addressing;
     let tunnel = addressing.tunnel.as_ref();
-    let link_local = tunnel.and_then(|tunnel| tunnel.link_local);
+    let link_local = tunnel
+        .and_then(|tunnel| tunnel.link_local)
+        .map(|prefix| prefix.0);
     let tunnel_ipv4 = tunnel.and_then(|tunnel| tunnel.ipv4).map(|prefix| prefix.0);
+    let (ipv4, ipv6) = (addressing.loopback.ipv4.0, addressing.loopback.ipv6.0);
     for node in &network.nodes {
         let name = &node.name;
-        assert!(
-            addressing.loopback.ipv4.0.contains(&node.loopback.0),
-            "{name}"
-        );
-        assert!(
-            addressing.loopback.ipv6.0.contains(&node.loopback.1),
+        let id = u128::from(u32::from(
+            written
+                .nodes
+                .iter()
+                .find(|(key, _)| key.as_str() == name)
+                .unwrap()
+                .1
+                .node_id,
+        ));
+        assert_ne!(id, 0, "{name}");
+        let v4_host = |address: Ipv4Addr, prefix_len| {
+            host_bits(u128::from(u32::from(address)), prefix_len, 32)
+        };
+        assert!(ipv4.contains(&node.loopback.0), "{name}");
+        assert_eq!(v4_host(node.loopback.0, ipv4.prefix_len()), id, "{name}");
+        assert!(ipv6.contains(&node.loopback.1), "{name}");
+        assert_eq!(
+            host_bits(u128::from(node.loopback.1), ipv6.prefix_len(), 128),
+            id,
             "{name}"
         );
         match link_local {
-            Some(network) => assert!(network.0.contains(&node.link_local), "{name}"),
+            Some(net) => {
+                assert!(net.contains(&node.link_local), "{name}");
+                assert_eq!(
+                    host_bits(u128::from(node.link_local), net.prefix_len(), 128),
+                    id
+                );
+            }
             None => assert_eq!(
-                node.link_local,
-                link_local_from_loopback(node.loopback.1),
+                u128::from(node.link_local),
+                (0xfe80_u128 << 112) | (u128::from(node.loopback.1) & 0xffff_ffff),
                 "{name}"
             ),
         }
         match (tunnel_ipv4, node.tunnel_ipv4) {
-            (Some(net), Some(address)) => assert!(net.contains(&address), "{name}"),
+            (Some(net), Some(address)) => {
+                assert!(net.contains(&address), "{name}");
+                assert_eq!(v4_host(address, net.prefix_len()), id, "{name}");
+            }
             (None, None) => {}
             other => panic!("{name}: the IPv4 of its links {other:?}"),
         }
@@ -251,8 +287,14 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     assert_read(&files, text);
-    let Ok(network) = sliplib_mesh::v2::lower(&files) else {
-        return;
+    // The loader has refused everything else a network can be refused for.
+    let network = match sliplib_mesh::v2::lower(&files) {
+        Ok(network) => network,
+        Err(sliplib_mesh::v2::Error::NoInterfacePrefix) => {
+            assert!(files.network().mesh.interface_prefix.is_none());
+            return;
+        }
+        Err(other) => panic!("lowering refused what the loader took: {other}"),
     };
     assert_derived(&files, &network);
     let resolved = sliplib_mesh::secrets::read(&network);
