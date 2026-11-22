@@ -85,7 +85,6 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
     let files = sliplib_config::v2::File::parse(twin.text).unwrap();
     let mut network = sliplib_mesh::v2::lower(&files).unwrap();
     network.metrics = MetricsPorts::from(&files.talos_settings().unwrap());
-    let resolved = sliplib_mesh::secrets::read(&network);
     let names: Vec<&str> = network
         .nodes
         .iter()
@@ -152,7 +151,7 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
             expected_router.metrics = None;
         }
 
-        let got = node_configs(&network, host, &resolved).unwrap();
+        let got = node_configs(&network, host).unwrap();
         let got_awg: AwgConfig =
             sliplib_yaml::from_str(&named(sliplib_yaml::to_string(&got.awg).unwrap())).unwrap();
         let got_router: RouterConfig =

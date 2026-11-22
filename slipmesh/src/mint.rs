@@ -31,8 +31,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     let edited = File::read(&yaml)
         .context("slipmesh.yaml with what was minted does not read back - not written")?;
     let network = check::network(&edited, None)?;
-    let written = sliplib_mesh::secrets::read(&network);
-    let refusals: Vec<anyhow::Error> = check::nodes(&network, &written)
+    let refusals: Vec<anyhow::Error> = check::nodes(&network)
         .into_iter()
         .filter_map(|(_, checked)| checked.err())
         .collect();
