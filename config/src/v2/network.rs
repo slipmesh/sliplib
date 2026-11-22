@@ -777,9 +777,16 @@ mod tests {
     }
 
     #[test]
-    fn a_node_gives_its_one_underlay_entry() {
-        let network = network(example()).unwrap();
+    fn a_node_gives_its_one_underlay_entry_and_the_key_written_for_it() {
+        let key = PrivateKey::generate();
+        let network = with(&format!(
+            "{{nodes: {{node-a: {{wireguard: {{private_key: {}}}}}}}}}",
+            key.expose()
+        ))
+        .unwrap();
         assert_eq!(network.nodes["node-c"].underlay().unwrap().mtu, Some(1420));
+        assert_eq!(network.nodes["node-a"].private_key(), Some(&key));
+        assert_eq!(network.nodes["node-c"].private_key(), None);
     }
 
     #[test]
