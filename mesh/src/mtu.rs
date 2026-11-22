@@ -16,9 +16,6 @@ pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
 /// The least MTU IPv6 allows a link (RFC 8200); the mesh carries OSPFv3 over IPv6 link-locals.
 pub(crate) const MIN_MESH_MTU: u32 = 1280;
 
-/// The least MTU IPv4 allows a link (RFC 791).
-const MIN_IPV4_MTU: u32 = 68;
-
 /// Why the mesh has no MTU: every node's interfaces take the same one, so this stops them all.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -53,25 +50,6 @@ pub enum LinkError {
     FamiliesDiffer(String, String),
     #[error("neither {0:?} nor {1:?} has an endpoint, so neither can dial the other")]
     NoEndpoint(String, String),
-    #[error(
-        "node {node:?}: {key} {mtu} is below {minimum}, the least {family} allows a link, and the link is dialed over {family} - set the MTU the path has"
-    )]
-    UnderlayBelowMinimum {
-        node: String,
-        key: String,
-        mtu: u32,
-        family: &'static str,
-        minimum: u32,
-    },
-    #[error(
-        "node {node:?}: {key} {underlay} leaves no room for the {overhead} bytes the link adds to a packet - lower `s4`, or raise the MTU where the path allows it"
-    )]
-    NoRoom {
-        node: String,
-        key: String,
-        underlay: u32,
-        overhead: u32,
-    },
 }
 
 /// The MTU of every mesh interface: the one the files set for the mesh when it fits every link,
@@ -125,40 +103,19 @@ pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32
 fn link_limit(mesh: &Network, link: &Link, resolved: &ResolvedSecrets) -> Result<u32, LinkError> {
     let [a, b] = &link.ends;
     let (a, b) = (mesh.node(a)?, mesh.node(b)?);
-    let (ip_header, family, minimum) = match link_family(a, b)? {
-        Family::Ipv4 => (20, "IPv4", MIN_IPV4_MTU),
-        Family::Ipv6 => (40, "IPv6", MIN_MESH_MTU),
+    let ip_header = match link_family(a, b)? {
+        Family::Ipv4 => 20,
+        Family::Ipv6 => 40,
     };
-    if let Some(node) = [a, b].into_iter().find(|node| node.underlay_mtu < minimum) {
-        return Err(LinkError::UnderlayBelowMinimum {
-            node: node.name.clone(),
-            key: node.underlay_mtu_key.clone(),
-            mtu: node.underlay_mtu,
-            family,
-            minimum,
-        });
-    }
-    let narrower = if b.underlay_mtu < a.underlay_mtu {
-        b
-    } else {
-        a
-    };
-    let uplink = narrower.underlay_mtu;
+    let uplink = a.underlay_mtu.min(b.underlay_mtu);
     let junk = resolved
         .mesh_link_obfuscation
         .get(&link_key(&link.ends))
         .and_then(|o| o.s4)
         .map_or(0, u32::from);
-    let overhead = 32 + 8 + ip_header + junk;
-    match uplink.checked_sub(overhead) {
-        Some(limit) if limit > 0 => Ok(limit),
-        _ => Err(LinkError::NoRoom {
-            node: narrower.name.clone(),
-            key: narrower.underlay_mtu_key.clone(),
-            underlay: uplink,
-            overhead,
-        }),
-    }
+    // An underlay the link's bytes fill leaves 0, which `mesh_mtu` refuses as any limit below
+    // 1280, as it does the limit of an underlay below its family's least.
+    Ok(uplink.saturating_sub(32 + 8 + ip_header + junk))
 }
 
 /// The family of the endpoint a link is dialed at: either side's, and the same when both have one.
@@ -342,39 +299,26 @@ mod tests {
     }
 
     #[test]
-    fn an_underlay_below_the_least_its_family_allows_is_refused_naming_its_node_and_key() {
-        for (a, b, mtu, family, minimum) in [
-            (AT_V6, "{mtu: 1279}", 1279, "IPv6", 1280),
-            (AT_V4, "{mtu: 67}", 67, "IPv4", 68),
+    fn an_underlay_below_its_familys_least_or_with_no_room_left_gives_its_link_a_refused_limit() {
+        // Below 1280 for IPv6 or 68 for IPv4, an underlay leaves a limit under 1280 whatever the
+        // link adds; one the link's bytes reach leaves 0.
+        for (a, b, link, limit) in [
+            (AT_V6, "{mtu: 1279}", WIREGUARD.to_owned(), 1199),
+            (AT_V4, "{mtu: 67}", WIREGUARD.to_owned(), 7),
+            (AT_V6, UNDIALED, amneziawg("{s4: 1420}"), 0),
+            (AT_V6, UNDIALED, amneziawg("{s4: 1500}"), 0),
         ] {
-            let refusal = link_refusal_of(a, b, WIREGUARD);
+            let unset = refusal_of(a, b, &link, "");
             assert!(
-                matches!(&refusal, LinkError::UnderlayBelowMinimum {
-                    node, key, mtu: m, family: f, minimum: least
-                } if node == "b" && key == "underlay.wan.mtu"
-                    && (*m, *f, *least) == (mtu, family, minimum)),
-                "{b}: {refusal:?}"
+                matches!(&unset, MtuError::LimitBelowMinimum { link, limit: l }
+                    if link == "a-b" && *l == limit),
+                "{b} {link}: {unset:?}"
             );
-        }
-        // At the least IPv4 allows, the link is counted, and its limit is what is refused.
-        let at_the_least = of(&network(AT_V4, "{mtu: 68}", WIREGUARD, ""));
-        assert!(
-            matches!(
-                at_the_least,
-                Err(MtuError::LimitBelowMinimum { limit: 8, .. })
-            ),
-            "{at_the_least:?}"
-        );
-    }
-
-    #[test]
-    fn an_underlay_that_leaves_no_room_for_what_the_link_adds_is_refused_naming_its_key() {
-        for (s4, overhead) in [(1420, 1500), (1500, 1580)] {
-            let refusal = link_refusal_of(AT_V6, UNDIALED, &amneziawg(&format!("{{s4: {s4}}}")));
+            let set = refusal_of(a, b, &link, ", mtu: 1280");
             assert!(
-                matches!(&refusal, LinkError::NoRoom { node, key, underlay: 1500, overhead: o }
-                    if node == "a" && key == "underlay.wan.mtu" && *o == overhead),
-                "{s4}: {refusal:?}"
+                matches!(&set, MtuError::AboveLimit { mtu: 1280, limit: l, link }
+                    if link == "a-b" && *l == limit),
+                "{b} {link}: {set:?}"
             );
         }
     }

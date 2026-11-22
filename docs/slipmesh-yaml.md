@@ -878,18 +878,12 @@ where `U` is the smaller underlay `mtu` of its two ends, 32 WireGuard's header a
 header, `IP` 20 or 40 by the family the link is dialed over, and `S4` the `s4` of an `amneziawg`
 link once the defaults are laid under its own, 0 for a `wireguard` one. Two nodes on Ethernet,
 dialed over IPv6 and with no `s4`, give 1420. The MTU of the mesh is the least of the limits of all
-links, whatever their type. `mesh.mtu` lowers it, and one above it is refused. A result below 1280,
-the least IPv6 allows a link, is an error, and so is a `mesh.mtu` with no links, which has no
-interface to give it to.
-
-Two refusals name the node and the key of the underlay `mtu` that causes them, such as
-`underlay.wan.mtu`:
-
-- An underlay `mtu` of either end below the least the family the link is dialed over allows a link:
-  68 for IPv4 ([RFC 791, section 3.1](https://www.rfc-editor.org/rfc/rfc791#section-3.1)), 1280 for
-  IPv6 ([RFC 8200, section 5](https://www.rfc-editor.org/rfc/rfc8200#section-5)).
-- An underlay `mtu` of the narrower end that the bytes the link adds, `32 + 8 + IP + S4` of the
-  formula above, reach or exceed: no room is left for a packet.
+links, whatever their type. `mesh.mtu` lowers it, and one above it is refused, naming the link
+whose limit it exceeds. A result below 1280, the least IPv6 allows a link ([RFC 8200, section
+5](https://www.rfc-editor.org/rfc/rfc8200#section-5)), is an error naming the link that gives it,
+and so is a `mesh.mtu` below 1280, or one with no links, which has no interface to give it to. An
+underlay `mtu` the bytes the link adds reach or exceed gives the link a limit of 0, refused the same
+way.
 
 ## `groups`
 
