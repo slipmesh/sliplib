@@ -553,8 +553,11 @@ impl File {
         let network_document = written.index;
         // Read as written first: from the text, an error names the line.
         body::<Network>(&written, NETWORK)?;
-        let network: Network = sliplib_yaml::from_value(in_force(&written.value))
-            .expect("each half read typed, laid key by key");
+        let network: Network =
+            sliplib_yaml::from_value(in_force(&written.value)).map_err(|source| Error::Body {
+                place: Place::new(NETWORK, written.line),
+                source: source.into(),
+            })?;
         network.check()?;
 
         let nodes: Vec<Name> = network.nodes.keys().cloned().collect();
