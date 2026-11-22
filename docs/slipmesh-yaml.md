@@ -828,7 +828,7 @@ result into what its platform takes.
 **Loopback addresses.** One IPv4 and one IPv6, by which the node is known inside the mesh. Each is
 a network of `addressing.loopback` with `node_id` in its host part, the same way in both families:
 the network's own bits, then as many low bits of `node_id` as the network leaves free, at most all
-32 as the address's low 32 bits, and zeros between. With the networks `198.51.100.0/25` and
+32 as the address's low 32 bits, and in IPv6 zeros between. With the networks `198.51.100.0/25` and
 `3fff:0:0:1::/64`, a `node_id` of `0.0.0.5` gives `198.51.100.5` and `3fff:0:0:1::5`. A unique
 `node_id` does not make the addresses unique: in a /25, `0.0.0.5` and `0.0.0.133` give the same
 IPv4 loopback, and in a /120 `0.0.1.5` and `0.0.0.5` the same IPv6 one. Two nodes with the same
@@ -862,8 +862,10 @@ address ([RFC 4291, section 2.6.1](https://www.rfc-editor.org/rfc/rfc4291#sectio
 not taken. A /31 ([RFC 3021](https://www.rfc-editor.org/rfc/rfc3021)), a /127
 ([RFC 6164](https://www.rfc-editor.org/rfc/rfc6164)), a /32 and a /128 have no such address. The
 tools put the loopbacks on their interface as /32 and /128 and the IPv4 address of a link as /32,
-so none of them is refused for its bits; the link-local of a link stands as /64, so one whose low
-64 bits are all zeros is refused.
+so none of them is refused for its bits. The link-local of a link stands as /64, and so does the
+link-local `router` puts on `router-lo`, `fe80::` and the low 32 bits of the IPv6 loopback: one
+whose low 64 bits are all zeros is refused. Under a loopback network longer than /96, a `node_id`
+whose bits below that network are all zeros gives it.
 
 **Routing.** Every node runs OSPFv3 over its links, which carries the IPv6 loopbacks, and an iBGP
 session with every other node between those loopbacks, under `routing.bgp.as`. iBGP carries IPv4

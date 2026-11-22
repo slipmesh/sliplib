@@ -38,6 +38,10 @@ pub enum Error {
         "the node {node:?} gets the link-local address {address}/{LINK_LOCAL_PREFIX_LEN}, whose host part is all zeros: that is the Subnet-Router anycast address, which no interface takes - give the node a `node_id` that leaves a bit set there, or take an `addressing.tunnel.link_local` where it does"
     )]
     AnycastLinkLocal { node: String, address: Ipv6Addr },
+    #[error(
+        "the node {node:?} gets the link-local address {address}/{LINK_LOCAL_PREFIX_LEN} on `router-lo`, from the low 32 bits of its IPv6 loopback, and its host part is all zeros: that is the Subnet-Router anycast address, which no interface takes - give the node a `node_id` that leaves a bit set in the host part of `addressing.loopback.ipv6`, or take a network there that does"
+    )]
+    AnycastLoopbackLinkLocal { node: String, address: Ipv6Addr },
 }
 
 /// What a derived address is, for a refusal: its name and the key of the network it is from.
@@ -166,12 +170,25 @@ pub fn lower(files: &File) -> Result<Network, Error> {
     distinct(&nodes, &TUNNEL_IPV4, |node| {
         node.tunnel_ipv4.map(IpAddr::from)
     })?;
+    let anycast = |address| {
+        sliplib_net::reserved(IpNet::V6(Ipv6Net::new_assert(
+            address,
+            LINK_LOCAL_PREFIX_LEN,
+        )))
+        .is_some()
+    };
     for node in &nodes {
-        let on_the_link = Ipv6Net::new_assert(node.link_local, LINK_LOCAL_PREFIX_LEN);
-        if sliplib_net::reserved(IpNet::V6(on_the_link)).is_some() {
+        if anycast(node.link_local) {
             return Err(Error::AnycastLinkLocal {
                 node: node.name.clone(),
                 address: node.link_local,
+            });
+        }
+        let on_router_lo = addressing::link_local_from_loopback(node.loopback.1);
+        if anycast(on_router_lo) {
+            return Err(Error::AnycastLoopbackLinkLocal {
+                node: node.name.clone(),
+                address: on_router_lo,
             });
         }
     }
@@ -553,6 +570,29 @@ mod tests {
         let wide = lowered("{nodes: {node-b: {node_id: 0.0.1.0}}}");
         assert_eq!(
             wide.node("node-b").unwrap().link_local.to_string(),
+            "fe80::100"
+        );
+    }
+
+    #[test]
+    fn a_loopback_link_local_with_a_host_part_of_zeros_is_refused() {
+        // Under a /120 the low 8 bits of 0.0.1.0 are zeros: router-lo would take fe80::/64.
+        let refusal = refusal(
+            "{addressing: {loopback: {ipv6: '3fff:0:0:1::/120'}, tunnel: {ipv4: null}}, nodes: \
+             {node-b: {node_id: 0.0.1.0}}}",
+        );
+        assert_eq!(
+            refusal,
+            Error::AnycastLoopbackLinkLocal {
+                node: "node-b".into(),
+                address: "fe80::".parse().unwrap(),
+            }
+        );
+        // The same node_id under the example's /64 leaves a bit set.
+        let wide = lowered("{nodes: {node-b: {node_id: 0.0.1.0}}}");
+        assert_eq!(
+            addressing::link_local_from_loopback(wide.node("node-b").unwrap().loopback.1)
+                .to_string(),
             "fe80::100"
         );
     }
