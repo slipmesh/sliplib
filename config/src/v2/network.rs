@@ -165,6 +165,19 @@ pub struct Node {
     pub routing: NodeRouting,
 }
 
+impl Node {
+    /// The one entry the loader leaves.
+    pub fn underlay(&self) -> Option<&Underlay> {
+        self.underlay.values().next()
+    }
+
+    pub fn private_key(&self) -> Option<&PrivateKey> {
+        self.wireguard
+            .as_ref()
+            .and_then(|wireguard| wireguard.private_key.as_ref())
+    }
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Underlay {
@@ -384,6 +397,25 @@ impl LinkKind {
         match self {
             Self::Wireguard(block) => block.port,
             Self::Amneziawg(block) => block.port,
+        }
+    }
+
+    /// Empty on `wireguard`.
+    pub fn obfuscation(&self) -> Obfuscation {
+        match self {
+            Self::Wireguard(_) => Obfuscation::default(),
+            Self::Amneziawg(block) => block
+                .obfuscation
+                .as_ref()
+                .map(|obfuscation| obfuscation.0.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    pub fn persistent_keepalive(&self) -> Option<Range<u16>> {
+        match self {
+            Self::Wireguard(block) => block.persistent_keepalive.map(Range::from),
+            Self::Amneziawg(block) => block.persistent_keepalive,
         }
     }
 }
@@ -719,6 +751,35 @@ mod tests {
 
     fn link(yaml: &str) -> Result<Link, String> {
         sliplib_yaml::from_str(yaml).map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn a_link_gives_its_obfuscation_and_keepalive_an_empty_one_on_wireguard() {
+        let amneziawg = link(
+            "{type: amneziawg, ends: {a: {}, b: {}}, amneziawg: {port: 1, persistent_keepalive: \
+             15-20, obfuscation: {s4: 16}}}",
+        )
+        .unwrap();
+        assert_eq!(amneziawg.kind.obfuscation().s4, Some(16));
+        assert_eq!(
+            amneziawg.kind.persistent_keepalive(),
+            Some(Range::new(15, 20).unwrap())
+        );
+        let unset = link("{type: amneziawg, ends: {a: {}, b: {}}, amneziawg: {port: 1}}").unwrap();
+        assert_eq!(unset.kind.obfuscation(), Obfuscation::default());
+        assert_eq!(unset.kind.persistent_keepalive(), None);
+        let wireguard = link(
+            "{type: wireguard, ends: {a: {}, b: {}}, wireguard: {port: 1, persistent_keepalive: 10}}",
+        )
+        .unwrap();
+        assert_eq!(wireguard.kind.obfuscation(), Obfuscation::default());
+        assert_eq!(wireguard.kind.persistent_keepalive(), Some(Range::from(10)));
+    }
+
+    #[test]
+    fn a_node_gives_its_one_underlay_entry() {
+        let network = network(example()).unwrap();
+        assert_eq!(network.nodes["node-c"].underlay().unwrap().mtu, Some(1420));
     }
 
     #[test]

@@ -186,20 +186,21 @@ with why - the variant holds the cause as a field and has no `source`; where the
 its own, it is the variant's `source`. A variant never does both, so printing the whole chain gives
 the whole message, each part once.
 
-- `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md).
-  `v2::File` reads the files as a whole (`parse`, `read`) and refuses whatever its specification
-  has the loader refuse, as `v2::Error`. Among them are a text that is not YAML, and a `network`
-  document whose `version` is missing, below 2 or `null`: such files are of version 1, refused as
-  `VersionOne`, naming the document that converts them. `missing_reference_values` lists the required keys the
-  files lack that `slipmesh mint` writes, and `network_document` says where the network stands
-  in the file, for a write. It gives the `network` with what is in force for each
-  node and each link written where they hold their own: a node's `routing`, a link's block of its
-  type. The `template` and `patch` documents come with their `Aim`: the nodes each reaches, and
-  its rank among those that reach one node (`templates_for`, `patches_for`), as an
-  `AimedDocument`; a `platform` document as a `PlatformDocument` (`platform`). The body is its
-  platform's tool's: `read` gives it as the tool's type, a refusal naming the document and the line,
-  and a template or patch also gives its `value`. This
-  release reads one `network` and one `groups` document, and refuses a second, which the format
+- `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md). `v2::File` reads the files as
+  a whole (`parse`, `read`) and refuses whatever its specification has the loader refuse, as
+  `v2::Error`. Among them are a text that is not YAML, and a `network` document whose `version` is
+  missing, below 2 or `null`: such files are of version 1, refused as `VersionOne`, naming the
+  document that converts them. `missing_reference_values` lists the required keys the files lack
+  that `slipmesh mint` writes, and `network_document` says where the network stands in the file, for
+  a write. It gives the `network` with what is in force for each node and each link written where
+  they hold their own: a node's `routing`, a link's block of its type. A node gives its one
+  `underlay` entry and its `private_key`; a link's `LinkKind` its `port`, its `obfuscation`, empty
+  on `wireguard`, and its `persistent_keepalive`. The `template` and `patch` documents come with
+  their `Aim`: the nodes each reaches, and its rank among those that reach one node
+  (`templates_for`, `patches_for`), as an `AimedDocument`; a `platform` document as a
+  `PlatformDocument` (`platform`). The body is its platform's tool's: `read` gives it as the tool's
+  type, a refusal naming the document and the line, and a template or patch also gives its `value`.
+  This release reads one `network` and one `groups` document, and refuses a second, which the format
   lays over the first, until the tools read several files.
 - `awg`: `AwgConfig` with its interfaces and peers, and `validate`. A peer's `persistent_keepalive`
   is a number of seconds or a range of them. `InterfaceEntry::keepalive_of` gives what a peer ends
@@ -225,16 +226,17 @@ the whole message, each part once.
 What a node's daemons are configured with, computed from the file `sliplib-config` reads, for
 every tool that configures a node of any platform.
 
-A refusal is a `render::Error`, which names the node and which of its configs it is about, with
-its cause as its `source`, or an `mtu::MtuError`. Files that read and give no network to compute
-from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those that do not read.
-`Network::node` refuses a name the network does not hold as `model::UnknownNode`.
+A refusal is a `render::Error`, which names the node and which of its configs it is about, with its
+cause as its `source`, or an `mtu::MtuError`. Files that read and give no network to compute from
+are refused as `network::Error`; `sliplib-config`'s refuses those that do not read. `Mesh::node`
+refuses a name the network does not hold as `network::UnknownNode`.
 
-- `model::Network`, what the configs are computed from: each node with its derived addresses,
-  platform and key; each link with its keepalive and obfuscation in force, the obfuscation empty on
-  a `wireguard` link; the route classes. `v2::lower` gives it from a `v2::File`, refusing one
-  without `mesh.interface_prefix`. `model::node_key` and `model::link_obfuscation` name where the
-  files hold a node's key and a link's obfuscation.
+- `Mesh`, what the configs are computed from: the loader's network (`network()`) and its interface
+  prefix. `Mesh::of` gives it for a `v2::File`, refusing one without `mesh.interface_prefix`. It
+  derives what a node's `node_id` gives it (`addresses`: the loopbacks, the link-local and the
+  tunnel IPv4) and its `direct_interfaces`, with the links' pattern last where the links carry IPv4.
+  `network::node_key` and `network::link_obfuscation` name where the files hold a node's key and a
+  link's obfuscation.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig` from the network, each
   checked as the node checks it. It refuses a missing key of the node, unless it is on no link, or
   of a peer, and a link of type `amneziawg` whose obfuscation lacks one of `jc`, `jmin`, `jmax`,

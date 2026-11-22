@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 use sliplib_config::v2::File;
-use sliplib_mesh::model::Network;
+use sliplib_mesh::Mesh;
 use sliplib_mesh::render::node_configs;
 use sliplib_yaml::MultiDoc;
 use std::path::Path;
@@ -14,7 +14,7 @@ fn read(config_path: &Path) -> Result<File> {
         .with_context(|| format!("reading {}", config_path.display()))
 }
 
-fn node(network: &Network, host: &str) -> Result<()> {
+fn node(network: &Mesh<'_>, host: &str) -> Result<()> {
     let Err(refusal) = node_configs(network, host) else {
         return Ok(());
     };
@@ -29,11 +29,12 @@ fn node(network: &Network, host: &str) -> Result<()> {
 
 /// Every node of `network` in its order, each with what refuses its configs: one refusal says
 /// nothing about the next node, so all of them are checked.
-pub fn nodes(network: &Network) -> Vec<(&str, Result<()>)> {
+pub fn nodes<'a>(network: &Mesh<'a>) -> Vec<(&'a str, Result<()>)> {
     network
+        .network()
         .nodes
-        .iter()
-        .map(|host| (host.name.as_str(), node(network, &host.name)))
+        .keys()
+        .map(|host| (host.as_str(), node(network, host.as_str())))
         .collect()
 }
 
@@ -48,7 +49,7 @@ pub fn run(config_path: &Path) -> ExitCode {
     };
     match read(config_path) {
         Err(refusal) => refuse(refusal),
-        Ok(file) => match sliplib_mesh::v2::lower(&file) {
+        Ok(file) => match Mesh::of(&file) {
             Err(refusal) => refuse(refusal.into()),
             Ok(network) => {
                 for (host, checked) in nodes(&network) {

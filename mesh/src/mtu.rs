@@ -7,7 +7,8 @@
 //! never past the MTU, so a full-size packet carries no padding. A fragmented outer packet takes
 //! TCP in the tunnel down to a few Mbit/s, which is what this guards against.
 
-use crate::model::{Family, Link, Network, Node, UnknownNode};
+use crate::network::{Mesh, UnknownNode};
+use sliplib_config::v2::network::{Family, Link, Node};
 
 /// A node's underlay MTU when the files set none: that of Ethernet.
 pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
@@ -54,37 +55,38 @@ pub enum LinkError {
 /// The MTU of every mesh interface: the one the files set for the mesh when it fits every link,
 /// else the least link limit. None for a mesh without links, which has no mesh interface to give
 /// it to.
-pub fn mesh_mtu(mesh: &Network) -> Result<Option<u32>, MtuError> {
-    let mut least: Option<(u32, &Link)> = None;
-    for link in &mesh.links {
+pub fn mesh_mtu(mesh: &Mesh<'_>) -> Result<Option<u32>, MtuError> {
+    let mut least: Option<(u32, &str)> = None;
+    for (name, link) in &mesh.network().mesh.links {
         let limit = link_limit(mesh, link).map_err(|source| MtuError::Link {
-            link: link.name.clone(),
+            link: name.to_string(),
             source,
         })?;
         if least.is_none_or(|(least, _)| limit < least) {
-            least = Some((limit, link));
+            least = Some((limit, name.as_str()));
         }
     }
+    let set = mesh.network().mesh.mtu;
     let Some((limit, link)) = least else {
-        if mesh.mtu.is_some() {
+        if set.is_some() {
             return Err(MtuError::NoLink);
         }
         return Ok(None);
     };
     if limit < MIN_MESH_MTU {
         return Err(MtuError::LimitBelowMinimum {
-            link: link.name.clone(),
+            link: link.to_owned(),
             limit,
         });
     }
-    let Some(mtu) = mesh.mtu else {
+    let Some(mtu) = set else {
         return Ok(Some(limit));
     };
     if mtu > limit {
         return Err(MtuError::AboveLimit {
             mtu,
             limit,
-            link: link.name.clone(),
+            link: link.to_owned(),
         });
     }
     if mtu < MIN_MESH_MTU {
@@ -94,35 +96,46 @@ pub fn mesh_mtu(mesh: &Network) -> Result<Option<u32>, MtuError> {
 }
 
 /// The largest MTU at which a full-size packet crosses `link` unfragmented.
-fn link_limit(mesh: &Network, link: &Link) -> Result<u32, LinkError> {
-    let [a, b] = &link.ends;
-    let (a, b) = (mesh.node(a)?, mesh.node(b)?);
-    let ip_header = match link_family(a, b)? {
+/// The node's underlay MTU: its own, or that of Ethernet.
+pub(crate) fn underlay_mtu(node: &Node) -> u32 {
+    node.underlay()
+        .and_then(|underlay| underlay.mtu)
+        .unwrap_or(DEFAULT_UPLINK_MTU)
+}
+
+fn link_limit(mesh: &Mesh<'_>, link: &Link) -> Result<u32, LinkError> {
+    let [a, b] = link.ends.each_ref().map(|end| end.as_str());
+    let ip_header = match link_family(mesh, a, b)? {
         Family::Ipv4 => 20,
         Family::Ipv6 => 40,
     };
-    let uplink = a.underlay_mtu.min(b.underlay_mtu);
-    let junk = link.obfuscation.s4.map_or(0, u32::from);
+    let uplink = underlay_mtu(mesh.node(a)?).min(underlay_mtu(mesh.node(b)?));
+    let junk = link.kind.obfuscation().s4.map_or(0, u32::from);
     // An underlay the link's bytes fill leaves 0, which `mesh_mtu` refuses as any limit below
     // 1280, as it does the limit of an underlay below its family's least.
     Ok(uplink.saturating_sub(32 + 8 + ip_header + junk))
 }
 
 /// The family of the endpoint a link is dialed at: either side's, and the same when both have one.
-fn link_family(a: &Node, b: &Node) -> Result<Family, LinkError> {
-    let family = |node: &Node| node.endpoint.as_ref().map(|endpoint| endpoint.family);
-    match (family(a), family(b)) {
-        (Some(x), Some(y)) if x != y => {
-            Err(LinkError::FamiliesDiffer(a.name.clone(), b.name.clone()))
-        }
+fn link_family(mesh: &Mesh<'_>, a: &str, b: &str) -> Result<Family, LinkError> {
+    let family = |name: &str| -> Result<Option<Family>, UnknownNode> {
+        Ok(mesh
+            .node(name)?
+            .underlay()
+            .and_then(|underlay| underlay.endpoint.as_ref())
+            .map(|endpoint| endpoint.family()))
+    };
+    match (family(a)?, family(b)?) {
+        (Some(x), Some(y)) if x != y => Err(LinkError::FamiliesDiffer(a.to_owned(), b.to_owned())),
         (Some(family), _) | (None, Some(family)) => Ok(family),
-        (None, None) => Err(LinkError::NoEndpoint(a.name.clone(), b.name.clone())),
+        (None, None) => Err(LinkError::NoEndpoint(a.to_owned(), b.to_owned())),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::example;
 
     /// The outer packet as it leaves the node: the inner packet padded to 16 but never past the
     /// MTU, then the WireGuard header and tag, the junk, UDP and the underlay's IP header.
@@ -132,26 +145,26 @@ mod tests {
 
     /// A network of `mesh_and_nodes`, its `mesh` and `nodes`, under one `slipmesh:` block, its
     /// addressing and its AS number.
-    fn lowered(mesh_and_nodes: &str) -> Network {
+    fn mesh_of(mesh_and_nodes: &str) -> Mesh<'static> {
         let text = format!(
             "slipmesh: {{kind: network, version: 2, revision: 1}}\naddressing: {{loopback: \
              {{ipv4: 198.51.100.0/25, ipv6: '3fff::/64'}}}}\nrouting: {{bgp: {{as: 64512}}}}\n\
              {mesh_and_nodes}"
         );
-        crate::v2::lower(&sliplib_config::v2::File::parse(&text).unwrap()).unwrap()
+        crate::test_support::mesh(sliplib_config::v2::File::parse(&text).unwrap())
     }
 
     /// Two nodes `a` and `b` and the link `a-b` between them: `a` and `b` are their underlay
     /// entries, `link` the link's keys after its ends, `mesh` keys of `mesh`.
-    fn network(a: &str, b: &str, link: &str, mesh: &str) -> Network {
-        lowered(&format!(
+    fn network(a: &str, b: &str, link: &str, mesh: &str) -> Mesh<'static> {
+        mesh_of(&format!(
             "mesh: {{interface_prefix: mesh-, links: {{a-b: {{ends: {{a: {{}}, b: {{}}}}, \
              {link}}}}}{mesh}}}\nnodes:\n  a: {{platform: talos, node_id: 0.0.0.1, underlay: \
              {{wan: {a}}}}}\n  b: {{platform: talos, node_id: 0.0.0.2, underlay: {{wan: {b}}}}}\n"
         ))
     }
 
-    fn of(network: &Network) -> Result<Option<u32>, MtuError> {
+    fn of(network: &Mesh<'_>) -> Result<Option<u32>, MtuError> {
         mesh_mtu(network)
     }
 
@@ -236,7 +249,7 @@ mod tests {
     #[test]
     fn the_mesh_takes_the_least_limit_of_its_links() {
         // a-b dials a over IPv4 at 1500: 1440. b-c dials c over IPv6 at 1490: 1410.
-        let network = lowered(
+        let network = mesh_of(
             "mesh:\n  interface_prefix: mesh-\n  links:\n    a-b: {type: wireguard, ends: \
              {a: {}, b: {}}, wireguard: {port: 51820}}\n    b-c: {type: wireguard, ends: {b: {}, \
              c: {}}, wireguard: {port: 51821}}\nnodes:\n  a: {platform: talos, node_id: 0.0.0.1, \
@@ -277,7 +290,7 @@ mod tests {
     #[test]
     fn a_mesh_without_links_takes_no_mtu_and_refuses_one_set() {
         let unlinked = |mesh: &str| {
-            lowered(&format!(
+            mesh_of(&format!(
                 "mesh: {{interface_prefix: mesh-{mesh}}}\nnodes:\n  a: {{platform: talos, \
                  node_id: 0.0.0.1, underlay: {{wan: {{}}}}}}\n"
             ))
@@ -328,5 +341,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_mesh_mtu_of_the_example_is_below_the_least_limit_of_its_links_as_its_comment_says() {
+        let mtu = |overlay: &str| {
+            let network = example(overlay);
+            crate::mtu::mesh_mtu(&network).unwrap()
+        };
+        assert_eq!(mtu("{}"), Some(1320));
+        assert_eq!(mtu("{mesh: {mtu: null}}"), Some(1344));
+    }
+
+    fn mtu_refusal(overlay: &str) -> crate::mtu::MtuError {
+        let network = example(overlay);
+        crate::mtu::mesh_mtu(&network).unwrap_err()
+    }
+
+    #[test]
+    fn an_mtu_of_zero_is_refused() {
+        use crate::mtu::MtuError;
+        let underlay = mtu_refusal("{nodes: {node-b: {underlay: {wan: {mtu: 0}}}}}");
+        assert!(
+            matches!(&underlay, MtuError::LimitBelowMinimum { link, limit: 0 } if link == "a-b"),
+            "{underlay:?}"
+        );
+        let mesh = mtu_refusal("{mesh: {mtu: 0}}");
+        assert!(
+            matches!(mesh, MtuError::BelowMinimum { mtu: 0 }),
+            "{mesh:?}"
+        );
+    }
+
+    #[test]
+    fn a_node_has_the_mtu_of_its_underlay_or_that_of_ethernet() {
+        let mesh = example("{}");
+        assert_eq!(underlay_mtu(mesh.node("node-c").unwrap()), 1420);
+        assert_eq!(underlay_mtu(mesh.node("node-a").unwrap()), 1500);
     }
 }

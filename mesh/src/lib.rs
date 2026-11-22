@@ -6,12 +6,13 @@
 pub mod addressing;
 #[cfg(feature = "mint")]
 pub mod mint;
-pub mod model;
 pub mod mtu;
+pub mod network;
 pub mod render;
 pub mod secrets;
-pub mod v2;
 pub mod warnings;
+
+pub use network::Mesh;
 
 #[cfg(test)]
 mod test_support;

@@ -13,15 +13,19 @@ use anyhow::{Context, Result};
 use sliplib_config::Obfuscation;
 use sliplib_config::v2::{File, Name};
 use sliplib_mesh::mint::Minted;
-use sliplib_mesh::model::Network;
 use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{Mapping, MultiDoc, Value};
 
-/// Writes every value of `minted` into its field of `yaml`, the `slipmesh.yaml` that `files` and
-/// then `network` were read from: `minted` names nodes and links by their positions in `network`.
-pub fn record(yaml: &mut MultiDoc, files: &File, network: &Network, minted: &Minted) -> Result<()> {
+/// Writes every value of `minted` into its field of `yaml`, the `slipmesh.yaml` `files` were read
+/// from: `minted` names nodes and links by their positions in the network.
+pub fn record(yaml: &mut MultiDoc, files: &File, minted: &Minted) -> Result<()> {
+    let network = files.network();
     for (node, key) in &minted.node_keys {
-        set_node_key(yaml, files, &network.nodes[*node].name, key)?;
+        let (name, _) = network
+            .nodes
+            .get_index(*node)
+            .context("no node at that position")?;
+        set_node_key(yaml, files, name.as_str(), key)?;
     }
     let mesh = document(yaml, files.network_document())?.get_mut("mesh");
     // The fields of the type's own obfuscation, which a link that writes `null` there goes
@@ -38,7 +42,12 @@ pub fn record(yaml: &mut MultiDoc, files: &File, network: &Network, minted: &Min
         .collect();
     let mut links = mesh.and_then(|mesh| mesh.get_mut("links"));
     for (link, generated) in &minted.link_obfuscation {
-        let name = &network.links[*link].name;
+        let (name, _) = network
+            .mesh
+            .links
+            .get_index(*link)
+            .context("no link at that position")?;
+        let name = name.as_str();
         // Only a link of type `amneziawg` is minted for, under the block of its type.
         let entry = named(links.as_deref_mut(), name)
             .and_then(|link| link.get_mut("amneziawg"))
@@ -137,9 +146,8 @@ mod tests {
     fn run(raw: &str) -> String {
         let mut yaml = MultiDoc::parse(raw).unwrap();
         let files = File::read(&yaml).unwrap();
-        let network = sliplib_mesh::v2::lower(&files).unwrap();
-        let minted = mint::create(&network).unwrap();
-        record(&mut yaml, &files, &network, &minted).unwrap();
+        let minted = mint::create(&sliplib_mesh::Mesh::of(&files).unwrap()).unwrap();
+        record(&mut yaml, &files, &minted).unwrap();
         yaml.text().unwrap()
     }
 

@@ -125,7 +125,7 @@ fn check_refuses_a_file_without_the_interface_prefix_once_naming_mint() {
     assert_eq!(checked.code, Some(1));
     assert_eq!(
         checked.stderr,
-        format!("{}\n", sliplib_mesh::v2::Error::NoInterfacePrefix)
+        format!("{}\n", sliplib_mesh::network::Error::NoInterfacePrefix)
     );
 }
 
