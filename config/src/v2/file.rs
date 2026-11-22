@@ -6,7 +6,6 @@ use super::block::{Block, Exclude, Include, Order, Rank};
 use super::check::Invalid;
 use super::groups::{Groups, GroupsError, Resolved, Selection};
 use super::network::{AMNEZIAWG, Network, WIREGUARD};
-use super::platform::{RouterosSettings, TalosSettings, Template};
 use super::{Name, Platform};
 use serde::de::DeserializeOwned;
 use sliplib_yaml::{Document, Mapping, MultiDoc, Value, merge};
@@ -400,90 +399,82 @@ impl Aimed {
     }
 }
 
-/// A `template` document: the text a daemon on the nodes it reaches makes its configuration
-/// from.
-pub struct TemplateDocument {
+/// A `template` or `patch` document. The body is its platform's tool's to read.
+pub struct AimedDocument {
     aim: Aim,
     body: Document,
 }
 
-// By hand: a `Document` holds the text of every file, the private keys among it.
-impl fmt::Debug for TemplateDocument {
+// The aim alone: the body may hold secrets in a format this crate does not read.
+impl fmt::Debug for AimedDocument {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TemplateDocument")
-            .field("aim", &self.aim)
-            .field("value", &self.body.value)
-            .finish()
-    }
-}
-
-impl TemplateDocument {
-    pub fn aim(&self) -> &Aim {
-        &self.aim
-    }
-
-    /// The keys of the document. The text among them is for the daemon's own tool to check.
-    pub fn read(&self) -> Result<Template, Error> {
-        body(&self.body, TEMPLATE)
-    }
-}
-
-/// A `patch` document: one in the format of the platform it names, for that platform's tool to
-/// read.
-pub struct PatchDocument {
-    aim: Aim,
-    body: Document,
-}
-
-// The aim alone: a patch is in its platform's format, whose secrets this one cannot tell apart.
-impl fmt::Debug for PatchDocument {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PatchDocument")
+        f.debug_struct("AimedDocument")
             .field("aim", &self.aim)
             .finish_non_exhaustive()
     }
 }
 
-impl PatchDocument {
+impl AimedDocument {
     pub fn aim(&self) -> &Aim {
         &self.aim
     }
 
-    /// The document without its `slipmesh:` block.
+    /// Without the `slipmesh:` block.
+    pub fn value(&self) -> &Value {
+        &self.body.value
+    }
+}
+
+/// A `platform` document. The body is its platform's tool's to read.
+pub struct PlatformDocument {
+    place: Place,
+    body: Document,
+}
+
+// The place alone, as for `AimedDocument`.
+impl fmt::Debug for PlatformDocument {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PlatformDocument")
+            .field("place", &self.place)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PlatformDocument {
+    pub fn place(&self) -> &Place {
+        &self.place
+    }
+
+    /// Without the `slipmesh:` block.
     pub fn value(&self) -> &Value {
         &self.body.value
     }
 }
 
 /// Those of `documents` that reach `node`, the last by rank last.
-fn reaching<'a, T>(documents: &'a [T], aim: impl Fn(&T) -> &Aim, node: &str) -> Vec<&'a T> {
-    let mut reaching: Vec<&T> = documents
+fn reaching<'a>(documents: &'a [AimedDocument], node: &str) -> Vec<&'a AimedDocument> {
+    let mut reaching: Vec<&AimedDocument> = documents
         .iter()
-        .filter(|document| aim(document).reaches(node))
+        .filter(|document| document.aim.reaches(node))
         .collect();
     // Stable: of two documents of one rank, the later read stays the later.
-    reaching.sort_by_key(|document| aim(document).rank());
+    reaching.sort_by_key(|document| document.aim.rank());
     reaching
 }
 
 pub struct File {
     network: Network,
     network_document: usize,
-    platforms: Vec<(Platform, Document)>,
-    templates: Vec<TemplateDocument>,
-    patches: Vec<PatchDocument>,
+    platforms: Vec<(Platform, PlatformDocument)>,
+    templates: Vec<AimedDocument>,
+    patches: Vec<AimedDocument>,
 }
 
 impl fmt::Debug for File {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let platforms: Vec<(Platform, &Value)> = self
-            .platforms
-            .iter()
-            .map(|(platform, document)| (*platform, &document.value))
-            .collect();
         f.debug_struct("File")
             .field("network", &self.network)
-            .field("platforms", &platforms)
+            .field("platforms", &self.platforms)
             .field("templates", &self.templates)
             .field("patches", &self.patches)
             .finish()
@@ -508,7 +499,7 @@ impl File {
 
         let mut networks = Vec::new();
         let mut groups = Vec::new();
-        let mut platforms: Vec<(Platform, Document)> = Vec::new();
+        let mut platforms: Vec<(Platform, PlatformDocument)> = Vec::new();
         let mut aimed = Vec::new();
         for Read { block, body } in documents {
             match block {
@@ -516,13 +507,15 @@ impl File {
                 Block::Groups { .. } => groups.push(body),
                 Block::Platform { platform, .. } => {
                     if let Some((_, first)) = platforms.iter().find(|(of, _)| *of == platform) {
+                        let first = first.body.line;
                         return Err(Error::PlatformTwice {
                             platform,
-                            first: first.line.min(body.line),
-                            second: first.line.max(body.line),
+                            first: first.min(body.line),
+                            second: first.max(body.line),
                         });
                     }
-                    platforms.push((platform, body));
+                    let place = Place::new(PLATFORM, body.line);
+                    platforms.push((platform, PlatformDocument { place, body }));
                 }
                 Block::Template {
                     platform,
@@ -581,10 +574,11 @@ impl File {
         let mut patches = Vec::new();
         for (kind, aimed, body) in aimed {
             let aim = aimed.aim(Place::new(kind, body.line), &network, &groups)?;
+            let document = AimedDocument { aim, body };
             if kind == TEMPLATE {
-                templates.push(TemplateDocument { aim, body });
+                templates.push(document);
             } else {
-                patches.push(PatchDocument { aim, body });
+                patches.push(document);
             }
         }
         Ok(Self {
@@ -617,51 +611,39 @@ impl File {
         }
     }
 
-    /// The settings of `platform`: the body of its `platform` document, and what a platform has
-    /// without one where the files hold none.
-    fn settings<T: DeserializeOwned + Default>(&self, platform: Platform) -> Result<T, Error> {
-        match self.platforms.iter().find(|(of, _)| *of == platform) {
-            Some((_, document)) => body(document, PLATFORM),
-            None => Ok(T::default()),
-        }
-    }
-
-    pub fn talos_settings(&self) -> Result<TalosSettings, Error> {
-        self.settings(Platform::Talos)
-    }
-
-    /// Nothing, or the refusal of a key: `routeros` has no settings.
-    pub fn routeros_settings(&self) -> Result<RouterosSettings, Error> {
-        self.settings(Platform::Routeros)
+    pub fn platform(&self, platform: Platform) -> Option<&PlatformDocument> {
+        self.platforms
+            .iter()
+            .find(|(of, _)| *of == platform)
+            .map(|(_, document)| document)
     }
 
     /// Every `template` document, in the order of the documents.
-    pub fn templates(&self) -> &[TemplateDocument] {
+    pub fn templates(&self) -> &[AimedDocument] {
         &self.templates
     }
 
     /// The `template` documents that reach `node`, the last by rank last: of those for one
     /// daemon the node gets the last.
-    pub fn templates_for(&self, node: &str) -> Vec<&TemplateDocument> {
-        reaching(&self.templates, TemplateDocument::aim, node)
+    pub fn templates_for(&self, node: &str) -> Vec<&AimedDocument> {
+        reaching(&self.templates, node)
     }
 
     /// Every `patch` document, in the order of the documents.
-    pub fn patches(&self) -> &[PatchDocument] {
+    pub fn patches(&self) -> &[AimedDocument] {
         &self.patches
     }
 
     /// The `patch` documents that reach `node`, in the order their platform's tool lays them
     /// over each other.
-    pub fn patches_for(&self, node: &str) -> Vec<&PatchDocument> {
-        reaching(&self.patches, PatchDocument::aim, node)
+    pub fn patches_for(&self, node: &str) -> Vec<&AimedDocument> {
+        reaching(&self.patches, node)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::network::LinkKind;
-    use super::super::platform::Daemon;
     use super::super::testing::example;
     use super::*;
     use crate::Range;
@@ -729,7 +711,7 @@ mod tests {
         names.iter().map(Name::as_str).collect()
     }
 
-    fn patch_names(patches: &[&PatchDocument]) -> Vec<String> {
+    fn patch_names(patches: &[&AimedDocument]) -> Vec<String> {
         patches
             .iter()
             .map(|patch| patch.value()["name"].as_str().unwrap().to_owned())
@@ -1045,30 +1027,34 @@ mod tests {
     }
 
     #[test]
-    fn files_print_with_no_private_key_and_no_patch_body() {
+    fn files_print_with_no_private_key_and_no_body_of_a_platform() {
         let key = sliplib_secrets::wireguard::PrivateKey::generate();
         let text = network_edited(BLOCK, |tree| {
             tree["nodes"]["node-a"]["wireguard"] =
                 yaml(&format!("{{private_key: {}}}", key.expose()));
         });
-        let token = sliplib_secrets::wireguard::PrivateKey::generate();
+        let tokens = [(); 3].map(|()| sliplib_secrets::wireguard::PrivateKey::generate());
         let file = file(&[
             &text,
-            "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n",
-            &template("platform: talos"),
+            &format!(
+                "slipmesh: {{kind: platform, platform: talos}}\ntoken: {}\n",
+                tokens[0].expose()
+            ),
+            &format!(
+                "{}token: {}\n",
+                template("platform: talos"),
+                tokens[1].expose()
+            ),
             &format!(
                 "{}token: {}\n",
                 patch("platform: talos", "one"),
-                token.expose()
+                tokens[2].expose()
             ),
         ])
         .unwrap();
         let printed = format!("{file:?}");
-        for secret in [key.expose(), token.expose()] {
-            assert!(!printed.contains(secret), "{printed}");
-        }
-        for value in ["\"metrics\"", "\"text\"", "\"patch\""] {
-            assert!(printed.contains(value), "{value}: {printed}");
+        for secret in std::iter::once(&key).chain(&tokens) {
+            assert!(!printed.contains(secret.expose()), "{printed}");
         }
     }
 
@@ -1096,12 +1082,12 @@ mod tests {
             include_str!("../../../docs/example/talos.yaml"),
         ])
         .unwrap();
-        let daemons: Vec<Daemon> = file
+        let daemons: Vec<&str> = file
             .templates()
             .iter()
-            .map(|template| template.read().unwrap().daemon)
+            .map(|template| template.value()["daemon"].as_str().unwrap())
             .collect();
-        assert_eq!(daemons, [Daemon::Router, Daemon::Firewall]);
+        assert_eq!(daemons, ["router", "firewall"]);
         for template in file.templates() {
             assert_eq!(
                 names(template.aim().nodes()),
@@ -1461,7 +1447,7 @@ mod tests {
             &patch("platform: talos, order: 10", "first"),
         ])
         .unwrap();
-        let all: Vec<&PatchDocument> = file.patches().iter().collect();
+        let all: Vec<&AimedDocument> = file.patches().iter().collect();
         assert_eq!(patch_names(&all), ["first", "second"]);
     }
 
@@ -1475,7 +1461,7 @@ mod tests {
     }
 
     #[test]
-    fn templates_come_ranked_and_read_as_their_keys() {
+    fn templates_come_ranked_with_their_bodies() {
         let file = file(&[
             &network("{}"),
             &template("platform: talos, include: [node-a]"),
@@ -1488,27 +1474,29 @@ mod tests {
         assert_eq!(names(for_a[1].aim().nodes()), ["node-a"]);
         assert_eq!(file.templates_for("node-b").len(), 1);
         assert_eq!(file.templates().len(), 2);
-        let read = for_a[1].read().unwrap();
-        assert_eq!(
-            (read.daemon, read.content.as_str()),
-            (Daemon::Router, "text")
-        );
+        assert_eq!(for_a[1].value()["content"], yaml("text"));
     }
 
     #[test]
-    fn a_template_with_a_key_it_does_not_take_is_refused_when_read() {
+    fn a_body_of_a_template_or_a_platform_is_taken_as_written() {
         let documents = [
             network("{}"),
-            format!("{}colour: red\n", template("platform: talos")),
+            "slipmesh: {kind: template, platform: talos}\ndaemon: none\ncolour: red\n".to_owned(),
+            "slipmesh: {kind: platform, platform: talos}\nlisten: true\n".to_owned(),
+            "slipmesh: {kind: platform, platform: routeros}\nmetrics: {}\n".to_owned(),
         ];
         let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
-        let at = place(TEMPLATE, &documents, 1);
         let file = file(&documents).unwrap();
-        let refusal = file.templates()[0].read().unwrap_err();
-        assert!(
-            matches!(&refusal, Error::Body { place, .. } if *place == at),
-            "{refusal:?}"
+        assert_eq!(
+            file.templates()[0].value(),
+            &yaml("{daemon: none, colour: red}")
         );
+        let talos = file.platform(Platform::Talos).unwrap();
+        assert_eq!(talos.value(), &yaml("{listen: true}"));
+        assert_eq!(*talos.place(), place(PLATFORM, &documents, 2));
+        let routeros = file.platform(Platform::Routeros).unwrap();
+        assert_eq!(routeros.value(), &yaml("{metrics: {}}"));
+        assert_eq!(*routeros.place(), place(PLATFORM, &documents, 3));
     }
 
     #[test]
@@ -1523,57 +1511,9 @@ mod tests {
     }
 
     #[test]
-    fn the_settings_of_talos_are_those_of_its_platform_document() {
-        let settings =
-            "slipmesh: {kind: platform, platform: talos}\nmetrics: {mesh: {port: 9586}}\n";
-        let file = file(&[&network("{}"), settings]).unwrap();
-        let metrics = file.talos_settings().unwrap().metrics.unwrap();
-        assert_eq!(metrics.mesh.unwrap().port.get(), 9586);
-        assert_eq!(metrics.router, None);
-    }
-
-    #[test]
-    fn a_platform_without_its_document_has_no_settings() {
+    fn a_platform_without_its_document_has_none() {
         let file = file(&[&network("{}")]).unwrap();
-        assert_eq!(file.talos_settings().unwrap(), TalosSettings::default());
-        assert_eq!(
-            file.routeros_settings().unwrap(),
-            RouterosSettings::default()
-        );
-    }
-
-    #[test]
-    fn a_key_the_settings_of_a_platform_do_not_have_is_refused_when_read() {
-        let documents = [
-            network("{}"),
-            "slipmesh: {kind: platform, platform: talos}\nlisten: true\n".to_owned(),
-            "slipmesh: {kind: platform, platform: routeros}\nmetrics: {}\n".to_owned(),
-        ];
-        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
-        // Both load: the tool of another platform reads the block alone.
-        let file = file(&documents).unwrap();
-        let of_talos = place(PLATFORM, &documents, 1);
-        let talos = file.talos_settings().unwrap_err();
-        assert!(
-            matches!(&talos, Error::Body { place, .. } if *place == of_talos),
-            "{talos:?}"
-        );
-        let of_routeros = place(PLATFORM, &documents, 2);
-        let routeros = file.routeros_settings().unwrap_err();
-        assert!(
-            matches!(&routeros, Error::Body { place, .. } if *place == of_routeros),
-            "{routeros:?}"
-        );
-    }
-
-    #[test]
-    fn an_empty_platform_document_of_routeros_is_taken() {
-        let of_routeros = "slipmesh: {kind: platform, platform: routeros}\n";
-        let file = file(&[&network("{}"), of_routeros]).unwrap();
-        assert_eq!(
-            file.routeros_settings().unwrap(),
-            RouterosSettings::default()
-        );
+        assert!(file.platform(Platform::Talos).is_none());
     }
 
     #[test]

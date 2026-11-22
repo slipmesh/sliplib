@@ -2,7 +2,7 @@
 //! computed and checked the way the tool that configures the node would. It writes nothing.
 
 use anyhow::{Context, Result};
-use sliplib_config::v2::{self, File};
+use sliplib_config::v2::File;
 use sliplib_mesh::model::Network;
 use sliplib_mesh::render::node_configs;
 use sliplib_yaml::MultiDoc;
@@ -12,25 +12,6 @@ use std::process::ExitCode;
 fn read(config_path: &Path) -> Result<File> {
     File::read(&MultiDoc::read(config_path)?)
         .with_context(|| format!("reading {}", config_path.display()))
-}
-
-/// Each refusal of the platform settings and the template keys, which stop no node.
-fn whole_file(config_path: &Path, files: &File) -> Vec<anyhow::Error> {
-    let in_the_file =
-        |refusal: v2::Error| anyhow::Error::new(refusal).context(config_path.display().to_string());
-    let mut refusals = Vec::new();
-    if let Err(refusal) = files.talos_settings() {
-        refusals.push(in_the_file(refusal));
-    }
-    if let Err(refusal) = files.routeros_settings() {
-        refusals.push(in_the_file(refusal));
-    }
-    for template in files.templates() {
-        if let Err(refusal) = template.read() {
-            refusals.push(in_the_file(refusal));
-        }
-    }
-    refusals
 }
 
 fn node(network: &Network, host: &str) -> Result<()> {
@@ -67,27 +48,22 @@ pub fn run(config_path: &Path) -> ExitCode {
     };
     match read(config_path) {
         Err(refusal) => refuse(refusal),
-        Ok(file) => {
-            for refusal in whole_file(config_path, &file) {
-                refuse(refusal);
-            }
-            match sliplib_mesh::v2::lower(&file) {
-                Err(refusal) => refuse(refusal.into()),
-                Ok(network) => {
-                    for (host, checked) in nodes(&network) {
-                        match checked {
-                            Ok(()) => println!("{host}: ok"),
-                            Err(refusal) => refuse(refusal),
-                        }
+        Ok(file) => match sliplib_mesh::v2::lower(&file) {
+            Err(refusal) => refuse(refusal.into()),
+            Ok(network) => {
+                for (host, checked) in nodes(&network) {
+                    match checked {
+                        Ok(()) => println!("{host}: ok"),
+                        Err(refusal) => refuse(refusal),
                     }
-                    if passed == ExitCode::SUCCESS {
-                        for warning in sliplib_mesh::warnings::warnings(&network) {
-                            eprintln!("warning: {warning}");
-                        }
+                }
+                if passed == ExitCode::SUCCESS {
+                    for warning in sliplib_mesh::warnings::warnings(&network) {
+                        eprintln!("warning: {warning}");
                     }
                 }
             }
-        }
+        },
     }
     passed
 }

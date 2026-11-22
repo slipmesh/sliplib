@@ -214,8 +214,8 @@ networks: what else step 6 shows comes from the conversion.
    Where the pattern of the links' interfaces stands last in a `direct_interfaces`, it may stay or be
    taken out: the configs are the same either way. Where it stands before other entries, taking it
    out moves it to the end, and the node's routing configuration changes with it.
-5. Run `slipmesh check`. It parses every document strictly, but the text of a `template` and the
-   body of a `patch`, which the generator checks, and it checks every node's configs.
+5. Run `slipmesh check`. It parses every document strictly, but the bodies of `platform`,
+   `template` and `patch` documents, which the generator checks, and it checks every node's configs.
 6. Run the two commands of step 1 again, with the tools built on v0.20.0 or later, and compare the
    patch files, and the plan `slipmesh-routeros` shows, with what step 1 left. Nothing of the mesh
    changes of itself: not the addresses, the keys, the link-local addresses of the tunnels, the MTU,

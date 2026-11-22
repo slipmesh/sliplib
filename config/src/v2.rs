@@ -37,14 +37,13 @@ mod file;
 pub mod groups;
 mod name;
 pub mod network;
-pub mod platform;
 #[cfg(test)]
 mod testing;
 
 pub use block::{ALL, Block, Exclude, Include, NONE, Order, Platform, Rank};
 pub use check::Invalid;
 pub use file::{
-    Aim, BlockError, Error, File, META_KEY, PatchDocument, Place, REVISION, TemplateDocument,
+    Aim, AimedDocument, BlockError, Error, File, META_KEY, Place, PlatformDocument, REVISION,
     VERSION,
 };
 pub use name::{ClassName, Name, NameError};

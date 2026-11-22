@@ -238,8 +238,8 @@ depends on whose the document is:
   an unknown key being an error at any depth.
 - **A tool, in a document of another platform:** the block alone, so a key added to the body does
   not concern it.
-- **`slipmesh check`, in all of it:** every body strictly, but the text of a `template` and the
-  body of a `patch`, which it leaves to the platform's tool. It is the one check of the files as a
+- **`slipmesh check`, in all of it:** every block, and the bodies of `network` and `groups`; the
+  body of a `platform`, `template` or `patch` it leaves to the platform's tool. It is the one check of the files as a
   whole, and the one to run after an edit by hand.
 
 The tools are built with the format they read, so a key a tool does not know is a mistake: passed
@@ -273,7 +273,7 @@ without moving the version or the revision.
   at once, names that node and what is wrong, and leaves every patch file as it was.
 - **A platform's tool** refuses what is wrong in a document only it serves, such as a `template`.
 
-`slipmesh check` makes all three, for every node. A refusal listed below is the loader's unless the
+`slipmesh check` makes the first two, for every node. A refusal listed below is the loader's unless the
 section names another.
 
 ### Required values, defaults and reference values
@@ -915,15 +915,15 @@ way to remove. A link's `ends` name nodes, never a group.
 The documents of a platform are written in its terms and name it in their `slipmesh:` block. They
 may stand in the files of the network or in files of their own. Today the one such platform is
 `talos`: `routeros` has no settings, templates or documents of its own and needs no `platform`
-document. One is taken, and the RouterOS tool and `slipmesh check` refuse any key in its body; a
+document. One is taken, and the RouterOS tool refuses any key in its body; a
 `template` or a `patch` that names `routeros` is refused.
 
 ### `platform`
 
 Settings that only one platform's tool reads: at most one document for a platform, named by
-`platform` in its block, taking neither `include` nor `exclude`. That platform's tool and
-`slipmesh check` read its body; the tools of other platforms read its block alone, so a new key
-here needs no release of theirs.
+`platform` in its block, taking neither `include` nor `exclude`. Only that platform's tool reads
+its body; `slipmesh check` and the other tools read its block alone, so a new key here needs a
+release of that tool alone.
 
 ```yaml
 slipmesh:
@@ -934,7 +934,7 @@ metrics:
   router: {port: 9324}
 ```
 
-The settings of `talos`:
+The settings of `talos`, which the Talos generator reads:
 
 | key | type | required | what it is |
 | --- | --- | --- | --- |
@@ -943,6 +943,7 @@ The settings of `talos`:
 A node listens on its own IPv4 loopback, so the metrics are reachable inside the mesh and nowhere
 else. The ports are two because two daemons serve them and cannot share one. An entry left out
 means no listener; a `port` of `0` is an error, since leaving the entry out is how to have none.
+The generator also refuses a key the table does not have and one port for both.
 
 ### `template`
 
@@ -988,6 +989,8 @@ set to the hash the command above prints. The warning stops nothing.
 
 What the Talos generator refuses:
 
+- a body with a key the table does not have or without one it requires, and a `base` that is not
+  `sha256:` and 64 hexadecimal digits;
 - a `talos` node that no `router` template reaches, since the routing daemon does not run without
   one;
 - files in which no document is a `firewall` template. A node that none of them reaches is not an
@@ -998,7 +1001,7 @@ What the Talos generator refuses:
   values exist only on the node.
 
 Those checks of the text are the generator's, `slipmesh-taloscfg generate --check`.
-`slipmesh check` checks the keys of the document and does not read the text.
+`slipmesh check` reads the block, not the body.
 
 ### `patch`
 
@@ -1060,9 +1063,9 @@ between nodes while the text of a template stays the same - aimed at nodes with 
 
 ## Who serves what
 
-What each tool does with each part of the files under revision 1. `slipmesh check` checks all of
-it; the column of `slipmesh` says what it writes. How each tool is run, and what it writes or
-changes, is in its own documentation.
+What each tool does with each part of the files under revision 1. `slipmesh check` checks all of it
+but the bodies of `platform`, `template` and `patch` documents; the column of `slipmesh` says what
+it writes. How each tool is run, and what it writes or changes, is in its own documentation.
 
 | part | `slipmesh` writes | on `talos`, `slipmesh-taloscfg` | on `routeros`, `slipmesh-routeros` |
 | --- | --- | --- | --- |
