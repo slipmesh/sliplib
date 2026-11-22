@@ -226,6 +226,12 @@ networks: what else step 6 shows comes from the conversion.
    - where step 4.9 made a link to a `routeros` node, which version 1 could have marked as
      obfuscated, a link of type `wireguard`, the interface of its `talos` end has no obfuscation,
      and the peer's keepalive is 25 where an obfuscated link gave it `20-30`;
+   - where step 4.11 turned a `patch` of `router` or `nftables` into a template, the files of that
+     document come in the generator's order and not the `patch`'s: the generator's config, then the
+     template, then the files the `patch` adds, so a file the `patch` listed before the template
+     stands after it now. The `nftables` document of a node's patch file stands after the `router`
+     document, not among the documents of the `patch`es, and has none of the keys besides
+     `configFiles` that step 4.12 dropped, `environment` for one;
    - where the pattern of the links' interfaces stood before other entries of a `direct_interfaces`
      and step 4 took it out, it stands last, and the node's routing configuration changes with it.
 

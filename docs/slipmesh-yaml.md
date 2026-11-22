@@ -268,7 +268,9 @@ without moving the version or the revision.
   a missing secret, an obfuscation the kernel module would refuse, an interface name too long. It
   stops that node and the nodes it has a link with, since each end of a link needs the other; a
   tool still configures the rest. [The MTU of the mesh](#the-mtu-of-the-mesh) is the exception: it
-  is computed from every link, so what it refuses stops every node.
+  is computed from every link, so what it refuses stops every node. The Talos generator is the
+  other: it writes the patch files of all its nodes or none, so a refusal of any node stops the run
+  at once, names that node and what is wrong, and leaves every patch file as it was.
 - **A platform's tool** refuses what is wrong in a document only it serves, such as a `template`.
 
 `slipmesh check` makes all three, for every node. A refusal listed below is the loader's unless the
@@ -1054,12 +1056,15 @@ or a list, in place of a string. The node gets that YAML's text, and each of its
 of `slipmesh.yaml` like any other.
 
 The generator makes some documents of a node itself: the `ExtensionServiceConfig` documents `awg`,
-`router` and `nftables`, and the annotations under `slipmesh.net/` in the node's `KubeNodeConfig`.
+`router` and, where a `firewall` template reaches the node, `nftables`, written in that order after
+the `patch` documents, and the annotations under `slipmesh.net/` in the node's `KubeNodeConfig`.
 A `patch` may add files to those three, and annotations of its own to the `KubeNodeConfig`. The
 generator refuses:
 
 - a `patch` of one of the three that sets anything but `configFiles`, or a file at a path the
   generator writes there;
+- a `patch` that adds files to `nftables` on a node no `firewall` template reaches, which gets no
+  `nftables` document to carry them;
 - an annotation under `slipmesh.net/`.
 
 `slipmesh check` reads the block of a `patch` and not its body. What the body means is the
