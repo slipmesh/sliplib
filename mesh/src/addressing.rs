@@ -18,8 +18,8 @@ pub fn ipv4_in(network: Ipv4Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv4Addr
     Ipv4Addr::from((u32::from(network) & mask) | (node_id_bits(node_id) & !mask))
 }
 
-/// The address `node_id` gives in `network/prefix_len`: the network's bits, and as many low bits of
-/// `node_id` as the host part holds, all 32 in a network of /96 or shorter.
+/// The address `node_id` gives in `network/prefix_len`: the network's bits, and `node_id` in the low
+/// bits of the host part, which the loader has checked it fits.
 pub(crate) fn ipv6_in(network: Ipv6Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv6Addr {
     let mask: u128 = if prefix_len == 0 {
         0
@@ -41,9 +41,7 @@ pub fn endpoint(endpoint: &str, port: u16) -> String {
 /// The link-local of a loopback: `fe80::` and the loopback's low 32 bits - `3fff::a1b2:c3d4` gives
 /// `fe80::a1b2:c3d4`. Under a loopback network of /96 or shorter they are the node's `node_id`.
 /// Under a longer one, /p, they are the network's own bits that fall there and the low 128 - p bits
-/// of `node_id`: under `3fff::ab:cd00/120` they are `ab:cdXX`. Two nodes share one only where they
-/// share a loopback. The loader refuses a loopback whose result has a host part of zeros on its
-/// /64, the Subnet-Router anycast `fe80::`.
+/// of `node_id`: under `3fff::ab:cd00/120` they are `ab:cdXX`.
 pub fn link_local_from_loopback(ipv6_loopback: Ipv6Addr) -> Ipv6Addr {
     let bits = u128::from(ipv6_loopback) as u32;
     let mut segments = [0u16; 8];
@@ -86,7 +84,7 @@ mod tests {
     #[test]
     fn the_networks_own_bits_in_the_low_32_stay_under_a_longer_network() {
         let network: Ipv6Addr = "3fff::1:0".parse().unwrap();
-        let loopback = ipv6_in(network, 120, Ipv4Addr::new(0, 0, 2, 5));
+        let loopback = ipv6_in(network, 120, Ipv4Addr::new(0, 0, 0, 5));
         assert_eq!(loopback.to_string(), "3fff::1:5");
         assert_eq!(link_local_from_loopback(loopback).to_string(), "fe80::1:5");
     }

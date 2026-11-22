@@ -40,6 +40,19 @@ pub enum Invalid {
         second: Name,
     },
     #[error(
+        "the node {0:?} has `node_id` 0.0.0.0, which gives every address of the node a host part of zeros - give it another"
+    )]
+    NodeIdZero(Name),
+    #[error(
+        "the node {node:?} has `node_id` {id}, whose bits do not fit the {host_bits} host bits of {key} - give it a `node_id` below 2^{host_bits}, or take a network there that leaves more"
+    )]
+    NodeIdTooWide {
+        node: Name,
+        id: Ipv4Addr,
+        key: &'static str,
+        host_bits: u8,
+    },
+    #[error(
         "the link {link:?} names {end:?} in its `ends`, which is not a node; a link joins nodes, never a group"
     )]
     UnknownEnd { link: Name, end: Name },
@@ -104,6 +117,7 @@ impl Network {
 fn check(network: &Network) -> Result<(), Invalid> {
     addressing(&network.addressing)?;
     nodes(&network.nodes)?;
+    node_ids_fit(network)?;
     links(network)?;
     classes(&network.routing.classes)?;
     keepalive(&network.mesh)
@@ -121,6 +135,51 @@ fn addressing(addressing: &Addressing) -> Result<(), Invalid> {
     }
 }
 
+/// Refuses a `node_id` with more significant bits than the host part of a network it is added
+/// to holds: then two `node_id`s never give one address, and none gives a host part of zeros.
+fn node_ids_fit(network: &Network) -> Result<(), Invalid> {
+    let addressing = &network.addressing;
+    let tunnel = addressing.tunnel.as_ref();
+    let host_bits = [
+        (
+            "addressing.loopback.ipv4",
+            Some(32 - addressing.loopback.ipv4.0.prefix_len()),
+        ),
+        (
+            "addressing.loopback.ipv6",
+            Some(128 - addressing.loopback.ipv6.0.prefix_len()),
+        ),
+        (
+            "addressing.tunnel.ipv4",
+            tunnel
+                .and_then(|tunnel| tunnel.ipv4)
+                .map(|network| 32 - network.0.prefix_len()),
+        ),
+        (
+            "addressing.tunnel.link_local",
+            tunnel
+                .and_then(|tunnel| tunnel.link_local)
+                .map(|network| 128 - network.0.prefix_len()),
+        ),
+    ];
+    for (name, node) in &network.nodes {
+        let significant = 32 - u32::from(node.node_id).leading_zeros();
+        let narrower = host_bits
+            .iter()
+            .filter_map(|(key, bits)| Some((*key, (*bits)?)))
+            .find(|(_, bits)| significant > u32::from(*bits));
+        if let Some((key, host_bits)) = narrower {
+            return Err(Invalid::NodeIdTooWide {
+                node: name.clone(),
+                id: node.node_id,
+                key,
+                host_bits,
+            });
+        }
+    }
+    Ok(())
+}
+
 fn nodes(nodes: &Map<Name, Node>) -> Result<(), Invalid> {
     if nodes.is_empty() {
         return Err(Invalid::NoNodes);
@@ -135,6 +194,9 @@ fn nodes(nodes: &Map<Name, Node>) -> Result<(), Invalid> {
                 node: name.clone(),
                 entries: node.underlay.len(),
             });
+        }
+        if node.node_id == Ipv4Addr::UNSPECIFIED {
+            return Err(Invalid::NodeIdZero(name.clone()));
         }
         if let Some(first) = ids.insert(node.node_id, name) {
             return Err(Invalid::NodeIdTwice {
@@ -347,6 +409,76 @@ mod tests {
                 second: name("node-c"),
             }
         );
+    }
+
+    #[test]
+    fn a_node_id_of_zeros_is_refused_naming_the_node() {
+        assert_eq!(
+            refusal("{nodes: {node-b: {node_id: 0.0.0.0}}}"),
+            Invalid::NodeIdZero(name("node-b"))
+        );
+    }
+
+    fn too_wide(id: [u8; 4], key: &'static str, host_bits: u8) -> Invalid {
+        Invalid::NodeIdTooWide {
+            node: name("node-b"),
+            id: Ipv4Addr::from(id),
+            key,
+            host_bits,
+        }
+    }
+
+    #[test]
+    fn a_node_id_one_bit_too_wide_for_a_network_it_is_added_to_is_refused_naming_it() {
+        // The example's loopbacks are a /25 and a /64, its links' IPv4 a /25.
+        let cases = [
+            (
+                "{nodes: {node-b: {node_id: 0.0.0.128}}}",
+                too_wide([0, 0, 0, 128], "addressing.loopback.ipv4", 7),
+            ),
+            (
+                "{addressing: {loopback: {ipv4: 198.18.0.0/15, ipv6: '3fff:0:0:1::/120'}, tunnel: \
+                 {ipv4: null}}, nodes: {node-b: {node_id: 0.0.1.0}}}",
+                too_wide([0, 0, 1, 0], "addressing.loopback.ipv6", 8),
+            ),
+            (
+                "{addressing: {tunnel: {ipv4: 198.51.100.192/26}}, nodes: {node-b: {node_id: \
+                 0.0.0.64}}}",
+                too_wide([0, 0, 0, 64], "addressing.tunnel.ipv4", 6),
+            ),
+            (
+                "{addressing: {tunnel: {ipv4: null, link_local: 'fe80::/122'}}, nodes: {node-b: \
+                 {node_id: 0.0.0.64}}}",
+                too_wide([0, 0, 0, 64], "addressing.tunnel.link_local", 6),
+            ),
+        ];
+        for (overlay, expected) in cases {
+            assert_eq!(refusal(overlay), expected, "{overlay}");
+        }
+    }
+
+    #[test]
+    fn a_node_id_at_the_limit_of_its_networks_is_taken() {
+        let network = with(
+            "{addressing: {loopback: {ipv4: 198.51.100.0/24, ipv6: '3fff:0:0:1::/120'}, tunnel: \
+             {ipv4: null}}, nodes: {node-b: {node_id: 0.0.0.255}}}",
+        )
+        .unwrap();
+        assert_eq!(check(&network), Ok(()));
+    }
+
+    #[test]
+    fn links_without_an_ipv4_network_take_any_node_id_there() {
+        let overlay = |ipv4: &str| {
+            format!(
+                "{{addressing: {{tunnel: {{ipv4: {ipv4}}}}}, nodes: {{node-b: {{node_id: 0.0.0.100}}}}}}"
+            )
+        };
+        assert_eq!(
+            refusal(&overlay("198.51.100.192/26")),
+            too_wide([0, 0, 0, 100], "addressing.tunnel.ipv4", 6)
+        );
+        assert_eq!(check(&with(&overlay("null")).unwrap()), Ok(()));
     }
 
     #[test]
