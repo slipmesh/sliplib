@@ -1056,6 +1056,9 @@ mod tests {
         for secret in std::iter::once(&key).chain(&tokens) {
             assert!(!printed.contains(secret.expose()), "{printed}");
         }
+        for kind in ["\"platform\"", "\"template\"", "\"patch\""] {
+            assert!(printed.contains(kind), "{kind}: {printed}");
+        }
     }
 
     #[test]
