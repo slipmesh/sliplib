@@ -878,12 +878,13 @@ where `U` is the smaller underlay `mtu` of its two ends, 32 WireGuard's header a
 header, `IP` 20 or 40 by the family the link is dialed over, and `S4` the `s4` of an `amneziawg`
 link once the defaults are laid under its own, 0 for a `wireguard` one. Two nodes on Ethernet,
 dialed over IPv6 and with no `s4`, give 1420. The MTU of the mesh is the least of the limits of all
-links, whatever their type. `mesh.mtu` lowers it, and one above it is refused, naming the link
-whose limit it exceeds. A result below 1280, the least IPv6 allows a link ([RFC 8200, section
-5](https://www.rfc-editor.org/rfc/rfc8200#section-5)), is an error naming the link that gives it,
-and so is a `mesh.mtu` below 1280, or one with no links, which has no interface to give it to. An
-underlay `mtu` the bytes the link adds reach or exceed gives the link a limit of 0, refused the same
-way.
+links, whatever their type. A link whose limit is below 1280, the least IPv6 allows a link ([RFC
+8200, section 5](https://www.rfc-editor.org/rfc/rfc8200#section-5)), is an error naming the link,
+whether `mesh.mtu` is set or not: raise the underlay `mtu` of its narrower end, or lower its `s4`.
+An underlay `mtu` the bytes the link adds reach or exceed gives the link a limit of 0, refused the
+same way. `mesh.mtu` lowers the MTU of the mesh, and one above it is refused, naming the link whose
+limit it exceeds. A `mesh.mtu` below 1280 is an error of its own, naming no link, and so is one with
+no links, which has no interface to give it to.
 
 ## `groups`
 
@@ -1100,11 +1101,12 @@ mesh as computed.
   made of.
 
 **Planned:** the three given to a tool as one file, their documents in that order, which is what
-laying `secrets.yaml` over `mesh.yaml` comes to. A tool refuses the second `network` document of a
-file today, so what it takes is one file holding the `network` document of `mesh.yaml` with that of
-`secrets.yaml` laid over it, then the documents of `talos.yaml`. The three hold no Planned part,
-since a file with one is refused. One link has a header, a timer and its [keepalive](#keepalive) written as
-ranges.
+laying `secrets.yaml` over `mesh.yaml` comes to.
+
+A tool refuses the second `network` document of a file today, so what it takes is one file holding
+the `network` document of `mesh.yaml` with that of `secrets.yaml` laid over it, then the documents
+of `talos.yaml`. The three hold no Planned part, since a file with one is refused. One link has a
+header, a timer and its [keepalive](#keepalive) written as ranges.
 
 Their networks and addresses are from the ranges reserved for documentation, but for the
 link-local `fe80::` of the links; a `node_id` is an identity, not an address. Their AS number is

@@ -261,8 +261,9 @@ from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those t
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
   crosses every link's underlay unfragmented, or the one the file sets for the mesh when it fits. It
   reads every link's obfuscation through its `s4`, links the node is not on included; a missing
-  entry counts as no junk. It refuses a result below 1280, the least IPv6 allows a link, naming
-  the link that gives it, and a `mesh.mtu` above a link's limit, naming that link.
+  entry counts as no junk. It refuses a link whose limit is below 1280, the least IPv6 allows a
+  link, and a `mesh.mtu` above a link's limit, each naming the link; and a `mesh.mtu` below 1280
+  or one set on a mesh without links.
 - `addressing` gives the address a `node_id` gives in a network, the link-local of a loopback, and
   an endpoint to dial.
 - `warnings::warnings` lists what the tools accept and tell about: for every link, in order, each
