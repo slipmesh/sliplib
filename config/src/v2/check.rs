@@ -20,7 +20,7 @@ const POOL_PROTOCOL: u8 = 200;
 #[non_exhaustive]
 pub enum Invalid {
     #[error(
-        "addressing.tunnel.link_local is {0}, outside fe80::/10, the range of link-local addresses - take a network inside it, or leave the key out for fe80::/64"
+        "addressing.tunnel.link_local is {0}, outside fe80::/10, the range of link-local addresses - take a network inside it, or leave the key out for each node's link-local to be fe80:: and the low 32 bits of its IPv6 loopback"
     )]
     LinkLocalOutside(Ipv6Net),
     #[error("`nodes` is empty, and a network has at least one node")]
@@ -40,12 +40,10 @@ pub enum Invalid {
         second: Name,
     },
     #[error(
-        "the node {0:?} has `node_id` 0.0.0.0, which gives every address of the node a host part of zeros - give it another"
+        "the node {0:?} has `node_id` 0.0.0.0, which gives its loopbacks a host part of zeros - give it another"
     )]
     NodeIdZero(Name),
-    #[error(
-        "the node {node:?} has `node_id` {id}, whose bits do not fit the {host_bits} host bits of {key} - give it a `node_id` below 2^{host_bits}, or take a network there that leaves more"
-    )]
+    #[error("the node {node:?} has `node_id` {id}, {}", too_wide(key, *host_bits))]
     NodeIdTooWide {
         node: Name,
         id: Ipv4Addr,
@@ -105,10 +103,25 @@ pub enum Invalid {
     KeepaliveFromZero { key: String, range: Range<u16> },
 }
 
+/// What is wrong with a `node_id` too wide for `key`, a network of `host_bits` host bits, and what
+/// to do about it.
+fn too_wide(key: &str, host_bits: u8) -> String {
+    match host_bits {
+        0 => {
+            format!("and {key} leaves no host bits for a `node_id` - take a shorter network there")
+        }
+        bits => format!(
+            "whose bits do not fit the {bits} host bits of {key} - give it a `node_id` below \
+             2^{bits}, or take a network there that leaves more"
+        ),
+    }
+}
+
 impl Network {
     /// Refuses what is wrong across the tree, which no one key refuses by itself: names, the
     /// ends and the ports of the links, the platforms that serve them, the route classes, the
-    /// networks no address can come from, a keepalive that starts at zero.
+    /// networks no address can come from, a `node_id` of `0.0.0.0` or one wider than a network it
+    /// is added to, a keepalive that starts at zero.
     pub fn check(&self) -> Result<(), Invalid> {
         check(self)
     }
@@ -465,6 +478,71 @@ mod tests {
         )
         .unwrap();
         assert_eq!(check(&network), Ok(()));
+    }
+
+    #[test]
+    fn a_network_that_leaves_no_host_bits_takes_no_node_id_and_says_so() {
+        let cases = [
+            (
+                "{addressing: {loopback: {ipv4: 198.51.100.1/32}}}",
+                "addressing.loopback.ipv4",
+            ),
+            (
+                "{addressing: {loopback: {ipv6: '3fff::1/128'}}}",
+                "addressing.loopback.ipv6",
+            ),
+        ];
+        for (overlay, key) in cases {
+            let refusal = refusal(overlay);
+            assert_eq!(
+                refusal,
+                Invalid::NodeIdTooWide {
+                    node: name("node-a"),
+                    id: Ipv4Addr::new(0, 0, 0, 1),
+                    key,
+                    host_bits: 0,
+                },
+                "{overlay}"
+            );
+            assert_eq!(
+                refusal.to_string(),
+                format!(
+                    "the node \"node-a\" has `node_id` 0.0.0.1, and {key} leaves no host bits for \
+                     a `node_id` - take a shorter network there"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn a_network_of_32_host_bits_or_more_takes_any_node_id() {
+        for ipv6 in ["3fff:0:0:1::/96", "3fff:0:0:1::/64"] {
+            let network = with(&format!(
+                "{{addressing: {{loopback: {{ipv4: 0.0.0.0/0, ipv6: '{ipv6}'}}, tunnel: {{ipv4: \
+                 null}}}}, nodes: {{node-b: {{node_id: 255.255.255.255}}}}}}"
+            ))
+            .unwrap();
+            assert_eq!(check(&network), Ok(()), "{ipv6}");
+        }
+    }
+
+    #[test]
+    fn a_node_id_too_wide_says_how_far_it_may_go() {
+        assert_eq!(
+            refusal("{nodes: {node-b: {node_id: 0.0.0.128}}}").to_string(),
+            "the node \"node-b\" has `node_id` 0.0.0.128, whose bits do not fit the 7 host bits of \
+             addressing.loopback.ipv4 - give it a `node_id` below 2^7, or take a network there that \
+             leaves more"
+        );
+    }
+
+    #[test]
+    fn a_node_id_of_zeros_says_what_it_gives() {
+        assert_eq!(
+            refusal("{nodes: {node-b: {node_id: 0.0.0.0}}}").to_string(),
+            "the node \"node-b\" has `node_id` 0.0.0.0, which gives its loopbacks a host part of \
+             zeros - give it another"
+        );
     }
 
     #[test]
