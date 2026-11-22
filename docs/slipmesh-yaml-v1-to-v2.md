@@ -35,8 +35,8 @@ In general:
 - One rule for names, which version 1 did not have: ASCII letters, digits, `-`, `_` and `.`, with a
   letter or a digit first and last. `all` and `none` are reserved.
 - New refusals among the nodes, none of which version 1 checked: two nodes with the same loopback
-  address; an IPv6 loopback network longer than /96; two nodes with the same address on the links,
-  link-local or IPv4; a link-local whose low 64 bits are all zeros.
+  address; two nodes with the same address on the links, link-local or IPv4; a link-local whose low
+  64 bits are all zeros.
 - The network of the link-local addresses on the links is a key of its own,
   `addressing.tunnel.link_local`, written with or without an IPv4 network beside it. Version 1 took
   it from `tunnel_networks.ipv6`, which came only together with `ipv4`, and did not check that it
@@ -144,10 +144,9 @@ networks: what else step 6 shows comes from the conversion.
    1. In the `slipmesh:` block of the `network` document, write `version: 2` and `revision: 1`.
    2. Write `addressing`: `loopback` is `cluster.loopback_networks`. Where the file has
       `cluster.tunnel_networks`, `tunnel.ipv4` is its `ipv4`, and `tunnel.link_local` its `ipv6`,
-      moved as it is: the link-local addresses are derived from it as before. Version 1 took two
-      networks that step 5 refuses: an IPv6 loopback network longer than /96, and an `ipv6` of
-      `tunnel_networks` outside `fe80::/10`. Such a network has to change, and the addresses
-      derived from it move with it.
+      moved as it is: the link-local addresses are derived from it as before. Version 1 took a
+      network that step 5 refuses: an `ipv6` of `tunnel_networks` outside `fe80::/10`. Such a
+      network has to change, and the addresses derived from it move with it.
    3. Write `routing`: `bgp.as` is `cluster.bgp_as`; `direct_interfaces` is the list of the same
       name; `learn` holds `pod_subnet` and `announce` holds `service_subnet`, each in a list. The
       label `k8s-services` has no place in version 2. `bfd` moves here without `enable`: where

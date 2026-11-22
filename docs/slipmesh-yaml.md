@@ -826,12 +826,13 @@ With `random_trailers` on, keep `h1` to `h3` single values or narrow ranges, or 
 result into what its platform takes.
 
 **Loopback addresses.** One IPv4 and one IPv6, by which the node is known inside the mesh. Each is
-a network of `addressing.loopback` with `node_id` in its host part: the IPv4 one takes as many low
-bits of `node_id` as the network leaves free, the IPv6 one all 32 as its low 32 bits. With the
-networks `198.51.100.0/25` and `3fff:0:0:1::/64`, a `node_id` of `0.0.0.5` gives `198.51.100.5`
-and `3fff:0:0:1::5`. A unique `node_id` does not make the addresses unique: in a /25, `0.0.0.5` and
-`0.0.0.133` give the same IPv4 loopback. Two nodes with the same address in either family are
-refused, and so is an IPv6 loopback network longer than /96, which leaves no room for the 32 bits.
+a network of `addressing.loopback` with `node_id` in its host part, the same way in both families:
+the network's own bits, then as many low bits of `node_id` as the network leaves free, at most all
+32 as the address's low 32 bits, and zeros between. With the networks `198.51.100.0/25` and
+`3fff:0:0:1::/64`, a `node_id` of `0.0.0.5` gives `198.51.100.5` and `3fff:0:0:1::5`. A unique
+`node_id` does not make the addresses unique: in a /25, `0.0.0.5` and `0.0.0.133` give the same
+IPv4 loopback, and in a /120 `0.0.1.5` and `0.0.0.5` the same IPv6 one. Two nodes with the same
+address in either family are refused.
 
 **One interface for each link.** On each end of a link of either type, it is named by
 `mesh.interface_prefix` and the name of the other end, listens on the `port` of the link's block,
@@ -848,10 +849,9 @@ between. With the default `fe80::/64`, a `node_id` of `0.0.0.5` gives `fe80::5`.
 
 A network that leaves fewer than 32 bits free takes only the low bits of `node_id`, so those bits
 have to differ between nodes: two nodes with the same derived address on the links, link-local or
-IPv4, are refused, across the whole network and not only between the ends of one link. Unlike the
-IPv6 loopback, `link_local` may be longer than /96. Every node gets such a link-local address, a
-node on no link too, and such a node is refused for a duplicate or for a host part of zeros as any
-other.
+IPv4, are refused, across the whole network and not only between the ends of one link. Every node
+gets such a link-local address, a node on no link too, and such a node is refused for a duplicate
+or for a host part of zeros as any other.
 
 **A host part of zeros.** An address whose host part is all zeros is refused only where the prefix
 it stands with on its interface makes it special. On an IPv4 prefix shorter than /31 the host part

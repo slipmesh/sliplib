@@ -6,9 +6,6 @@ use crate::Range;
 use sliplib_net::Ipv6Net;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-/// The longest IPv6 loopback network: a node's address takes its `node_id` as the low 32 bits.
-const LOOPBACK_LIMIT: u8 = 96;
-
 /// The link-local unicast range of IPv6.
 const LINK_LOCAL: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10);
 
@@ -22,10 +19,6 @@ const POOL_PROTOCOL: u8 = 200;
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Invalid {
-    #[error(
-        "addressing.loopback.ipv6 is {0}, which leaves no room for the 32 bits of a `node_id` - make it /{LOOPBACK_LIMIT} or shorter"
-    )]
-    LoopbackTooLong(Ipv6Net),
     #[error(
         "addressing.tunnel.link_local is {0}, outside fe80::/10, the range of link-local addresses - take a network inside it, or leave the key out for fe80::/64"
     )]
@@ -117,10 +110,6 @@ fn check(network: &Network) -> Result<(), Invalid> {
 }
 
 fn addressing(addressing: &Addressing) -> Result<(), Invalid> {
-    let loopback = addressing.loopback.ipv6.0;
-    if loopback.prefix_len() > LOOPBACK_LIMIT {
-        return Err(Invalid::LoopbackTooLong(loopback));
-    }
     let link_local = addressing
         .tunnel
         .as_ref()
@@ -299,16 +288,6 @@ mod tests {
     fn a_network_without_nodes_is_refused() {
         let refusal = refusal("{nodes: {node-a: null, node-b: null, node-c: null, router1: null}}");
         assert_eq!(refusal, Invalid::NoNodes);
-    }
-
-    #[test]
-    fn an_ipv6_loopback_network_that_leaves_no_room_for_a_node_id_is_refused() {
-        assert_eq!(
-            refusal("{addressing: {loopback: {ipv6: '3fff:0:0:1::/97'}}}"),
-            Invalid::LoopbackTooLong("3fff:0:0:1::/97".parse().unwrap())
-        );
-        let widest = with("{addressing: {loopback: {ipv6: '3fff:0:0:1::/96'}}}").unwrap();
-        assert_eq!(check(&widest), Ok(()));
     }
 
     #[test]

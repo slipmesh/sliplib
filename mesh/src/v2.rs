@@ -50,6 +50,10 @@ const IPV4_LOOPBACK: Derived = Derived {
     what: "IPv4 loopback",
     key: "addressing.loopback.ipv4",
 };
+const IPV6_LOOPBACK: Derived = Derived {
+    what: "IPv6 loopback",
+    key: "addressing.loopback.ipv6",
+};
 const LINK_LOCAL: Derived = Derived {
     what: "link-local address",
     key: "addressing.tunnel.link_local",
@@ -59,9 +63,7 @@ const TUNNEL_IPV4: Derived = Derived {
     key: "addressing.tunnel.ipv4",
 };
 
-/// Refuses two nodes that got one address: `of` gives a node's, where it has one. The IPv6
-/// loopbacks need no such look: the loader refuses a loopback network longer than /96 and two
-/// nodes of one `node_id`, so each loopback holds a whole `node_id` of its own.
+/// Refuses two nodes that got one address: `of` gives a node's, where it has one.
 fn distinct(
     nodes: &[Node],
     derived: &Derived,
@@ -159,6 +161,7 @@ pub fn lower(files: &File) -> Result<Network, Error> {
         .collect();
 
     distinct(&nodes, &IPV4_LOOPBACK, |node| Some(node.loopback.0.into()))?;
+    distinct(&nodes, &IPV6_LOOPBACK, |node| Some(node.loopback.1.into()))?;
     distinct(&nodes, &LINK_LOCAL, |node| Some(node.link_local.into()))?;
     distinct(&nodes, &TUNNEL_IPV4, |node| {
         node.tunnel_ipv4.map(IpAddr::from)
@@ -456,6 +459,42 @@ mod tests {
                 what: "IPv4 loopback",
                 key: "addressing.loopback.ipv4",
                 address: "198.51.100.1".parse().unwrap(),
+                first: "node-a".into(),
+                second: "node-b".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn an_ipv6_loopback_network_longer_than_96_takes_as_many_bits_of_the_node_id_as_it_leaves() {
+        // What v0.19's `ipv6_loopback` derived: the network's bits and the low 8 of 0.0.1.2.
+        let network = lowered(
+            "{addressing: {loopback: {ipv4: 198.18.0.0/24, ipv6: '3fff:0:0:1::/120'}}, nodes: \
+             {node-b: {node_id: 0.0.1.2}}}",
+        );
+        let node = network.node("node-b").unwrap();
+        assert_eq!(node.loopback.0.to_string(), "198.18.0.2");
+        assert_eq!(node.loopback.1.to_string(), "3fff:0:0:1::2");
+        assert_eq!(
+            network.node("node-a").unwrap().loopback.1.to_string(),
+            "3fff:0:0:1::1"
+        );
+    }
+
+    #[test]
+    fn two_nodes_with_one_ipv6_loopback_are_refused_naming_both() {
+        // In a /120 the node_id gives its low 8 bits: 0.0.1.1 and 0.0.0.1 are the same there, and
+        // differ in the 16 of the IPv4 /16.
+        let refusal = refusal(
+            "{addressing: {loopback: {ipv4: 198.18.0.0/16, ipv6: '3fff:0:0:1::/120'}, tunnel: \
+             {ipv4: null}}, nodes: {node-b: {node_id: 0.0.1.1}}}",
+        );
+        assert_eq!(
+            refusal,
+            Error::SameAddress {
+                what: "IPv6 loopback",
+                key: "addressing.loopback.ipv6",
+                address: "3fff:0:0:1::1".parse().unwrap(),
                 first: "node-a".into(),
                 second: "node-b".into(),
             }

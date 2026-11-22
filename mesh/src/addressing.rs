@@ -18,9 +18,8 @@ pub fn ipv4_in(network: Ipv4Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv4Addr
     Ipv4Addr::from((u32::from(network) & mask) | (node_id_bits(node_id) & !mask))
 }
 
-/// The address `node_id` gives in `network/prefix_len`: the network's bits, and `node_id`'s 32 bits
-/// in the low bits of the host part. A network longer than /96 leaves fewer than 32, and takes
-/// only that many low bits of `node_id`, as the link-local networks do.
+/// The address `node_id` gives in `network/prefix_len`: the network's bits, and as many low bits of
+/// `node_id` as the host part holds, all 32 in a network of /96 or shorter.
 pub(crate) fn ipv6_in(network: Ipv6Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv6Addr {
     let mask: u128 = if prefix_len == 0 {
         0
@@ -39,8 +38,10 @@ pub fn endpoint(endpoint: &str, port: u16) -> String {
     }
 }
 
-/// The link-local of a loopback: `fe80::` and the loopback's low 32 bits, which are the node's
-/// `node_id` - `3fff::a1b2:c3d4` gives `fe80::a1b2:c3d4`.
+/// The link-local of a loopback: `fe80::` and the loopback's low 32 bits - `3fff::a1b2:c3d4` gives
+/// `fe80::a1b2:c3d4`. Under a loopback network of /96 or shorter they are the node's `node_id`;
+/// under a longer one, its low bits below the network's, so two nodes share one where they share a
+/// loopback, which is refused.
 pub fn link_local_from_loopback(ipv6_loopback: Ipv6Addr) -> Ipv6Addr {
     let bits = u128::from(ipv6_loopback) as u32;
     let mut segments = [0u16; 8];
