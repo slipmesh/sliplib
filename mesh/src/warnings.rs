@@ -26,8 +26,7 @@ impl fmt::Display for Warning {
     }
 }
 
-/// Every warning about the links of `mesh`, in their order, each from the obfuscation in force on
-/// the link: its own laid over the network's, none for a `plain` link.
+/// In the order of the links.
 pub fn warnings(mesh: &Network) -> Vec<Warning> {
     mesh.links
         .iter()

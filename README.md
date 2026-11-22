@@ -233,33 +233,30 @@ its cause as its `source`, or an `mtu::MtuError`. Files that read and give no ne
 from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those that do not read.
 `Network::node` refuses a name the network does not hold as `model::UnknownNode`.
 
-- `model::Network` is what the configs are computed from: every node with the addresses derived for
-  it, its platform and the private key the files write for it, every link with the keepalive and the
-  obfuscation in force on it, the obfuscation empty on a link of type `wireguard`, the route classes
-  and the ports of the metrics listeners. `v2::lower` gives it for a `v2::File`, and refuses files
-  without `mesh.interface_prefix`. The metrics ports are the `talos` platform's settings, which the
-  lowering does not read: the Talos generator and `slipmesh check` set them on the network.
+- `model::Network`, what the configs are computed from: each node with its derived addresses,
+  platform and key; each link with its keepalive and obfuscation in force, the obfuscation empty on
+  a `wireguard` link; the route classes; the ports of the metrics listeners. `v2::lower` gives it
+  from a `v2::File`, refusing one without `mesh.interface_prefix`. The metrics ports are the `talos`
+  settings, which lowering does not read: the Talos generator and `slipmesh check` set them.
   `model::node_key` and `model::link_obfuscation` name where the files hold a node's key and a
   link's obfuscation.
-- `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
-  node checks it, from the network alone. It needs the node's own key, but on a node on no link; and
-  for each of its links, the peer's key and the link's obfuscation. It refuses what of these is
-  missing, or the obfuscation of a link of type `amneziawg` without one of `jc`, `jmin`, `jmax`,
-  `s1`, `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes
-  and links the node is not on. Such a refusal gives its `secrets::MissingSecret` through
-  `render::Error::missing_secret`, so a tool can add how its user creates the secret. A peer the
-  node dials is given the keepalive of its link where that differs from what
-  `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes of `talos`.
+- `render::node_configs` gives a node's `AwgConfig` and `RouterConfig` from the network, each
+  checked as the node checks it. It refuses a missing key of the node, unless it is on no link, or
+  of a peer, and a link of type `amneziawg` whose obfuscation lacks one of `jc`, `jmin`, `jmax`,
+  `s1`, `s2` and `h1` to `h4`, naming what lacks what; nothing of nodes and links the node is not
+  on. Such a refusal gives its `secrets::MissingSecret` through `render::Error::missing_secret`, for
+  a tool to say how to create it. A dialed peer gets its link's keepalive where that differs from
+  what `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes of
+  `talos`.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
   each by the entry it belongs to, and no key for a node on no link, or `NoHeaderLeft`
   when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a
   tool that only reads the file leaves it off, and that function is not in its build.
-- `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
-  crosses every link's underlay unfragmented, or the one the file sets for the mesh when it fits. It
-  reads every link's obfuscation through its `s4`, links the node is not on included; an `s4` left
-  out counts as no junk. It refuses a link whose limit is below 1280, the least IPv6 allows a
-  link, and a `mesh.mtu` above a link's limit, each naming the link; and a `mesh.mtu` below 1280
-  or one set on a mesh without links.
+- `mtu::mesh_mtu`, the MTU of every mesh interface: the largest at which a full-size packet crosses
+  every link's underlay unfragmented, or `mesh.mtu` where it fits. It counts every link's `s4`, 0
+  where unset. It refuses a link whose limit is below 1280, the least IPv6 allows a link, and a
+  `mesh.mtu` above a link's limit, each naming the link; and a `mesh.mtu` below 1280 or set on a
+  mesh without links.
 - `addressing` gives the address a `node_id` gives in a network, the link-local of a loopback, and
   an endpoint to dial.
 - `warnings::warnings` lists what the tools accept and tell about: for every link, in order, each

@@ -1,6 +1,4 @@
-//! What a node's configs need of the network's secrets, which the model holds as the files set
-//! them: the refusal of one the files lack, and the fields an obfuscation of a link of type
-//! `amneziawg` carries once minted. Nothing here generates a secret.
+//! The refusal of a missing secret, and the fields a minted obfuscation carries.
 
 use sliplib_config::Obfuscation;
 
