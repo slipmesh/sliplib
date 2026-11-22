@@ -140,7 +140,11 @@ networks: what else step 6 shows comes from the conversion.
 3. Have the pools and the lists written out as resources of the cluster, as
    [What leaves the file](#what-leaves-the-file) says. **Planned:** until the operators exist, a
    file with pools or `bypass` cannot be converted. A file with neither skips this step.
-4. Edit the file:
+4. Edit the file. A key a file of version 1 writes as `null` is deleted, not moved: version 1
+   read `null` as the key left out, and version 2 lays it as deleting the key. Moved as it is, a
+   node's `direct_interfaces: null`, which gave the node the cluster's list, leaves it announcing no
+   interfaces, and a field of a link's `obfuscation` written `null`, which took the network's
+   value, leaves the link without that field.
    1. In the `slipmesh:` block of the `network` document, write `version: 2` and `revision: 1`.
    2. Write `addressing`: `loopback` is `cluster.loopback_networks`. Where the file has
       `cluster.tunnel_networks`, `tunnel.ipv4` is its `ipv4`, and `tunnel.link_local` its `ipv6`,
@@ -160,11 +164,11 @@ networks: what else step 6 shows comes from the conversion.
       rule](slipmesh-yaml.md#names), or `all` or `none`, has to change, and so do the names of the
       interfaces named after it on the node's peers. Give every node its `platform`. Its
       `mesh_private_key` becomes `wireguard.private_key`, and its `direct_interfaces` moves under
-      its `routing`. A `node_id` wider than the host part of a network it is added to, which
-      version 1 cut there, and `0.0.0.0`, are refused by step 5. Give such a node the `node_id`
-      whose bits version 1 kept in its IPv4 loopback, the old one cut to the host bits of
-      `loopback.ipv4`, where that value is not `0.0.0.0` and fits every network the node's
-      addresses are derived from; otherwise any value that does. `198.51.100.133` under a /25
+      its `routing`, but for a `null` one, which is deleted. A `node_id` wider than the host part
+      of a network it is added to, which version 1 cut there, and `0.0.0.0`, are refused by
+      step 5. Give such a node the `node_id` whose bits version 1 kept in its IPv4 loopback, the
+      old one cut to the host bits of `loopback.ipv4`, where that value is not `0.0.0.0` and fits
+      every network the node's addresses are derived from; otherwise any value that does. `198.51.100.133` under a /25
       becomes `0.0.0.5`. The node's IPv4 loopback stays only in the first case.
    7. Give every node one `underlay` entry, named as you like. Its `mtu` is the node's `uplink_mtu`,
       left out where that was. Its `endpoint` holds the node's `endpoint` without any port and
@@ -181,7 +185,8 @@ networks: what else step 6 shows comes from the conversion.
    9. Turn `mesh.links` into a mapping, giving each link a name. Its `pair` becomes `ends`, each node
       with `{}`. A link with `plain: true` becomes `type: wireguard`, with its `port` in a
       `wireguard` block. Any other becomes `type: amneziawg`, with its `port` and `obfuscation` in an
-      `amneziawg` block. A link that reaches a `routeros` node has to be of type `wireguard`.
+      `amneziawg` block, the fields of `obfuscation` written `null` deleted. A link that reaches a
+      `routeros` node has to be of type `wireguard`.
    10. Delete `bypass`, `bypass_refresh_interval_secs` and every `roadwarriors` document.
    11. Turn each `patch` that carries a template into a `template` document, `daemon: router` or
        `daemon: firewall`, keeping its `include` and `exclude`. The template's text becomes
