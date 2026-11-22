@@ -21,9 +21,6 @@ path = "../config"
 [dependencies.sliplib-mesh]
 path = "../mesh"
 
-[dependencies.sliplib-net]
-path = "../net"
-
 [dependencies.sliplib-yaml]
 path = "../yaml"
 
