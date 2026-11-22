@@ -9,29 +9,40 @@ use sliplib_config::router::RouterConfig;
 use sliplib_mesh::render::node_configs;
 use sliplib_yaml::Value;
 
-/// A config of version 1, which wrote beside the shared keys those only its daemon reads.
+// Version 1 wrote, beside the shared keys, those only its daemon reads: each type below takes the
+// ones of its level alone.
+
 #[derive(Deserialize, Serialize)]
-struct WithOwnKeys<C> {
+struct Router {
     #[serde(flatten)]
-    shared: C,
+    shared: RouterConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     metrics: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    handshake_stale_secs: Option<u64>,
 }
 
-/// The `awg` config of version 1: its own keys sit at the top and in an interface.
 #[derive(Deserialize, Serialize)]
 struct Awg {
-    interfaces: Vec<WithOwnKeys<InterfaceEntry>>,
+    interfaces: Vec<Interface>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     metrics: Option<Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Interface {
+    #[serde(flatten)]
+    shared: InterfaceEntry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    handshake_stale_secs: Option<u64>,
 }
 
 impl Awg {
     fn shared(self) -> AwgConfig {
         AwgConfig {
-            interfaces: self.interfaces.into_iter().map(|own| own.shared).collect(),
+            interfaces: self
+                .interfaces
+                .into_iter()
+                .map(|interface| interface.shared)
+                .collect(),
         }
     }
 }
@@ -130,8 +141,7 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
         // Written back, each file holds what it held: a key the types do not take fails here and
         // not unseen below, where both sides go through them.
         let read_awg: Awg = sliplib_yaml::from_str(&golden_text("awg")).unwrap();
-        let read_router: WithOwnKeys<RouterConfig> =
-            sliplib_yaml::from_str(&golden_text("router")).unwrap();
+        let read_router: Router = sliplib_yaml::from_str(&golden_text("router")).unwrap();
         let as_read = |config: &str| sliplib_yaml::from_str::<Value>(&golden_text(config)).unwrap();
         assert_eq!(
             sliplib_yaml::to_value(&read_awg).unwrap(),
@@ -153,10 +163,9 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
         let mut expected_awg = sliplib_yaml::from_str::<Awg>(&renumbered("awg"))
             .unwrap()
             .shared();
-        let mut expected_router =
-            sliplib_yaml::from_str::<WithOwnKeys<RouterConfig>>(&renumbered("router"))
-                .unwrap()
-                .shared;
+        let mut expected_router = sliplib_yaml::from_str::<Router>(&renumbered("router"))
+            .unwrap()
+            .shared;
         expected_awg
             .interfaces
             .retain(|interface| !interface.name.starts_with("rw-"));
