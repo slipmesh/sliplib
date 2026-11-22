@@ -239,8 +239,8 @@ depends on whose the document is:
 - **A tool, in a document of another platform:** the block alone, so a key added to the body does
   not concern it.
 - **`slipmesh check`, in all of it:** every block, and the bodies of `network` and `groups`; the
-  body of a `platform`, `template` or `patch` it leaves to the platform's tool. It is the one check
-  of the files as a whole, and the one to run after an edit by hand.
+  body of a `platform`, `template` or `patch` it leaves to the platform's tool. With that tool's own
+  check, such as the Talos generator's `--check`, it is the one to run after an edit by hand.
 
 The tools are built with the format they read, so a key a tool does not know is a mistake: passed
 over, it would silently stop configuring what it was written for. A body written in a platform's
@@ -942,7 +942,7 @@ The settings of `talos`, which the Talos generator reads:
 A node listens on its own IPv4 loopback, so the metrics are reachable inside the mesh and nowhere
 else. The ports are two because two daemons serve them and cannot share one. An entry left out
 means no listener, which is how to have none. The generator refuses a key the table does not have,
-a `port` of 0, and one port for both.
+a listener without `port`, a `port` of 0, and one port for both.
 
 ### `template`
 

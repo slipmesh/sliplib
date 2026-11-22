@@ -93,7 +93,7 @@ pub enum Error {
         #[source]
         source: BlockError,
     },
-    /// The body of the document at `place` does not read as its kind.
+    /// The body of the document at `place` does not read as the type asked for.
     #[error("{place}")]
     Body {
         place: Place,

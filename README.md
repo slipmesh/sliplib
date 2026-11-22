@@ -10,7 +10,7 @@ the command-line tool for `slipmesh.yaml` itself.
 | [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and written back |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
-| [`sliplib-config`](config) | `slipmesh.yaml`, its schema and its loader, and the configs of the daemons, each with its checks |
+| [`sliplib-config`](config) | `slipmesh.yaml`, its schema and its loader, and what every platform's daemons share of their configs, with its checks |
 | [`sliplib-mesh`](mesh) | A node's `awg` and `router` configs, computed from `slipmesh.yaml` |
 
 The crates and the tool are one workspace with one version and one tag. A change to one crate moves

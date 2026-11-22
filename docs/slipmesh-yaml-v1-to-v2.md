@@ -129,8 +129,9 @@ No command converts a file. It is edited by hand, and the tools then show that n
 was not meant to. Step 1 runs the tools of the last release that reads version 1, built on sliplib
 v0.19, on the file as it is; steps 5 to 7 run those built on v0.20.0 or later, on the converted
 file. Every node of a network converted this way gets the configs version 1 gave it, but for the
-differences step 6 lists, which [`mesh/tests/golden.rs`](../mesh/tests/golden.rs) pins for two
-networks: what else step 6 shows comes from the conversion.
+differences step 6 lists. [`mesh/tests/golden.rs`](../mesh/tests/golden.rs) pins that for two
+networks, all but the metrics listeners, which the Talos generator writes: what else step 6 shows
+comes from the conversion.
 
 1. Before editing, leave nothing pending: `slipmesh-taloscfg generate --diff` prints no change to a
    patch file, and `slipmesh-routeros --node <name> --check --diff` plans none on its device.

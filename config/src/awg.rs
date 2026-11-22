@@ -1,7 +1,4 @@
-//! Config shape: a flat list of interfaces, each with any number of peers. There is no
-//! discriminator between "mesh-style" and "roadwarriors-style" interfaces - the difference is
-//! purely behavioral, driven by whether a given peer's `allowed_ips` is set (see `PeerEntry`'s own
-//! doc comment).
+//! What every platform's `awg` daemon shares of its config.
 
 use crate::{Obfuscation, Range};
 use serde::{Deserialize, Serialize};
@@ -45,23 +42,12 @@ pub struct InterfaceEntry {
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct PeerEntry {
     pub public_key: String,
-    /// Human-readable name, carried for display only: it reaches the `peer_name` metric label and
-    /// nothing else. Never used to decide behaviour - the public key is the identity, and
-    /// `allowed_ips` is the only discriminator between kinds of peer. A base64 key is what a
-    /// dashboard would otherwise have to show, which nobody can read.
+    /// For display only: the public key is the identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
-    /// `None` => this peer gets the full-tunnel default (`0.0.0.0/0` + `::/0`) as its AllowedIPs,
-    /// its handshake is never polled, and no kernel route is ever installed for it - this is what
-    /// used to be a dedicated "mesh" interface (connectivity comes from the underlay routing
-    /// protocol reaching over the tunnel once it's up, not from a per-peer route).
-    ///
-    /// `Some(cidrs)` => exactly these CIDRs become the peer's AllowedIPs, its handshake is polled
-    /// at 1Hz, and a kernel route is installed per CIDR while the handshake stays fresh - this is
-    /// what used to be a dedicated "roadwarriors" interface. An interface can freely mix peers of
-    /// both kinds.
+    /// `None`: `0.0.0.0/0` and `::/0`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_ips: Option<Vec<String>>,
     /// Seconds without traffic after which this node sends the peer a packet, so that a NAT on
