@@ -62,7 +62,7 @@ the link has no `header_protection_key` while one of `s1` to `s3` stands 1 to 15
 A file with a refusal gets none: what a link loses is counted from settings that pass the checks.
 
 It reads the block of a `platform`, `template` or `patch` document and not its body: that is the
-platform's tool's own check, the Talos generator's `--check` for `talos`.
+platform's tool's own check, such as the Talos generator's `--check`.
 
 ### `mint`
 
@@ -179,11 +179,11 @@ Types and their checks only; reading and writing the files is `sliplib-yaml`'s.
 
 Every check and the loader return an error type of their own, one variant for each refusal:
 `v2::Error`, `v2::Invalid`, `v2::NameError` and those of `v2::groups` and `v2::network`,
-`awg::Invalid`, `router::Invalid` and `LoopbackAddressError`, `ObfuscationError`. A variant's text
-is one line of the refusal. Where that line names its cause itself - an address that does not parse,
-with why - the variant holds the cause as a field and has no `source`; where the cause is a line of
-its own, it is the variant's `source`. A variant never does both, so printing the whole chain gives
-the whole message, each part once.
+`awg::Invalid`, `router::Invalid` and `LoopbackAddressError`, `ObfuscationError`, `MetricsError`. A
+variant's text is one line of the refusal. Where that line names its cause itself - an address that
+does not parse, with why - the variant holds the cause as a field and has no `source`; where the
+cause is a line of its own, it is the variant's `source`. A variant never does both, so printing the
+whole chain gives the whole message, each part once.
 
 - `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md).
   `v2::File` reads the files as a whole (`parse`, `read`) and refuses whatever its specification
@@ -195,8 +195,9 @@ the whole message, each part once.
   node and each link written where they hold their own: a node's `routing`, a link's block of its
   type. The `template` and `patch` documents come with their `Aim`: the nodes each reaches, and
   its rank among those that reach one node (`templates_for`, `patches_for`), as an
-  `AimedDocument`; a `platform` document as a `PlatformDocument` (`platform`). Each gives its body
-  as written, with the place a refusal names: the body is its platform's tool's to read. This
+  `AimedDocument`; a `platform` document as a `PlatformDocument` (`platform`). The body is its
+  platform's tool's: `read` gives it as the tool's type, a refusal naming the document and the line,
+  and a template or patch also gives its `value`. This
   release reads one `network` and one `groups` document, and refuses a second, which the format
   lays over the first, until the tools read several files.
 - `nftables::TEMPLATE_PATH`, where the `nftables` service reads its ruleset template.
