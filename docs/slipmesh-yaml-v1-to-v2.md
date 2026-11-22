@@ -163,10 +163,9 @@ networks: what else step 6 shows comes from the conversion.
       its `routing`. A `node_id` wider than the host part of a network it is added to, which
       version 1 cut there, and `0.0.0.0`, are refused by step 5. Give such a node the `node_id`
       whose bits version 1 kept in its IPv4 loopback, the old one cut to the host bits of
-      `loopback.ipv4`, where that value is not `0.0.0.0`, fits every network the node's addresses
-      are derived from, and is held by no other node; otherwise any value that meets those three.
-      `198.51.100.133` under a /25 becomes `0.0.0.5`. The node's IPv4 loopback stays only in the
-      first case.
+      `loopback.ipv4`, where that value is not `0.0.0.0` and fits every network the node's
+      addresses are derived from; otherwise any value that does. `198.51.100.133` under a /25
+      becomes `0.0.0.5`. The node's IPv4 loopback stays only in the first case.
    7. Give every node one `underlay` entry, named as you like. Its `mtu` is the node's `uplink_mtu`,
       left out where that was. Its `endpoint` holds the node's `endpoint` without any port and
       without the brackets of an IPv6 address, under the key of its family: the family of the
