@@ -162,10 +162,11 @@ networks: what else step 6 shows comes from the conversion.
       `mesh_private_key` becomes `wireguard.private_key`, and its `direct_interfaces` moves under
       its `routing`. A `node_id` wider than the host part of a network it is added to, which
       version 1 cut there, and `0.0.0.0`, are refused by step 5. Give such a node the `node_id`
-      version 1 used for its IPv4 loopback, the low bits of the old one that the narrowest of its
-      IPv4 networks leaves free, where no other node holds it, and otherwise any free one that
-      fits every network: `198.51.100.133` under a /25 becomes `0.0.0.5`. Where that network is
-      the IPv4 loopback's, that loopback stays.
+      whose bits version 1 kept in its IPv4 loopback, the old one cut to the host bits of
+      `loopback.ipv4`, where that value is not `0.0.0.0`, fits every network the node's addresses
+      are derived from, and is held by no other node; otherwise any value that meets those three.
+      `198.51.100.133` under a /25 becomes `0.0.0.5`. The node's IPv4 loopback stays only in the
+      first case.
    7. Give every node one `underlay` entry, named as you like. Its `mtu` is the node's `uplink_mtu`,
       left out where that was. Its `endpoint` holds the node's `endpoint` without any port and
       without the brackets of an IPv6 address, under the key of its family: the family of the
@@ -227,9 +228,12 @@ networks: what else step 6 shows comes from the conversion.
      link's `port`, every peer's endpoint for that node, in the `awg` config and on a RouterOS peer;
    - where step 4.2 changed a network, the addresses derived from it;
    - where a node was renamed in step 4.6, the interfaces named after it, and what refers to them;
-   - where step 4.6 gave a node another `node_id`, the addresses derived from it that move: its
-     IPv6 loopback, its link-local, any address the old `node_id` did not already give in the new
-     one's place, and what other nodes hold of them, the address of its iBGP sessions among them;
+   - where step 4.6 gave a node another `node_id`, each address derived from it that the new one
+     changes, and what other nodes hold of it, the address of its iBGP sessions among them: its
+     IPv6 loopback where its network kept more bits of the old `node_id` than the new one has; its
+     IPv4 loopback where the new `node_id` is not the one version 1 kept there; its link-local
+     where it changes with them, which a `link_local` network that took only the kept low bits
+     leaves as it was;
    - where step 4.9 made a link to a `routeros` node, which version 1 could have marked as
      obfuscated, a link of type `wireguard`, the interface of its `talos` end has no obfuscation,
      and the peer's keepalive is 25 where an obfuscated link gave it `20-30`;

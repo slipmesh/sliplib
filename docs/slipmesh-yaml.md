@@ -828,8 +828,8 @@ result into what its platform takes.
 
 **Loopback addresses.** One IPv4 and one IPv6, by which the node is known inside the mesh. Each is
 a network of `addressing.loopback` with `node_id` in its host part, the same way in both families:
-the network's own bits, then as many low bits of `node_id` as the network leaves free, at most all
-32 as the address's low 32 bits, and in IPv6 zeros between. With the networks `198.51.100.0/25` and
+the network's own bits, then the whole `node_id`, which fits the host part by the rule below, as
+the address's low bits, and in IPv6 zeros between. With the networks `198.51.100.0/25` and
 `3fff:0:0:1::/64`, a `node_id` of `0.0.0.5` gives `198.51.100.5` and `3fff:0:0:1::5`.
 
 **The rule of `node_id`.** A `node_id` is refused where its significant bits, those up to its

@@ -48,11 +48,11 @@ node's `awg` and `router` configs and checks each the way its node would. It pri
 for a node that passes and, for one that does not, the first thing that refuses it on a line of
 its own. It goes through every node whatever the others gave, and exits 1 when anything was
 refused. What the loader refuses is one refusal for the whole file, with no node checked, even
-when it concerns one node - a `node_id` that is not an address, two links on one port. It writes
-nothing.
+when it concerns one node - a `node_id` that is not an address, is `0.0.0.0` or is wider than a
+network it is added to, two links on one port. It writes nothing.
 
-What leaves no network to compute from is one refusal for the file as well: two nodes that get one
-address, or a file without `mesh.interface_prefix`, naming `mint`, which writes it. It reads the
+What leaves no network to compute from is one refusal for the file as well: a file without
+`mesh.interface_prefix`, naming `mint`, which writes it. It reads the
 settings of each platform and the keys of each `template`, refuses each of those that does not
 read, and still checks the nodes. A refusal that `mint` cures says so.
 
@@ -236,10 +236,10 @@ from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those t
 - `model::Network` is what the configs are computed from: every node with the addresses derived
   for it and its platform, every link with the obfuscation and the keepalive in force on it, the
   route classes and the ports of the metrics listeners. `v2::lower` gives it for a `v2::File`, and
-  refuses files without `mesh.interface_prefix`, two nodes that get one address and a link-local no
-  interface takes. The metrics ports are the `talos` platform's settings, which the lowering does
-  not read: the Talos generator and `slipmesh check` set them on the network. `model::node_key` and
-  `model::link_obfuscation` name where the files hold a node's key and a link's obfuscation.
+  refuses files without `mesh.interface_prefix`. The metrics ports are the `talos` platform's
+  settings, which the lowering does not read: the Talos generator and `slipmesh check` set them on
+  the network. `model::node_key` and `model::link_obfuscation` name where the files hold a node's
+  key and a link's obfuscation.
 - `secrets::read` takes the secrets the network holds: each node's private key and each link's
   obfuscation. It never creates one: a key the file lacks is absent from `ResolvedSecrets`, while
   every link gets an obfuscation entry, empty when nothing is set or the link is of type
