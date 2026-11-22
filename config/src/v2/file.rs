@@ -423,6 +423,11 @@ impl AimedDocument {
     pub fn value(&self) -> &Value {
         &self.body.value
     }
+
+    /// The body as `T`, refused naming the document and the line.
+    pub fn read<T: DeserializeOwned>(&self) -> Result<T, Error> {
+        body(&self.body, self.aim.place.kind)
+    }
 }
 
 /// A `platform` document. The body is its platform's tool's to read.
@@ -445,9 +450,9 @@ impl PlatformDocument {
         &self.place
     }
 
-    /// Without the `slipmesh:` block.
-    pub fn value(&self) -> &Value {
-        &self.body.value
+    /// The body as `T`, refused naming the document and the line.
+    pub fn read<T: DeserializeOwned>(&self) -> Result<T, Error> {
+        body(&self.body, PLATFORM)
     }
 }
 
@@ -611,6 +616,7 @@ impl File {
         }
     }
 
+    /// The `platform` document of `platform`, if the files hold one.
     pub fn platform(&self, platform: Platform) -> Option<&PlatformDocument> {
         self.platforms
             .iter()
@@ -1495,11 +1501,53 @@ mod tests {
             &yaml("{daemon: none, colour: red}")
         );
         let talos = file.platform(Platform::Talos).unwrap();
-        assert_eq!(talos.value(), &yaml("{listen: true}"));
+        assert_eq!(talos.read::<Value>().unwrap(), yaml("{listen: true}"));
         assert_eq!(*talos.place(), place(PLATFORM, &documents, 2));
         let routeros = file.platform(Platform::Routeros).unwrap();
-        assert_eq!(routeros.value(), &yaml("{metrics: {}}"));
+        assert_eq!(routeros.read::<Value>().unwrap(), yaml("{metrics: {}}"));
         assert_eq!(*routeros.place(), place(PLATFORM, &documents, 3));
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    #[serde(deny_unknown_fields)]
+    struct Known {
+        #[expect(dead_code, reason = "only refusals are read")]
+        known: u8,
+    }
+
+    #[test]
+    fn a_body_refused_when_read_names_its_document_and_the_line_of_the_key() {
+        let documents = [
+            network("{}"),
+            "slipmesh: {kind: template, platform: talos}\nknown: 1\nunknown: 2\n".to_owned(),
+            "slipmesh: {kind: platform, platform: talos}\nknown: 1\nunknown: 2\n".to_owned(),
+        ];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let file = file(&documents).unwrap();
+        let refusals = [
+            (
+                1,
+                TEMPLATE,
+                file.templates()[0].read::<Known>().unwrap_err(),
+            ),
+            (
+                2,
+                PLATFORM,
+                file.platform(Platform::Talos)
+                    .unwrap()
+                    .read::<Known>()
+                    .unwrap_err(),
+            ),
+        ];
+        for (index, kind, refusal) in refusals {
+            let key_line = format!("at line {}", line(&documents, index) + 2);
+            assert!(
+                matches!(&refusal, Error::Body { place: at, source }
+                    if *at == place(kind, &documents, index)
+                        && source.to_string().contains(&key_line)),
+                "{key_line}: {refusal:?}"
+            );
+        }
     }
 
     #[test]
