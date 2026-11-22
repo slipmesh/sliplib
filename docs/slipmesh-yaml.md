@@ -525,8 +525,9 @@ port is refused. A host name is read as follows: labels of ASCII
 letters, digits and `-` joined by dots, as [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) has
 its labels, none empty, longer than 63 bytes or starting or ending with `-`; at most 253 bytes in
 all, the limit of [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035); and the last label not all
-digits, which RFC 1123 does not require. Anything that is neither such a name nor an IP address is
-refused.
+digits, which RFC 1123 does not require. One trailing dot may follow the last label, naming the
+root: `node-a.example.com.`. The 253 bytes do not count it, and the last label is the one before
+it. Anything that is neither such a name nor an IP address is refused.
 
 An entry without `endpoint` is a node behind NAT or without a fixed address. It is never dialed: it
 dials the other end of each of its links.
