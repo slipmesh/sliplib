@@ -1,5 +1,4 @@
-//! A node's `awg` and `router` configs from the network: its mesh interfaces and peers, iBGP with
-//! every other node, OSPF and announcements.
+//! A node's `awg` and `router` configs.
 
 use crate::addressing;
 use crate::model::{Network, Node, PRIVATE_KEY, UnknownNode};
@@ -254,7 +253,7 @@ pub fn node_configs(model: &Network, host: &str) -> std::result::Result<NodeConf
     })
 }
 
-/// The obfuscation of `what`, refused, unless `plain`, when it lacks a minted field.
+/// Refuses one lacking a minted field, unless `plain`.
 fn minted_obfuscation(
     obfuscation: &Obfuscation,
     plain: bool,

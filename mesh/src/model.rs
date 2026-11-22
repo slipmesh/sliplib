@@ -95,7 +95,7 @@ pub struct Node {
     pub link_local: Ipv6Addr,
     /// The IPv4 address of every link's interface on the node, where the network gives links one.
     pub tunnel_ipv4: Option<Ipv4Addr>,
-    /// The key the files write for the node, none where they write none.
+    /// As the files write it.
     pub private_key: Option<PrivateKey>,
     /// Where the node's peers dial it. None, it is never dialed.
     pub endpoint: Option<Endpoint>,
