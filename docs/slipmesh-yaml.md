@@ -520,14 +520,9 @@ The key under `endpoint` is the family the links to the node are dialed over, an
 A host name says no family, so the key says it. A peer dials the first address the resolver
 returns, and a `routeros` device resolves the name itself, so a name with addresses of both
 families has to resolve to the family of its key first, or the links carry an MTU counted for the
-other family's header. `endpoint` takes no port, since each link adds its own; one written with a
-port is refused. A host name is read as follows: labels of ASCII
-letters, digits and `-` joined by dots, as [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) has
-its labels, none empty, longer than 63 bytes or starting or ending with `-`; at most 253 bytes in
-all, the limit of [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035); and the last label not all
-digits, which RFC 1123 does not require. One trailing dot may follow the last label, naming the
-root: `node-a.example.com.`. The 253 bytes do not count it, and the last label is the one before
-it. Anything that is neither such a name nor an IP address is refused.
+other family's header. `endpoint` takes no port and no brackets, since each link adds its own
+port: what is not an IP address is a name, given to the resolver as written, and an empty one, or
+one holding `:`, `[` or `]`, is refused.
 
 An entry without `endpoint` is a node behind NAT or without a fixed address. It is never dialed: it
 dials the other end of each of its links.
