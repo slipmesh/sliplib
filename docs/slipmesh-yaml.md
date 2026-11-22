@@ -1054,7 +1054,8 @@ or a list, in place of a string. The node gets that YAML's text, and each of its
 of `slipmesh.yaml` like any other.
 
 The generator makes some documents of a node itself: the `ExtensionServiceConfig` documents `awg`,
-`router` and `nftables`, and the annotations under `slipmesh.net/` in the node's `KubeNodeConfig`.
+`router` and `nftables`, written in that order after the `patch` documents, and the annotations
+under `slipmesh.net/` in the node's `KubeNodeConfig`.
 A `patch` may add files to those three, and annotations of its own to the `KubeNodeConfig`. The
 generator refuses:
 

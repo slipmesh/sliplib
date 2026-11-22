@@ -226,6 +226,9 @@ networks: what else step 6 shows comes from the conversion.
    - where step 4.9 made a link to a `routeros` node, which version 1 could have marked as
      obfuscated, a link of type `wireguard`, the interface of its `talos` end has no obfuscation,
      and the peer's keepalive is 25 where an obfuscated link gave it `20-30`;
+   - where step 4.11 turned the `patch` of `nftables` into a `firewall` template, the `nftables`
+     document of a node's patch file stands after the `router` document, not among the documents
+     of the `patch`es;
    - where the pattern of the links' interfaces stood before other entries of a `direct_interfaces`
      and step 4 took it out, it stands last, and the node's routing configuration changes with it.
 
