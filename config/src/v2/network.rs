@@ -781,10 +781,8 @@ mod tests {
 
     #[test]
     fn a_host_name_of_254_bytes_is_refused_with_or_without_a_trailing_dot() {
-        for host in [
-            format!("b{}", longest_host_name()),
-            format!("b{}.", longest_host_name()),
-        ] {
+        let name = [63, 63, 63, 62].map(|length| "a".repeat(length)).join(".");
+        for host in [name.clone(), format!("{name}.")] {
             let refused = endpoint(&format!("{{ipv4: {host}}}")).unwrap_err();
             assert!(
                 refused.contains(&EndpointError::NotAHost(host.clone()).to_string()),
