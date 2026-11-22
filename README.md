@@ -234,21 +234,18 @@ from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those t
 `Network::node` refuses a name the network does not hold as `model::UnknownNode`.
 
 - `model::Network` is what the configs are computed from: every node with the addresses derived
-  for it and its platform, every link with the obfuscation and the keepalive in force on it, the
-  route classes and the ports of the metrics listeners. `v2::lower` gives it for a `v2::File`, and
-  refuses files without `mesh.interface_prefix`. The metrics ports are the `talos` platform's
+  for it, its platform and the private key the files write for it, every link with the obfuscation
+  and the keepalive in force on it, empty on a link of type `wireguard`, the route classes and the
+  ports of the metrics listeners. `v2::lower` gives it for a `v2::File`, and refuses files without
+  `mesh.interface_prefix`. The metrics ports are the `talos` platform's
   settings, which the lowering does not read: the Talos generator and `slipmesh check` set them on
   the network. `model::node_key` and `model::link_obfuscation` name where the files hold a node's
   key and a link's obfuscation.
-- `secrets::read` takes the secrets the network holds: each node's private key and each link's
-  obfuscation. It never creates one: a key the file lacks is absent from `ResolvedSecrets`, while
-  every link gets an obfuscation entry, empty when nothing is set or the link is of type
-  `wireguard`.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
-  node checks it. It needs the node's own key, but on a node on no link; and for each of its links,
-  the peer's key and the link's obfuscation. It refuses what of these is missing, or the
-  obfuscation of a link of type `amneziawg` without one of `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1`
-  to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes and links the node
+  node checks it, from the network alone. It needs the node's own key, but on a node on no link;
+  and for each of its links, the peer's key and the link's obfuscation. It refuses what of these is
+  missing, or the obfuscation of a link of type `amneziawg` without one of `jc`, `jmin`, `jmax`,
+  `s1`, `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes and links the node
   is not on. Such a refusal gives its `secrets::MissingSecret` through
   `render::Error::missing_secret`, so a tool can add how its user creates the secret. A peer the
   node dials is given the keepalive of its link where that differs from what
@@ -260,8 +257,8 @@ from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those t
   tool that only reads the file leaves it off, and that function is not in its build.
 - `mtu::mesh_mtu` is the MTU of every mesh interface: the largest at which a full-size packet
   crosses every link's underlay unfragmented, or the one the file sets for the mesh when it fits. It
-  reads every link's obfuscation through its `s4`, links the node is not on included; a missing
-  entry counts as no junk. It refuses a link whose limit is below 1280, the least IPv6 allows a
+  reads every link's obfuscation through its `s4`, links the node is not on included; an `s4` left
+  out counts as no junk. It refuses a link whose limit is below 1280, the least IPv6 allows a
   link, and a `mesh.mtu` above a link's limit, each naming the link; and a `mesh.mtu` below 1280
   or one set on a mesh without links.
 - `addressing` gives the address a `node_id` gives in a network, the link-local of a loopback, and

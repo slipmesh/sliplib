@@ -8,7 +8,6 @@
 //! TCP in the tunnel down to a few Mbit/s, which is what this guards against.
 
 use crate::model::{Family, Link, Network, Node, UnknownNode};
-use crate::secrets::{ResolvedSecrets, link_key};
 
 /// A node's underlay MTU when the files set none: that of Ethernet.
 pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
@@ -55,10 +54,10 @@ pub enum LinkError {
 /// The MTU of every mesh interface: the one the files set for the mesh when it fits every link,
 /// else the least link limit. None for a mesh without links, which has no mesh interface to give
 /// it to.
-pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32>, MtuError> {
+pub fn mesh_mtu(mesh: &Network) -> Result<Option<u32>, MtuError> {
     let mut least: Option<(u32, &Link)> = None;
     for link in &mesh.links {
-        let limit = link_limit(mesh, link, resolved).map_err(|source| MtuError::Link {
+        let limit = link_limit(mesh, link).map_err(|source| MtuError::Link {
             link: link.name.clone(),
             source,
         })?;
@@ -95,7 +94,7 @@ pub fn mesh_mtu(mesh: &Network, resolved: &ResolvedSecrets) -> Result<Option<u32
 }
 
 /// The largest MTU at which a full-size packet crosses `link` unfragmented.
-fn link_limit(mesh: &Network, link: &Link, resolved: &ResolvedSecrets) -> Result<u32, LinkError> {
+fn link_limit(mesh: &Network, link: &Link) -> Result<u32, LinkError> {
     let [a, b] = &link.ends;
     let (a, b) = (mesh.node(a)?, mesh.node(b)?);
     let ip_header = match link_family(a, b)? {
@@ -103,11 +102,7 @@ fn link_limit(mesh: &Network, link: &Link, resolved: &ResolvedSecrets) -> Result
         Family::Ipv6 => 40,
     };
     let uplink = a.underlay_mtu.min(b.underlay_mtu);
-    let junk = resolved
-        .mesh_link_obfuscation
-        .get(&link_key(&link.ends))
-        .and_then(|o| o.s4)
-        .map_or(0, u32::from);
+    let junk = link.obfuscation.s4.map_or(0, u32::from);
     // An underlay the link's bytes fill leaves 0, which `mesh_mtu` refuses as any limit below
     // 1280, as it does the limit of an underlay below its family's least.
     Ok(uplink.saturating_sub(32 + 8 + ip_header + junk))
@@ -128,7 +123,6 @@ fn link_family(a: &Node, b: &Node) -> Result<Family, LinkError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secrets;
 
     /// The outer packet as it leaves the node: the inner packet padded to 16 but never past the
     /// MTU, then the WireGuard header and tag, the junk, UDP and the underlay's IP header.
@@ -158,7 +152,7 @@ mod tests {
     }
 
     fn of(network: &Network) -> Result<Option<u32>, MtuError> {
-        mesh_mtu(network, &secrets::read(network))
+        mesh_mtu(network)
     }
 
     fn mtu_of(a: &str, b: &str, link: &str, mesh: &str) -> u32 {

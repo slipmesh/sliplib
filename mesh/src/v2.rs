@@ -148,7 +148,6 @@ mod tests {
     use super::*;
     use crate::model::Family;
     use crate::render::node_configs;
-    use crate::secrets;
     use sliplib_config::v2::Platform;
 
     use crate::test_support::{example as lowered, example_files as files};
@@ -394,7 +393,7 @@ mod tests {
     fn the_mesh_mtu_of_the_example_is_below_the_least_limit_of_its_links_as_its_comment_says() {
         let mtu = |overlay: &str| {
             let network = lowered(overlay);
-            crate::mtu::mesh_mtu(&network, &secrets::read(&network)).unwrap()
+            crate::mtu::mesh_mtu(&network).unwrap()
         };
         assert_eq!(mtu("{}"), Some(1320));
         assert_eq!(mtu("{mesh: {mtu: null}}"), Some(1344));
@@ -402,7 +401,7 @@ mod tests {
 
     fn mtu_refusal(overlay: &str) -> crate::mtu::MtuError {
         let network = lowered(overlay);
-        crate::mtu::mesh_mtu(&network, &secrets::read(&network)).unwrap_err()
+        crate::mtu::mesh_mtu(&network).unwrap_err()
     }
 
     #[test]
@@ -426,12 +425,12 @@ mod tests {
     #[test]
     fn a_node_on_no_link_is_configured_without_a_key() {
         let network = lowered(&format!("{{nodes: {{node-d: {NODE_D}}}}}"));
-        let configs = node_configs(&network, "node-d", &secrets::read(&network)).unwrap();
+        let configs = node_configs(&network, "node-d").unwrap();
         assert!(configs.awg.interfaces.is_empty());
         assert_eq!(configs.router.bgp_peers.len(), 4);
         // A node on a link still needs its own.
         let keyless = lowered("{nodes: {node-b: {wireguard: null}}}");
-        let refusal = node_configs(&keyless, "node-b", &secrets::read(&keyless)).unwrap_err();
+        let refusal = node_configs(&keyless, "node-b").unwrap_err();
         assert!(refusal.missing_secret().is_some(), "{refusal:?}");
     }
 
@@ -465,11 +464,10 @@ mod tests {
     fn a_name_too_long_for_an_interface_is_refused_at_the_other_end_of_its_link() {
         use sliplib_config::awg::Invalid;
         let fits = with_a_node_named("node-abcde");
-        node_configs(&fits, "node-a", &secrets::read(&fits)).unwrap();
+        node_configs(&fits, "node-a").unwrap();
         let long = with_a_node_named("node-abcdef");
-        let resolved = secrets::read(&long);
-        node_configs(&long, "node-abcdef", &resolved).unwrap();
-        let refusal = node_configs(&long, "node-a", &resolved).unwrap_err();
+        node_configs(&long, "node-abcdef").unwrap();
+        let refusal = node_configs(&long, "node-a").unwrap_err();
         assert!(
             matches!(&refusal, crate::render::Error::InvalidAwg { node, source: Invalid::InterfaceNameTooLong(name) }
                 if node == "node-a" && name == "mesh-node-abcdef"),
@@ -478,7 +476,7 @@ mod tests {
     }
 
     fn peer_keepalive(network: &Network, node: &str, peer: &str) -> Option<Range<u16>> {
-        let configs = node_configs(network, node, &secrets::read(network)).unwrap();
+        let configs = node_configs(network, node).unwrap();
         let interface = configs
             .awg
             .interfaces
@@ -491,9 +489,8 @@ mod tests {
     #[test]
     fn every_node_of_the_example_gets_its_configs() {
         let network = lowered("{}");
-        let resolved = secrets::read(&network);
         for node in &network.nodes {
-            node_configs(&network, &node.name, &resolved).unwrap();
+            node_configs(&network, &node.name).unwrap();
         }
     }
 
@@ -537,16 +534,15 @@ mod tests {
             awg: std::num::NonZeroU16::new(9586),
             router: std::num::NonZeroU16::new(9324),
         };
-        let resolved = secrets::read(&network);
-        let talos = node_configs(&network, "node-a", &resolved).unwrap();
+        let talos = node_configs(&network, "node-a").unwrap();
         assert_eq!(talos.awg.metrics.unwrap().listen, "198.51.100.1:9586");
         assert_eq!(talos.router.metrics.unwrap().listen, "198.51.100.1:9324");
-        let routeros = node_configs(&network, "router1", &resolved).unwrap();
+        let routeros = node_configs(&network, "router1").unwrap();
         assert!(routeros.awg.metrics.is_none() && routeros.router.metrics.is_none());
     }
 
     fn refused(network: &Network, node: &str) -> crate::render::Error {
-        node_configs(network, node, &secrets::read(network)).unwrap_err()
+        node_configs(network, node).unwrap_err()
     }
 
     #[test]
@@ -610,9 +606,8 @@ mod tests {
         let network = lowered(&format!(
             "{{mesh: {{links: {{a-b: {{amneziawg: {{obfuscation: {every_field}}}}}}}}}}}"
         ));
-        let resolved = secrets::read(&network);
         for (node, peer) in [("node-a", "node-b"), ("node-b", "node-a")] {
-            let configs = node_configs(&network, node, &resolved).unwrap();
+            let configs = node_configs(&network, node).unwrap();
             let interface = configs
                 .awg
                 .interfaces

@@ -6,7 +6,6 @@ use sliplib_config::v2::platform::TalosSettings;
 use sliplib_config::v2::{self, File};
 use sliplib_mesh::model::{MetricsPorts, Network};
 use sliplib_mesh::render::node_configs;
-use sliplib_mesh::secrets::ResolvedSecrets;
 use sliplib_yaml::MultiDoc;
 use std::path::Path;
 use std::process::ExitCode;
@@ -39,8 +38,8 @@ fn whole_file(config_path: &Path, files: &File) -> (Vec<anyhow::Error>, Option<T
     (refusals, talos)
 }
 
-fn node(network: &Network, host: &str, resolved: &ResolvedSecrets) -> Result<()> {
-    let Err(refusal) = node_configs(network, host, resolved) else {
+fn node(network: &Network, host: &str) -> Result<()> {
+    let Err(refusal) = node_configs(network, host) else {
         return Ok(());
     };
     let cured_by_minting = refusal.missing_secret().is_some();
@@ -54,11 +53,11 @@ fn node(network: &Network, host: &str, resolved: &ResolvedSecrets) -> Result<()>
 
 /// Every node of `network` in its order, each with what refuses its configs: one refusal says
 /// nothing about the next node, so all of them are checked.
-pub fn nodes<'n>(network: &'n Network, resolved: &ResolvedSecrets) -> Vec<(&'n str, Result<()>)> {
+pub fn nodes(network: &Network) -> Vec<(&str, Result<()>)> {
     network
         .nodes
         .iter()
-        .map(|host| (host.name.as_str(), node(network, &host.name, resolved)))
+        .map(|host| (host.name.as_str(), node(network, &host.name)))
         .collect()
 }
 
@@ -91,15 +90,14 @@ pub fn run(config_path: &Path) -> ExitCode {
             match network(&file, talos.as_ref()) {
                 Err(refusal) => refuse(refusal),
                 Ok(network) => {
-                    let resolved = sliplib_mesh::secrets::read(&network);
-                    for (host, checked) in nodes(&network, &resolved) {
+                    for (host, checked) in nodes(&network) {
                         match checked {
                             Ok(()) => println!("{host}: ok"),
                             Err(refusal) => refuse(refusal),
                         }
                     }
                     if passed == ExitCode::SUCCESS {
-                        for warning in sliplib_mesh::warnings::warnings(&network, &resolved) {
+                        for warning in sliplib_mesh::warnings::warnings(&network) {
                             eprintln!("warning: {warning}");
                         }
                     }

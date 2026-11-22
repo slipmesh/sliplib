@@ -2,7 +2,6 @@
 //! here refuses a file or changes what a node gets.
 
 use crate::model::Network;
-use crate::secrets::{ResolvedSecrets, link_key};
 use sliplib_config::TrailerLoss;
 use std::fmt;
 
@@ -27,17 +26,14 @@ impl fmt::Display for Warning {
     }
 }
 
-/// Every warning about the links of `mesh`, in their order, each link's obfuscation taken as
-/// `resolved` holds it: its own laid over the network's, none for a `plain` link.
-pub fn warnings(mesh: &Network, resolved: &ResolvedSecrets) -> Vec<Warning> {
+/// Every warning about the links of `mesh`, in their order, each from the obfuscation in force on
+/// the link: its own laid over the network's, none for a `plain` link.
+pub fn warnings(mesh: &Network) -> Vec<Warning> {
     mesh.links
         .iter()
         .flat_map(|link| {
-            resolved
-                .mesh_link_obfuscation
-                .get(&link_key(&link.ends))
-                .map(|obfuscation| obfuscation.trailer_loss())
-                .unwrap_or_default()
+            link.obfuscation
+                .trailer_loss()
                 .into_iter()
                 .map(|loss| Warning {
                     link: link.name.clone(),
@@ -56,7 +52,7 @@ mod tests {
     /// both: what is told of them.
     fn told_of(overlay: &str) -> Vec<Warning> {
         let network = crate::test_support::example(overlay);
-        warnings(&network, &crate::secrets::read(&network))
+        warnings(&network)
     }
 
     fn lines(warnings: &[Warning]) -> Vec<String> {

@@ -6,7 +6,7 @@
 //! config needs its peers' keys.
 
 use crate::model::{self, Network};
-use crate::secrets::{self, link_key};
+use crate::secrets;
 use sliplib_config::Obfuscation;
 use sliplib_secrets::wireguard::PrivateKey;
 use std::fmt;
@@ -66,11 +66,10 @@ fn mint_obfuscation(
 /// Whatever secrets `network` lacks, generated, each by the entry it belongs to. A `plain` link
 /// gets no obfuscation generated: it would turn "no obfuscation" back into an obfuscated one.
 pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
-    let mut written = secrets::read(network);
     let mut minted = Minted::default();
 
     for (index, node) in network.nodes.iter().enumerate() {
-        if written.mesh_private_keys.contains_key(&node.name) || !network.needs_a_key(&node.name) {
+        if node.private_key.is_some() || !network.needs_a_key(&node.name) {
             continue;
         }
         minted.node_keys.push((index, PrivateKey::generate()));
@@ -81,13 +80,9 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
         if link.plain {
             continue;
         }
-        let pair = link_key(&link.ends);
-        let obfuscation = written
-            .mesh_link_obfuscation
-            .entry(pair.clone())
-            .or_default();
+        let mut obfuscation = link.obfuscation.clone();
         let entry = model::link_obfuscation(link);
-        if let Some(generated) = mint_obfuscation(obfuscation, &entry)? {
+        if let Some(generated) = mint_obfuscation(&mut obfuscation, &entry)? {
             minted.link_obfuscation.push((index, generated));
             minted.names.push(entry);
         }

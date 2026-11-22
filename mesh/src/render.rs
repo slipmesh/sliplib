@@ -1,11 +1,10 @@
 //! A node's `awg` and `router` configs from the network: its mesh interfaces and peers, iBGP with
-//! every other node, OSPF and announcements. Every function takes the network's secrets as
-//! [`crate::secrets::read`] gives them.
+//! every other node, OSPF and announcements.
 
 use crate::addressing;
 use crate::model::{Network, Node, PRIVATE_KEY, UnknownNode};
 use crate::mtu::MtuError;
-use crate::secrets::{MissingSecret, ResolvedSecrets, link_key, unminted};
+use crate::secrets::{MissingSecret, unminted};
 use sliplib_config::awg::{AwgConfig, InterfaceEntry, PeerEntry};
 use sliplib_config::router::{BgpPeerEntry, NodeIdentity, RouterConfig};
 use sliplib_config::v2::Platform;
@@ -129,13 +128,9 @@ fn key_of(node: &str) -> impl Fn(KeyError) -> RenderError {
 /// The node's mesh interfaces: one full-tunnel interface per link it is on, named after the peer
 /// (`mesh-<peer>`). The name stays local - peers know each other by key - and must fit `IFNAMSIZ`,
 /// which the awg check enforces.
-fn mesh_interfaces_for(
-    mesh: &Network,
-    node_name: &str,
-    resolved: &ResolvedSecrets,
-) -> Result<Vec<InterfaceEntry>> {
+fn mesh_interfaces_for(mesh: &Network, node_name: &str) -> Result<Vec<InterfaceEntry>> {
     let node = mesh.node(node_name)?;
-    let own_private_key = resolved.mesh_private_keys.get(node_name);
+    let own_private_key = node.private_key.as_ref();
     if own_private_key.is_none() && mesh.needs_a_key(node_name) {
         return Err(MissingSecret(format!("node {node_name:?}: {PRIVATE_KEY} is not set")).into());
     }
@@ -146,7 +141,7 @@ fn mesh_interfaces_for(
     }
 
     // Before the node's links: what refuses the MTU of the mesh stops a node on no link too.
-    let mtu = crate::mtu::mesh_mtu(mesh, resolved)?;
+    let mtu = crate::mtu::mesh_mtu(mesh)?;
     // Only a node that needs no key has none, and it is on no link.
     let Some(own_private_key) = own_private_key else {
         return Ok(Vec::new());
@@ -161,11 +156,11 @@ fn mesh_interfaces_for(
             continue;
         };
         let peer_node = mesh.node(peer_name)?;
-        let peer_private_key = resolved.mesh_private_keys.get(peer_name).ok_or_else(|| {
+        let peer_private_key = peer_node.private_key.as_ref().ok_or_else(|| {
             MissingSecret(format!("node {peer_name:?}: {PRIVATE_KEY} is not set"))
         })?;
         let obfuscation = minted_obfuscation(
-            resolved.mesh_link_obfuscation.get(&link_key(&link.ends)),
+            &link.obfuscation,
             link.plain,
             &format!("mesh link {}", link.name),
         )?;
@@ -206,13 +201,9 @@ fn mesh_interfaces_for(
     Ok(out)
 }
 
-pub(crate) fn render_awg_config(
-    mesh: &Network,
-    node_name: &str,
-    resolved: &ResolvedSecrets,
-) -> Result<AwgConfig> {
+pub(crate) fn render_awg_config(mesh: &Network, node_name: &str) -> Result<AwgConfig> {
     Ok(AwgConfig {
-        interfaces: mesh_interfaces_for(mesh, node_name, resolved)?,
+        interfaces: mesh_interfaces_for(mesh, node_name)?,
         metrics: metrics_for(mesh.node(node_name)?, mesh.metrics.awg),
     })
 }
@@ -225,22 +216,17 @@ pub struct NodeConfigs {
 }
 
 /// `host`'s configs from `model`, each checked the way the node would check it.
-pub fn node_configs(
-    model: &Network,
-    host: &str,
-    resolved: &ResolvedSecrets,
-) -> std::result::Result<NodeConfigs, Error> {
+pub fn node_configs(model: &Network, host: &str) -> std::result::Result<NodeConfigs, Error> {
     let node = || host.to_owned();
     // Refused as the `awg` config, computed first, refuses a node it does not know.
     let found = model.node(host).map_err(|source| Error::RenderingAwg {
         node: node(),
         source: source.into(),
     })?;
-    let awg_cfg =
-        render_awg_config(model, host, resolved).map_err(|source| Error::RenderingAwg {
-            node: node(),
-            source,
-        })?;
+    let awg_cfg = render_awg_config(model, host).map_err(|source| Error::RenderingAwg {
+        node: node(),
+        source,
+    })?;
     sliplib_config::awg::validate(&awg_cfg).map_err(|source| Error::InvalidAwg {
         node: node(),
         source,
@@ -268,20 +254,16 @@ pub fn node_configs(
     })
 }
 
-/// The obfuscation read for `what`, refused when none was read and, unless `plain`, when it lacks
-/// a minted field.
+/// The obfuscation of `what`, refused, unless `plain`, when it lacks a minted field.
 fn minted_obfuscation(
-    read: Option<&Obfuscation>,
+    obfuscation: &Obfuscation,
     plain: bool,
     what: &str,
 ) -> std::result::Result<Obfuscation, MissingSecret> {
-    let obfuscation = read
-        .cloned()
-        .ok_or_else(|| MissingSecret(format!("{what}: obfuscation is not set")))?;
     let unminted = if plain {
         Vec::new()
     } else {
-        unminted(&obfuscation)
+        unminted(obfuscation)
     };
     if !unminted.is_empty() {
         return Err(MissingSecret(format!(
@@ -289,7 +271,7 @@ fn minted_obfuscation(
             unminted.join(", ")
         )));
     }
-    Ok(obfuscation)
+    Ok(obfuscation.clone())
 }
 
 /// A metrics listener for this node, when the port says there is one, on the node's own IPv4
@@ -309,7 +291,7 @@ mod tests {
     use crate::test_support::example;
 
     fn configs_of(network: &Network, node: &str) -> std::result::Result<NodeConfigs, Error> {
-        super::node_configs(network, node, &crate::secrets::read(network))
+        super::node_configs(network, node)
     }
 
     #[test]
@@ -376,11 +358,10 @@ mod tests {
     #[test]
     fn a_nodes_configs_are_its_rendered_awg_and_router_configs() {
         let network = example("{}");
-        let resolved = crate::secrets::read(&network);
-        let configs = super::node_configs(&network, "node-a", &resolved).unwrap();
+        let configs = super::node_configs(&network, "node-a").unwrap();
         assert_eq!(
             configs.awg,
-            super::render_awg_config(&network, "node-a", &resolved).unwrap()
+            super::render_awg_config(&network, "node-a").unwrap()
         );
         assert_eq!(
             configs.router,
