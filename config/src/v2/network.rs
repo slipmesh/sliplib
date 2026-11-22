@@ -182,8 +182,8 @@ pub enum Family {
     Ipv6,
 }
 
-/// Where a node's peers reach it: an address of the family its key names, or a host name dialed
-/// over that family. It carries no port, since each link adds its own.
+/// Where a node's peers reach it: an address of the family its key names, or a name, taken as
+/// written, dialed over that family. Each link dials it at its own port.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(try_from = "EndpointKeys")]
 pub struct Endpoint {
@@ -221,28 +221,6 @@ pub enum EndpointError {
     BothFamilies,
     #[error("the address {host} stands under `{key}` and is of the other family")]
     OtherFamily { host: String, key: &'static str },
-    #[error(
-        "{0:?} is neither an IP address nor a host name; an `endpoint` takes no port and no brackets, since each link adds its own port"
-    )]
-    NotAHost(String),
-}
-
-/// Whether `text` is a host name as RFC 1123 takes one: labels of letters, digits and `-` joined
-/// by dots, none starting or ending with `-`, and the last not all digits.
-fn is_host_name(text: &str) -> bool {
-    let labels: Vec<&str> = text.split('.').collect();
-    text.len() <= 253
-        && labels.iter().all(|label| {
-            (1..=63).contains(&label.len())
-                && label
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-        })
-        && labels
-            .last()
-            .is_some_and(|last| !last.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 impl TryFrom<EndpointKeys> for Endpoint {
@@ -255,11 +233,11 @@ impl TryFrom<EndpointKeys> for Endpoint {
             (None, None) => return Err(EndpointError::NoFamily),
             (Some(_), Some(_)) => return Err(EndpointError::BothFamilies),
         };
-        match host.parse::<IpAddr>() {
-            Ok(address) if address.is_ipv4() == (family == Family::Ipv4) => {}
-            Ok(_) => return Err(EndpointError::OtherFamily { host, key }),
-            Err(_) if is_host_name(&host) => {}
-            Err(_) => return Err(EndpointError::NotAHost(host)),
+        if host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_ipv4() != (family == Family::Ipv4))
+        {
+            return Err(EndpointError::OtherFamily { host, key });
         }
         Ok(Self { family, host })
     }
@@ -695,7 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn an_endpoint_is_an_address_of_its_keys_family_or_a_host_name() {
+    fn an_endpoint_is_an_address_of_its_keys_family_or_a_name() {
         for (yaml, family, host) in [
             ("{ipv4: 192.0.2.1}", Family::Ipv4, "192.0.2.1"),
             ("{ipv6: \"2001:db8::1\"}", Family::Ipv6, "2001:db8::1"),
@@ -705,6 +683,11 @@ mod tests {
                 "node-b.example.com",
             ),
             ("{ipv6: node-b}", Family::Ipv6, "node-b"),
+            (
+                "{ipv4: node_b.example.com}",
+                Family::Ipv4,
+                "node_b.example.com",
+            ),
         ] {
             let read = endpoint(yaml).unwrap();
             assert_eq!((read.family(), read.host()), (family, host), "{yaml}");
@@ -731,28 +714,6 @@ mod tests {
         ] {
             let refused = endpoint(yaml).unwrap_err();
             assert!(refused.contains(&refusal.to_string()), "{yaml}: {refused}");
-        }
-    }
-
-    #[test]
-    fn an_endpoint_with_a_port_or_brackets_or_no_host_name_is_refused() {
-        for host in [
-            "192.0.2.1:51820",
-            "\"[2001:db8::1]\"",
-            "\"[2001:db8::1]:51820\"",
-            "node-b.example.com:51820",
-            "-node.example.com",
-            "node_b.example.com",
-            "node..example.com",
-            "192.0.2",
-            "\"\"",
-        ] {
-            let refused = endpoint(&format!("{{ipv4: {host}}}")).unwrap_err();
-            let written: String = sliplib_yaml::from_str(host).unwrap();
-            assert!(
-                refused.contains(&EndpointError::NotAHost(written).to_string()),
-                "{host}: {refused}"
-            );
         }
     }
 

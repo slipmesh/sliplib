@@ -99,8 +99,6 @@ pub struct Node {
     /// Where the node's peers dial it. None, it is never dialed.
     pub endpoint: Option<Endpoint>,
     pub underlay_mtu: u32,
-    /// How a message names the key of `underlay_mtu`, under the node.
-    pub underlay_mtu_key: String,
     pub direct_interfaces: Vec<String>,
     pub learn: Vec<String>,
     pub announce: Vec<AnnounceEntry>,

@@ -44,12 +44,7 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             let id = node.node_id;
             let (ipv4, ipv6) = (loopback.ipv4.0, loopback.ipv6.0);
             // The loader leaves exactly one entry.
-            let (entry, underlay) = node
-                .underlay
-                .first()
-                .map_or(("", None), |(entry, underlay)| {
-                    (entry.as_str(), Some(underlay))
-                });
+            let underlay = node.underlay.first().map(|(_, underlay)| underlay);
             let mut direct_interfaces = node.routing.direct_interfaces.clone();
             if let Some(pattern) = &pattern
                 && !direct_interfaces.contains(pattern)
@@ -83,7 +78,6 @@ pub fn lower(files: &File) -> Result<Network, Error> {
                 underlay_mtu: underlay
                     .and_then(|underlay| underlay.mtu)
                     .unwrap_or(DEFAULT_UPLINK_MTU),
-                underlay_mtu_key: format!("underlay.{entry}.mtu"),
                 direct_interfaces,
                 learn: prefixes(&node.routing.learn),
                 announce: prefixes(&node.routing.announce)
@@ -412,12 +406,11 @@ mod tests {
     }
 
     #[test]
-    fn an_mtu_of_zero_is_refused_by_its_key() {
-        use crate::mtu::{LinkError, MtuError};
+    fn an_mtu_of_zero_is_refused() {
+        use crate::mtu::MtuError;
         let underlay = mtu_refusal("{nodes: {node-b: {underlay: {wan: {mtu: 0}}}}}");
         assert!(
-            matches!(&underlay, MtuError::Link { link, source: LinkError::UnderlayBelowMinimum { node, key, mtu: 0, .. } }
-                if link == "a-b" && node == "node-b" && key == "underlay.wan.mtu"),
+            matches!(&underlay, MtuError::LimitBelowMinimum { link, limit: 0 } if link == "a-b"),
             "{underlay:?}"
         );
         let mesh = mtu_refusal("{mesh: {mtu: 0}}");

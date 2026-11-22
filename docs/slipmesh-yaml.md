@@ -520,13 +520,8 @@ The key under `endpoint` is the family the links to the node are dialed over, an
 A host name says no family, so the key says it. A peer dials the first address the resolver
 returns, and a `routeros` device resolves the name itself, so a name with addresses of both
 families has to resolve to the family of its key first, or the links carry an MTU counted for the
-other family's header. `endpoint` takes no port, since each link adds its own; one written with a
-port is refused. A host name is read as follows: labels of ASCII
-letters, digits and `-` joined by dots, as [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) has
-its labels, none empty, longer than 63 bytes or starting or ending with `-`; at most 253 bytes in
-all, the limit of [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035); and the last label not all
-digits, which RFC 1123 does not require. Anything that is neither such a name nor an IP address is
-refused.
+other family's header. What is not an IP address is a name, which the loader takes as written and
+the consumer resolves. Each link dials the endpoint at its own port, so `endpoint` holds no port.
 
 An entry without `endpoint` is a node behind NAT or without a fixed address. It is never dialed: it
 dials the other end of each of its links.
@@ -877,18 +872,13 @@ where `U` is the smaller underlay `mtu` of its two ends, 32 WireGuard's header a
 header, `IP` 20 or 40 by the family the link is dialed over, and `S4` the `s4` of an `amneziawg`
 link once the defaults are laid under its own, 0 for a `wireguard` one. Two nodes on Ethernet,
 dialed over IPv6 and with no `s4`, give 1420. The MTU of the mesh is the least of the limits of all
-links, whatever their type. `mesh.mtu` lowers it, and one above it is refused. A result below 1280,
-the least IPv6 allows a link, is an error, and so is a `mesh.mtu` with no links, which has no
-interface to give it to.
-
-Two refusals name the node and the key of the underlay `mtu` that causes them, such as
-`underlay.wan.mtu`:
-
-- An underlay `mtu` of either end below the least the family the link is dialed over allows a link:
-  68 for IPv4 ([RFC 791, section 3.1](https://www.rfc-editor.org/rfc/rfc791#section-3.1)), 1280 for
-  IPv6 ([RFC 8200, section 5](https://www.rfc-editor.org/rfc/rfc8200#section-5)).
-- An underlay `mtu` of the narrower end that the bytes the link adds, `32 + 8 + IP + S4` of the
-  formula above, reach or exceed: no room is left for a packet.
+links, whatever their type. A link whose limit is below 1280, the least IPv6 allows a link ([RFC
+8200, section 5](https://www.rfc-editor.org/rfc/rfc8200#section-5)), is an error naming the link,
+whether `mesh.mtu` is set or not: raise the underlay `mtu` of its narrower end, or lower its `s4`.
+An underlay `mtu` the bytes the link adds reach or exceed gives the link a limit of 0, refused the
+same way. `mesh.mtu` lowers the MTU of the mesh, and one above it is refused, naming the link whose
+limit it exceeds. A `mesh.mtu` below 1280 is an error of its own, naming no link, and so is one with
+no links, which has no interface to give it to.
 
 ## `groups`
 
@@ -1104,10 +1094,13 @@ mesh as computed.
   patches, and two groups: `workers`, which one patch is aimed with, and `core`, which `workers` is
   made of.
 
-A tool reads one file today, so the three are given to it as one, their documents in that order,
-which is what laying `secrets.yaml` over `mesh.yaml` comes to. They hold no Planned part, since a
-file with one is refused. One link has a header, a timer and its [keepalive](#keepalive) written as
-ranges.
+**Planned:** the three given to a tool as one file, their documents in that order, which is what
+laying `secrets.yaml` over `mesh.yaml` comes to.
+
+A tool refuses the second `network` document of a file today, so what it takes is one file holding
+the `network` document of `mesh.yaml` with that of `secrets.yaml` laid over it, then the documents
+of `talos.yaml`. The three hold no Planned part, since a file with one is refused. One link has a
+header, a timer and its [keepalive](#keepalive) written as ranges.
 
 Their networks and addresses are from the ranges reserved for documentation, but for the
 link-local `fe80::` of the links; a `node_id` is an identity, not an address. Their AS number is
