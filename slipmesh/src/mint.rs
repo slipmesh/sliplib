@@ -17,7 +17,6 @@ pub fn run(config_path: &Path) -> Result<()> {
         file = File::read(&yaml)
             .context("slipmesh.yaml with what it lacked does not read back - not written")?;
     }
-    // The ports of the metrics change no secret, and refuse no node.
     let network = sliplib_mesh::v2::lower(&file)?;
     let minted = sliplib_mesh::mint::create(&network)?;
     edit::record(&mut yaml, &file, &network, &minted)?;

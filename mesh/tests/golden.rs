@@ -74,9 +74,8 @@ fn golden(directory: &str, file: &str) -> String {
     .unwrap()
 }
 
-/// But for what `docs/slipmesh-yaml-v1-to-v2.md` says a conversion changes: no pool interface,
-/// bypass list or announce label, the link's port for an endpoint's, the addresses of a replaced
-/// `node_id`. No metrics listener: the Talos generator adds them.
+/// Version 1's configs, less what `docs/slipmesh-yaml-v1-to-v2.md` says a conversion changes and
+/// the metrics listeners, which the Talos generator adds.
 fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
     let files = sliplib_config::v2::File::parse(twin.text).unwrap();
     let network = sliplib_mesh::v2::lower(&files).unwrap();

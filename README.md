@@ -244,8 +244,8 @@ from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those t
   `s1`, `s2` and `h1` to `h4`, naming what lacks what; nothing of nodes and links the node is not
   on. Such a refusal gives its `secrets::MissingSecret` through `render::Error::missing_secret`, for
   a tool to say how to create it. A dialed peer gets its link's keepalive where that differs from
-  what `InterfaceEntry::keepalive_of` gives without it. No metrics listener: a tool for Talos adds
-  it from the `talos` settings.
+  what `InterfaceEntry::keepalive_of` gives without it. No metrics listener: the Talos generator
+  adds it from the `talos` settings.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
   each by the entry it belongs to, and no key for a node on no link, or `NoHeaderLeft`
   when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a
