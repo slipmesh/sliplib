@@ -1099,9 +1099,11 @@ mesh as computed.
   patches, and two groups: `workers`, which one patch is aimed with, and `core`, which `workers` is
   made of.
 
-A tool reads one file today, so the three are given to it as one, their documents in that order,
-which is what laying `secrets.yaml` over `mesh.yaml` comes to. They hold no Planned part, since a
-file with one is refused. One link has a header, a timer and its [keepalive](#keepalive) written as
+**Planned:** the three given to a tool as one file, their documents in that order, which is what
+laying `secrets.yaml` over `mesh.yaml` comes to. A tool refuses the second `network` document of a
+file today, so what it takes is one file holding the `network` document of `mesh.yaml` with that of
+`secrets.yaml` laid over it, then the documents of `talos.yaml`. The three hold no Planned part,
+since a file with one is refused. One link has a header, a timer and its [keepalive](#keepalive) written as
 ranges.
 
 Their networks and addresses are from the ranges reserved for documentation, but for the
