@@ -99,41 +99,41 @@ mod tests {
     /// unconfigured mesh stays as it was.
     #[test]
     fn mint_obfuscation_carries_the_31_switches_and_never_generates_them() {
-        let mut resolved = Obfuscation {
+        let mut obfuscation = Obfuscation {
             random_trailers: Some(true),
             ..Obfuscation::default()
         };
-        let generated = mint_obfuscation(&mut resolved, "an entry")
+        let generated = mint_obfuscation(&mut obfuscation, "an entry")
             .unwrap()
             .unwrap();
-        assert_eq!(resolved.random_trailers, Some(true));
-        assert_eq!(resolved.disable_cookies, None);
+        assert_eq!(obfuscation.random_trailers, Some(true));
+        assert_eq!(obfuscation.disable_cookies, None);
         assert_eq!(generated.random_trailers, None);
     }
 
     #[test]
     fn mint_obfuscation_generates_when_nothing_else_is_set() {
-        let mut resolved = Obfuscation::default();
-        let generated = mint_obfuscation(&mut resolved, "an entry")
+        let mut obfuscation = Obfuscation::default();
+        let generated = mint_obfuscation(&mut obfuscation, "an entry")
             .unwrap()
             .unwrap();
-        assert!(resolved.jc.is_some());
-        assert!(resolved.h1.is_some());
-        assert_eq!(resolved, generated);
+        assert!(obfuscation.jc.is_some());
+        assert!(obfuscation.h1.is_some());
+        assert_eq!(obfuscation, generated);
     }
 
     #[test]
     fn mint_obfuscation_reports_as_generated_only_what_no_layer_set() {
-        let mut resolved = Obfuscation {
+        let mut obfuscation = Obfuscation {
             jc: Some(9),
             h1: Some(42.into()),
             ..Obfuscation::default()
         };
-        let generated = mint_obfuscation(&mut resolved, "an entry")
+        let generated = mint_obfuscation(&mut obfuscation, "an entry")
             .unwrap()
             .unwrap();
         assert_eq!((generated.jc, generated.h1), (None, None));
-        assert_eq!(generated.jmin, resolved.jmin);
+        assert_eq!(generated.jmin, obfuscation.jmin);
         assert!(generated.jmin.is_some());
     }
 

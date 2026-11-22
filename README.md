@@ -233,24 +233,23 @@ its cause as its `source`, or an `mtu::MtuError`. Files that read and give no ne
 from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those that do not read.
 `Network::node` refuses a name the network does not hold as `model::UnknownNode`.
 
-- `model::Network` is what the configs are computed from: every node with the addresses derived
-  for it, its platform and the private key the files write for it, every link with the obfuscation
-  and the keepalive in force on it, empty on a link of type `wireguard`, the route classes and the
-  ports of the metrics listeners. `v2::lower` gives it for a `v2::File`, and refuses files without
-  `mesh.interface_prefix`. The metrics ports are the `talos` platform's
-  settings, which the lowering does not read: the Talos generator and `slipmesh check` set them on
-  the network. `model::node_key` and `model::link_obfuscation` name where the files hold a node's
-  key and a link's obfuscation.
+- `model::Network` is what the configs are computed from: every node with the addresses derived for
+  it, its platform and the private key the files write for it, every link with the keepalive and the
+  obfuscation in force on it, the obfuscation empty on a link of type `wireguard`, the route classes
+  and the ports of the metrics listeners. `v2::lower` gives it for a `v2::File`, and refuses files
+  without `mesh.interface_prefix`. The metrics ports are the `talos` platform's settings, which the
+  lowering does not read: the Talos generator and `slipmesh check` set them on the network.
+  `model::node_key` and `model::link_obfuscation` name where the files hold a node's key and a
+  link's obfuscation.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig`, each checked the way the
-  node checks it, from the network alone. It needs the node's own key, but on a node on no link;
-  and for each of its links, the peer's key and the link's obfuscation. It refuses what of these is
+  node checks it, from the network alone. It needs the node's own key, but on a node on no link; and
+  for each of its links, the peer's key and the link's obfuscation. It refuses what of these is
   missing, or the obfuscation of a link of type `amneziawg` without one of `jc`, `jmin`, `jmax`,
-  `s1`, `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes and links the node
-  is not on. Such a refusal gives its `secrets::MissingSecret` through
+  `s1`, `s2` and `h1` to `h4`, naming what lacks what; it refuses nothing for the secrets of nodes
+  and links the node is not on. Such a refusal gives its `secrets::MissingSecret` through
   `render::Error::missing_secret`, so a tool can add how its user creates the secret. A peer the
   node dials is given the keepalive of its link where that differs from what
-  `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes of
-  `talos`.
+  `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes of `talos`.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
   each by the entry it belongs to, and no key for a node on no link, or `NoHeaderLeft`
   when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a
