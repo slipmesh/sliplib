@@ -43,7 +43,8 @@
   [`.cargo/mutants.toml`](../.cargo/mutants.toml).
 - A parser of outside input written here, not one a dependency provides, gets a
   [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz) target that asserts a property, not only
-  the absence of a panic.
+  the absence of a panic. `slipmesh.yaml` is the network's own file, not outside input, and gets
+  none.
 
 ## Comments
 

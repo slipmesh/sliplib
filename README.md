@@ -372,32 +372,6 @@ test reads each into its type and writes it back, and the text has to come out t
 of what a node gets fails the twins; a change of how a config is written fails the read-back until
 the files are rewritten in the new form, which the pull request then shows.
 
-[`fuzz/`](fuzz) holds a target for [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz.html),
-which needs a nightly toolchain: `read_slipmesh` gives a text to `v2::File`, lowers what reads into
-the network, and computes the configs of every node. It expects a refusal at any step, or a result
-that holds what each step promises - each node's and each link's values in force as the format lays
-them, documents that reach nodes of their own platform, each node given what reaches it, by rank
-and then as read, and every derived address in the network it is derived in - and never a panic.
-It is run before a pull request that changes how a file is read or lowered. Its first inputs are
-the specification's example, the network and the Talos documents joined into one text, and the
-golden network of version 2:
-
-```bash
-mkdir -p fuzz/corpus/read_slipmesh
-```
-
-```bash
-for file in docs/example/mesh.yaml docs/example/talos.yaml; do echo ---; cat "$file"; done > fuzz/corpus/read_slipmesh/example.yaml
-```
-
-```bash
-cp mesh/tests/golden/v2/slipmesh.yaml fuzz/corpus/read_slipmesh/golden.yaml
-```
-
-```bash
-cargo +nightly fuzz run read_slipmesh fuzz/corpus/read_slipmesh -- -max_total_time=180
-```
-
 ## Releasing
 
 Releases come from `main` only. Run the Release PR workflow, with the version or empty to compute it
