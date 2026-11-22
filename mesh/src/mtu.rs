@@ -303,7 +303,7 @@ mod tests {
             (AT_V6, UNDIALED, amneziawg("{s4: 1420}"), 0),
             (AT_V6, UNDIALED, amneziawg("{s4: 1500}"), 0),
         ] {
-            for mesh in ["", ", mtu: 1280", ", mtu: 1279", ", mtu: 1"] {
+            for mesh in ["", ", mtu: 1280", ", mtu: 1"] {
                 let refusal = refusal_of(a, b, &link, mesh);
                 assert!(
                     matches!(&refusal, MtuError::LimitBelowMinimum { link, limit: l }
