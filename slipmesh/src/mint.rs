@@ -18,7 +18,7 @@ pub fn run(config_path: &Path) -> Result<()> {
             .context("slipmesh.yaml with what it lacked does not read back - not written")?;
     }
     // The ports of the metrics change no secret, and refuse no node.
-    let network = check::network(&file, None)?;
+    let network = sliplib_mesh::v2::lower(&file)?;
     let minted = sliplib_mesh::mint::create(&network)?;
     edit::record(&mut yaml, &file, &network, &minted)?;
     if minted.is_empty() && unset.is_empty() {
@@ -30,7 +30,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     // node's config is refused with must not reach the file.
     let edited = File::read(&yaml)
         .context("slipmesh.yaml with what was minted does not read back - not written")?;
-    let network = check::network(&edited, None)?;
+    let network = sliplib_mesh::v2::lower(&edited)?;
     let refusals: Vec<anyhow::Error> = check::nodes(&network)
         .into_iter()
         .filter_map(|(_, checked)| checked.err())

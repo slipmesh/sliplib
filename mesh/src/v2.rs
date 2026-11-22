@@ -2,7 +2,7 @@
 //! the addresses its `node_id` gives it, every link with what the loader found in force on it.
 
 use crate::addressing;
-use crate::model::{Endpoint, Link, MetricsPorts, Network, Node};
+use crate::model::{Endpoint, Link, Network, Node};
 use crate::mtu::DEFAULT_UPLINK_MTU;
 use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::v2::File;
@@ -135,7 +135,6 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             .iter()
             .map(|(name, class)| (name.to_string(), class.protocol))
             .collect(),
-        metrics: MetricsPorts::default(),
     })
 }
 
@@ -525,20 +524,6 @@ mod tests {
             peer_keepalive(&of_their_own, "node-a", "node-b"),
             Some(Range::from(25))
         );
-    }
-
-    #[test]
-    fn the_metrics_ports_reach_the_nodes_of_talos_alone() {
-        let mut network = lowered("{}");
-        network.metrics = MetricsPorts {
-            awg: std::num::NonZeroU16::new(9586),
-            router: std::num::NonZeroU16::new(9324),
-        };
-        let talos = node_configs(&network, "node-a").unwrap();
-        assert_eq!(talos.awg.metrics.unwrap().listen, "198.51.100.1:9586");
-        assert_eq!(talos.router.metrics.unwrap().listen, "198.51.100.1:9324");
-        let routeros = node_configs(&network, "router1").unwrap();
-        assert!(routeros.awg.metrics.is_none() && routeros.router.metrics.is_none());
     }
 
     fn refused(network: &Network, node: &str) -> crate::render::Error {

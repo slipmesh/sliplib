@@ -235,19 +235,17 @@ from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those t
 
 - `model::Network`, what the configs are computed from: each node with its derived addresses,
   platform and key; each link with its keepalive and obfuscation in force, the obfuscation empty on
-  a `wireguard` link; the route classes; the ports of the metrics listeners. `v2::lower` gives it
-  from a `v2::File`, refusing one without `mesh.interface_prefix`. The metrics ports are the `talos`
-  settings, which lowering does not read: the Talos generator and `slipmesh check` set them.
-  `model::node_key` and `model::link_obfuscation` name where the files hold a node's key and a
-  link's obfuscation.
+  a `wireguard` link; the route classes. `v2::lower` gives it from a `v2::File`, refusing one
+  without `mesh.interface_prefix`. `model::node_key` and `model::link_obfuscation` name where the
+  files hold a node's key and a link's obfuscation.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig` from the network, each
   checked as the node checks it. It refuses a missing key of the node, unless it is on no link, or
   of a peer, and a link of type `amneziawg` whose obfuscation lacks one of `jc`, `jmin`, `jmax`,
   `s1`, `s2` and `h1` to `h4`, naming what lacks what; nothing of nodes and links the node is not
   on. Such a refusal gives its `secrets::MissingSecret` through `render::Error::missing_secret`, for
   a tool to say how to create it. A dialed peer gets its link's keepalive where that differs from
-  what `InterfaceEntry::keepalive_of` gives without it. The metrics listeners go to the nodes of
-  `talos`.
+  what `InterfaceEntry::keepalive_of` gives without it. No metrics listener: a tool for Talos adds
+  it from the `talos` settings.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
   each by the entry it belongs to, and no key for a node on no link, or `NoHeaderLeft`
   when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a

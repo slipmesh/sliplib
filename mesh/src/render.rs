@@ -6,10 +6,8 @@ use crate::mtu::MtuError;
 use crate::secrets::{MissingSecret, unminted};
 use sliplib_config::awg::{AwgConfig, InterfaceEntry, PeerEntry};
 use sliplib_config::router::{BgpPeerEntry, NodeIdentity, RouterConfig};
-use sliplib_config::v2::Platform;
-use sliplib_config::{MetricsConfig, Obfuscation, ObfuscationError};
+use sliplib_config::{Obfuscation, ObfuscationError};
 use sliplib_secrets::wireguard::KeyError;
-use std::num::NonZeroU16;
 
 /// Why a node has no configs. Every variant names the node and which of its two configs it is
 /// about; the cause is its source.
@@ -113,7 +111,7 @@ pub(crate) fn render_router_config(mesh: &Network, node: &Node) -> RouterConfig 
         learn: node.learn.clone(),
         announce: node.announce.clone(),
         bypass: None,
-        metrics: metrics_for(node, mesh.metrics.router),
+        metrics: None,
     }
 }
 
@@ -203,7 +201,7 @@ fn mesh_interfaces_for(mesh: &Network, node_name: &str) -> Result<Vec<InterfaceE
 pub(crate) fn render_awg_config(mesh: &Network, node_name: &str) -> Result<AwgConfig> {
     Ok(AwgConfig {
         interfaces: mesh_interfaces_for(mesh, node_name)?,
-        metrics: metrics_for(mesh.node(node_name)?, mesh.metrics.awg),
+        metrics: None,
     })
 }
 
@@ -271,16 +269,6 @@ fn minted_obfuscation(
         )));
     }
     Ok(obfuscation.clone())
-}
-
-/// A metrics listener for this node, when the port says there is one, on the node's own IPv4
-/// loopback - the address the router daemon brings up, so no listener can drift from it.
-fn metrics_for(node: &Node, port: Option<NonZeroU16>) -> Option<MetricsConfig> {
-    // The listeners are those of the daemons the Talos generator installs.
-    let port = port.filter(|_| node.platform == Platform::Talos)?;
-    Some(MetricsConfig {
-        listen: format!("{}:{port}", node.loopback.0),
-    })
 }
 
 #[cfg(test)]

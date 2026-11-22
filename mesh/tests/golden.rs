@@ -5,8 +5,6 @@
 
 use sliplib_config::awg::AwgConfig;
 use sliplib_config::router::RouterConfig;
-use sliplib_config::v2::Platform;
-use sliplib_mesh::model::MetricsPorts;
 use sliplib_mesh::render::node_configs;
 
 /// The configs version 1 gave the nodes of a network: the directory that holds them, and the
@@ -76,15 +74,12 @@ fn golden(directory: &str, file: &str) -> String {
     .unwrap()
 }
 
-/// Every node of the twin gets the configs its file of version 1 gave it, but for what
-/// `docs/slipmesh-yaml-v1-to-v2.md` says a conversion changes: no pool interface, no bypass list,
-/// no label on what is announced, the link's port where a node's endpoint held another, the
-/// addresses derived from a `node_id` the conversion replaced, and no metrics listener on a node
-/// that is not of `talos`.
+/// But for what `docs/slipmesh-yaml-v1-to-v2.md` says a conversion changes: no pool interface,
+/// bypass list or announce label, the link's port for an endpoint's, the addresses of a replaced
+/// `node_id`. No metrics listener: the Talos generator adds them.
 fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
     let files = sliplib_config::v2::File::parse(twin.text).unwrap();
-    let mut network = sliplib_mesh::v2::lower(&files).unwrap();
-    network.metrics = MetricsPorts::from(&files.talos_settings().unwrap());
+    let network = sliplib_mesh::v2::lower(&files).unwrap();
     let names: Vec<&str> = network
         .nodes
         .iter()
@@ -146,10 +141,8 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
                 *endpoint = (*now).to_owned();
             }
         }
-        if network.node(host).unwrap().platform != Platform::Talos {
-            expected_awg.metrics = None;
-            expected_router.metrics = None;
-        }
+        expected_awg.metrics = None;
+        expected_router.metrics = None;
 
         let got = node_configs(&network, host).unwrap();
         let got_awg: AwgConfig =
