@@ -111,7 +111,6 @@ pub(crate) fn render_router_config(mesh: &Network, node: &Node) -> RouterConfig 
         learn: node.learn.clone(),
         announce: node.announce.clone(),
         bypass: None,
-        metrics: None,
     }
 }
 
@@ -173,7 +172,6 @@ fn mesh_interfaces_for(mesh: &Network, node_name: &str) -> Result<Vec<InterfaceE
             addresses,
             private_key: own_private_key.clone(),
             obfuscation,
-            handshake_stale_secs: None,
             mtu,
             peers: vec![PeerEntry {
                 public_key: peer_private_key.public_key().map_err(key_of(peer_name))?,
@@ -201,7 +199,6 @@ fn mesh_interfaces_for(mesh: &Network, node_name: &str) -> Result<Vec<InterfaceE
 pub(crate) fn render_awg_config(mesh: &Network, node_name: &str) -> Result<AwgConfig> {
     Ok(AwgConfig {
         interfaces: mesh_interfaces_for(mesh, node_name)?,
-        metrics: None,
     })
 }
 

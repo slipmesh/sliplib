@@ -173,17 +173,18 @@ mean.
 
 ### `sliplib-config`
 
-`slipmesh.yaml`, which every tool reads, and the daemons' configs: what a config generator writes
-for a node from it, and what its readers take - the daemons on the node, and the RouterOS tool.
-Types and their checks only; reading and writing the files is `sliplib-yaml`'s.
+`slipmesh.yaml`, which every tool reads, and what every platform's daemons share of their configs:
+what a config generator writes for a node from it, and what its readers take - the daemons on the
+node, and the RouterOS tool. A key of one daemon alone, such as where it serves its metrics, is its
+platform's tool's. Types and their checks only; reading and writing the files is `sliplib-yaml`'s.
 
 Every check and the loader return an error type of their own, one variant for each refusal:
 `v2::Error`, `v2::Invalid`, `v2::NameError` and those of `v2::groups` and `v2::network`,
-`awg::Invalid`, `router::Invalid` and `LoopbackAddressError`, `ObfuscationError`, `MetricsError`. A
-variant's text is one line of the refusal. Where that line names its cause itself - an address that
-does not parse, with why - the variant holds the cause as a field and has no `source`; where the
-cause is a line of its own, it is the variant's `source`. A variant never does both, so printing the
-whole chain gives the whole message, each part once.
+`awg::Invalid`, `router::Invalid` and `LoopbackAddressError`, `ObfuscationError`. A variant's text
+is one line of the refusal. Where that line names its cause itself - an address that does not parse,
+with why - the variant holds the cause as a field and has no `source`; where the cause is a line of
+its own, it is the variant's `source`. A variant never does both, so printing the whole chain gives
+the whole message, each part once.
 
 - `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md).
   `v2::File` reads the files as a whole (`parse`, `read`) and refuses whatever its specification
@@ -200,7 +201,6 @@ whole chain gives the whole message, each part once.
   and a template or patch also gives its `value`. This
   release reads one `network` and one `groups` document, and refuses a second, which the format
   lays over the first, until the tools read several files.
-- `nftables::TEMPLATE_PATH`, where the `nftables` service reads its ruleset template.
 - `awg`: `AwgConfig` with its interfaces and peers, and `validate`. A peer's `persistent_keepalive`
   is a number of seconds or a range of them. `InterfaceEntry::keepalive_of` gives what a peer ends
   up with: none for a peer without an `endpoint`, which is only waited for; for a dialed one its
@@ -211,10 +211,9 @@ whole chain gives the whole message, each part once.
   sources, and `validate`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would
   otherwise fail on. `Obfuscation::trailer_loss` says how a tunnel with `random_trailers` on loses
-  data packets, as `TrailerLoss`: a share of them where one of `h1` to `h3` is a range, or by
-  their own header where an offset reads it. `Obfuscation::bytes_into_clear_header` says whether
-  an offset does, for the warning and for whatever creates an offset. `MetricsConfig` is where a
-  daemon serves its Prometheus endpoint.
+  data packets, as `TrailerLoss`: a share of them where one of `h1` to `h3` is a range, or by their
+  own header where an offset reads it. `Obfuscation::bytes_into_clear_header` says whether an offset
+  does, for the warning and for whatever creates an offset.
 - `Range`, the type of the magic headers and the timing and padding values of `Obfuscation`. The
   kernel module draws each of them from a range, written as one number or as `lo-hi`. A number
   is rendered into a node's config as a number and a range as a string, which a daemon built
@@ -243,7 +242,7 @@ from are refused as this crate's `v2::Error`; `sliplib-config`'s refuses those t
   on. Such a refusal gives its `secrets::MissingSecret` through `render::Error::missing_secret`, for
   a tool to say how to create it. A dialed peer gets its link's keepalive where that differs from
   what `InterfaceEntry::keepalive_of` gives without it. No metrics listener: the Talos generator
-  adds it from the `talos` settings.
+  adds it to its daemons' own configs.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
   each by the entry it belongs to, and no key for a node on no link, or `NoHeaderLeft`
   when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a
@@ -350,13 +349,13 @@ fail each time; [`.cargo/mutants.toml`](.cargo/mutants.toml) lists what it skips
 [`mesh/tests/golden.rs`](mesh/tests/golden.rs) pins what the files give their nodes. Under
 [`mesh/tests/golden/`](mesh/tests/golden), `v1` and `v1-alternate` hold the configs that two
 networks of format version 1 gave every node, with derived public keys named by their owner; the
-first set every key of that format, the second the other side of each key a file sets once. `v2`
-and `v2-alternate` are the same two networks converted to version 2 by hand, and every node of each
-gets those configs, but for what [a conversion
-changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand). The files hold values: the
-test reads each into its type and writes it back, and the text has to come out the same. A change
-of what a node gets fails the twins; a change of how a config is written fails the read-back until
-the files are rewritten in the new form, which the pull request then shows.
+first set every key of that format, the second the other side of each key a file sets once. `v2` and
+`v2-alternate` are the same two networks converted to version 2 by hand, and every node of each gets
+those configs, but for what [a conversion
+changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand) and the keys of a daemon's own
+config, `metrics` and `handshake_stale_secs`. The files hold values: the test reads each into the
+shared type with those keys beside it and writes it back, and the values have to come out the same.
+A change of what a node gets fails the twins; a key the types do not take fails the read-back.
 
 ## Releasing
 

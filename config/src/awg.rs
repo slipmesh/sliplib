@@ -3,7 +3,7 @@
 //! purely behavioral, driven by whether a given peer's `allowed_ips` is set (see `PeerEntry`'s own
 //! doc comment).
 
-use crate::{MetricsConfig, MetricsError, Obfuscation, Range};
+use crate::{Obfuscation, Range};
 use serde::{Deserialize, Serialize};
 use sliplib_net::parse as parse_cidr;
 use sliplib_secrets::wireguard::PrivateKey;
@@ -13,12 +13,6 @@ use std::collections::HashSet;
 pub struct AwgConfig {
     #[serde(default)]
     pub interfaces: Vec<InterfaceEntry>,
-    /// Absent means "do not listen" - a node not set up for scraping must not open a port because
-    /// a default said so. Rendered rather than hand-written, and safe to render ahead of the
-    /// binary that reads it: nothing here denies unknown fields, so an older
-    /// `awg` ignores the section instead of refusing the config.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metrics: Option<MetricsConfig>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
@@ -39,10 +33,6 @@ pub struct InterfaceEntry {
     pub private_key: PrivateKey,
     #[serde(default)]
     pub obfuscation: Obfuscation,
-    /// Only meaningful for peers that have an explicit `allowed_ips` (see `PeerEntry`) - ignored
-    /// entirely for full-tunnel peers, which are never handshake-tracked. Defaults to 180s if unset.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub handshake_stale_secs: Option<u64>,
     /// The interface's MTU. Unset leaves it as it is: the kernel's default for a new interface. The
     /// generator sets one MTU on every mesh interface, low enough that a full-size packet with
     /// its WireGuard and junk overhead still fits the underlay unfragmented.
@@ -83,8 +73,6 @@ pub struct PeerEntry {
     pub persistent_keepalive: Option<Range<u16>>,
 }
 
-pub const DEFAULT_HANDSHAKE_STALE_SECS: u64 = 180;
-
 /// The keepalive of a dialed peer whose entry sets none, on an interface that sets nothing of the
 /// obfuscation: the interval WireGuard's own tools suggest behind a NAT.
 pub const PLAIN_KEEPALIVE: Range<u16> = Range::constant(25, 25);
@@ -123,8 +111,6 @@ impl InterfaceEntry {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Invalid {
-    #[error(transparent)]
-    Metrics(#[from] MetricsError),
     #[error("interface name must not be empty")]
     EmptyInterfaceName,
     #[error("interface name {0:?} is longer than 15 bytes (IFNAMSIZ)")]
@@ -169,12 +155,8 @@ pub enum Invalid {
 
 /// Pure validation, no I/O: interface names are non-empty, fit `IFNAMSIZ`, and are unique;
 /// every `addresses`/`allowed_ips` entry is a parseable CIDR (either family); a peer's keepalive
-/// range starts at 1 or above; `metrics.listen`, when present, is a parseable IPv4 `ip:port`.
+/// range starts at 1 or above.
 pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
-    if let Some(metrics) = &cfg.metrics {
-        metrics.validate("metrics.listen")?;
-    }
-
     let mut seen_names = HashSet::new();
     for iface in &cfg.interfaces {
         if iface.name.is_empty() {
@@ -250,7 +232,6 @@ mod tests {
             addresses: vec![],
             private_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             obfuscation: Obfuscation::default(),
-            handshake_stale_secs: None,
             mtu: None,
             peers: vec![],
         }
@@ -262,7 +243,6 @@ mod tests {
         iface.mtu = Some(mtu);
         AwgConfig {
             interfaces: vec![iface],
-            metrics: None,
         }
     }
 
@@ -292,7 +272,6 @@ mod tests {
         assert_eq!(cfg.interfaces[0].mtu, Some(1420));
         let unset = AwgConfig {
             interfaces: vec![iface("mesh-a")],
-            metrics: None,
         };
         assert!(!sliplib_yaml::to_string(&unset).unwrap().contains("mtu"));
     }
@@ -372,7 +351,6 @@ interfaces:
     fn rejects_duplicate_interface_names() {
         let cfg = AwgConfig {
             interfaces: vec![iface("dup"), iface("dup")],
-            ..Default::default()
         };
         assert!(validate(&cfg).is_err());
     }
@@ -381,7 +359,6 @@ interfaces:
     fn rejects_a_name_longer_than_ifnamsiz() {
         let cfg = AwgConfig {
             interfaces: vec![iface("this-name-is-way-too-long")],
-            ..Default::default()
         };
         assert!(validate(&cfg).is_err());
     }
@@ -390,7 +367,6 @@ interfaces:
     fn accepts_a_name_that_fills_ifnamsiz() {
         let cfg = AwgConfig {
             interfaces: vec![iface("fifteen-bytes-1")],
-            ..Default::default()
         };
         validate(&cfg).unwrap();
     }
@@ -401,7 +377,6 @@ interfaces:
         a.addresses.push("not-a-cidr".to_string());
         let cfg = AwgConfig {
             interfaces: vec![a],
-            ..Default::default()
         };
         assert!(validate(&cfg).is_err());
     }
@@ -418,7 +393,6 @@ interfaces:
         });
         let cfg = AwgConfig {
             interfaces: vec![a],
-            ..Default::default()
         };
         assert!(validate(&cfg).is_err());
     }
@@ -442,64 +416,8 @@ interfaces:
         });
         let cfg = AwgConfig {
             interfaces: vec![a],
-            ..Default::default()
         };
         assert!(validate(&cfg).is_err());
-    }
-
-    fn with_metrics(listen: &str) -> AwgConfig {
-        AwgConfig {
-            interfaces: vec![],
-            metrics: Some(MetricsConfig {
-                listen: listen.to_string(),
-            }),
-        }
-    }
-
-    #[test]
-    fn accepts_a_v4_metrics_listen_address() {
-        validate(&with_metrics("198.51.100.1:9586")).unwrap();
-    }
-
-    #[test]
-    fn rejects_a_wildcard_metrics_listen_address() {
-        // The whole point of the address is that it exists only inside the overlay. Binding
-        // 0.0.0.0 would put the endpoint on every interface the node has, public ones included.
-        assert!(validate(&with_metrics("0.0.0.0:9586")).is_err());
-    }
-
-    #[test]
-    fn rejects_port_zero() {
-        // The kernel would pick an ephemeral port, which nothing could then scrape. "Do not
-        // listen" is spelled by omitting the section, not by asking for port 0.
-        assert!(validate(&with_metrics("198.51.100.1:0")).is_err());
-    }
-
-    #[test]
-    fn rejects_a_malformed_metrics_listen_address() {
-        assert!(validate(&with_metrics("198.51.100.1")).is_err());
-        assert!(validate(&with_metrics("not-an-address")).is_err());
-    }
-
-    #[test]
-    fn rejects_a_v6_metrics_listen_address() {
-        // The address Prometheus discovers is the node's InternalIP, which is the v4 loopback;
-        // a v6 listener would be bound to something nothing scrapes.
-        assert!(validate(&with_metrics("[3fff::1]:9586")).is_err());
-    }
-
-    #[test]
-    fn a_config_without_a_metrics_section_parses_and_validates() {
-        let cfg: AwgConfig = sliplib_yaml::from_str("interfaces: []").unwrap();
-        assert_eq!(cfg.metrics, None);
-        validate(&cfg).unwrap();
-    }
-
-    #[test]
-    fn a_metrics_section_round_trips_through_yaml() {
-        let cfg = with_metrics("198.51.100.1:9586");
-        let yaml = sliplib_yaml::to_string(&cfg).unwrap();
-        assert_eq!(sliplib_yaml::from_str::<AwgConfig>(&yaml).unwrap(), cfg);
     }
 
     #[test]
@@ -518,7 +436,6 @@ interfaces:
         });
         AwgConfig {
             interfaces: vec![a],
-            ..Default::default()
         }
     }
 

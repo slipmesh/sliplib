@@ -2,7 +2,6 @@
 //! needs is declared statically - nothing is discovered from the cluster or from the node's own
 //! interfaces.
 
-use crate::{MetricsConfig, MetricsError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr};
@@ -80,11 +79,6 @@ pub struct RouterConfig {
     pub announce: Vec<AnnounceEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bypass: Option<BypassConfig>,
-    /// Present when this node serves BIRD's protocol state to Prometheus, absent otherwise.
-    /// Served by `bird_exporter`, which the daemon runs beside BIRD - an implementation detail
-    /// of the daemon, not of this document.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metrics: Option<MetricsConfig>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
@@ -205,8 +199,6 @@ pub enum Invalid {
     Ipv4Loopbacks(usize),
     #[error("node.loopback_addresses must contain exactly one IPv6 address, found {0}")]
     Ipv6Loopbacks(usize),
-    #[error(transparent)]
-    Metrics(#[from] MetricsError),
     #[error("bfd: min_rx_ms and min_tx_ms must be greater than 0")]
     BfdIntervalZero,
     #[error("bfd: multiplier must be greater than 0")]
@@ -281,10 +273,6 @@ pub fn validate(cfg: &RouterConfig) -> Result<(), Invalid> {
     }
     if v6_count != 1 {
         return Err(Invalid::Ipv6Loopbacks(v6_count));
-    }
-
-    if let Some(metrics) = &cfg.metrics {
-        metrics.validate("metrics.listen")?;
     }
 
     if let Some(bfd) = &cfg.bfd {
@@ -391,22 +379,6 @@ node:
   loopback_addresses: ["198.51.100.1/32", "3fff::1/128"]
 bgp_as: 64512
 "#
-    }
-
-    /// The rule itself lives on `MetricsConfig` and `awg`'s own tests cover it; what this
-    /// guards is that `router` still asks for it. A wildcard listener would put BIRD's protocol
-    /// state on every interface the node has, public ones included.
-    #[test]
-    fn validate_rejects_a_wildcard_metrics_listener() {
-        let yaml = format!(
-            "{}metrics:
-  listen: 0.0.0.0:9324
-",
-            minimal_yaml()
-        );
-        let cfg: RouterConfig = sliplib_yaml::from_str(&yaml).unwrap();
-        let err = validate(&cfg).unwrap_err().to_string();
-        assert!(err.contains("wildcard"), "unexpected error: {err}");
     }
 
     #[test]
