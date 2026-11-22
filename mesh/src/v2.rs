@@ -8,15 +8,6 @@ use sliplib_config::router::{AnnounceEntry, BfdSettings};
 use sliplib_config::v2::File;
 use sliplib_config::v2::network::{self, LinkKind};
 use sliplib_config::{Obfuscation, Range};
-use sliplib_net::{IpNet, Ipv6Net};
-use std::net::{IpAddr, Ipv6Addr};
-
-/// The network of the link-local addresses when `addressing.tunnel.link_local` is left out.
-const DEFAULT_LINK_LOCAL: Ipv6Net =
-    Ipv6Net::new_assert(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 64);
-
-/// The prefix length a link's interface carries its link-local with.
-const LINK_LOCAL_PREFIX_LEN: u8 = 64;
 
 /// Why the files, which read, give no network to compute from.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -24,69 +15,10 @@ const LINK_LOCAL_PREFIX_LEN: u8 = 64;
 pub enum Error {
     #[error("mesh.interface_prefix is not set - `slipmesh mint` writes it")]
     NoInterfacePrefix,
-    #[error(
-        "the nodes {first:?} and {second:?} both get the {what} {address}: their `node_id`s give the same bits in the host part of {key} - change one `node_id`, or take a network that leaves room for both"
-    )]
-    SameAddress {
-        what: &'static str,
-        key: &'static str,
-        address: IpAddr,
-        first: String,
-        second: String,
-    },
-    #[error(
-        "the node {node:?} gets the link-local address {address}/{LINK_LOCAL_PREFIX_LEN}, whose host part is all zeros: that is the Subnet-Router anycast address, which no interface takes - give the node a `node_id` that leaves a bit set there, or take an `addressing.tunnel.link_local` where it does"
-    )]
-    AnycastLinkLocal { node: String, address: Ipv6Addr },
 }
 
-/// What a derived address is, for a refusal: its name and the key of the network it is from.
-struct Derived {
-    what: &'static str,
-    key: &'static str,
-}
-
-const IPV4_LOOPBACK: Derived = Derived {
-    what: "IPv4 loopback",
-    key: "addressing.loopback.ipv4",
-};
-const LINK_LOCAL: Derived = Derived {
-    what: "link-local address",
-    key: "addressing.tunnel.link_local",
-};
-const TUNNEL_IPV4: Derived = Derived {
-    what: "IPv4 address on its links",
-    key: "addressing.tunnel.ipv4",
-};
-
-/// Refuses two nodes that got one address: `of` gives a node's, where it has one. The IPv6
-/// loopbacks need no such look: the loader refuses a loopback network longer than /96 and two
-/// nodes of one `node_id`, so each loopback holds a whole `node_id` of its own.
-fn distinct(
-    nodes: &[Node],
-    derived: &Derived,
-    of: impl Fn(&Node) -> Option<IpAddr>,
-) -> Result<(), Error> {
-    for (index, node) in nodes.iter().enumerate() {
-        let Some(address) = of(node) else { continue };
-        if let Some(first) = nodes[..index]
-            .iter()
-            .find(|other| of(other) == Some(address))
-        {
-            return Err(Error::SameAddress {
-                what: derived.what,
-                key: derived.key,
-                address,
-                first: first.name.clone(),
-                second: node.name.clone(),
-            });
-        }
-    }
-    Ok(())
-}
-
-/// `files` as a network. Refuses what only the derived addresses show: two nodes with one
-/// address, and a link-local no interface takes.
+/// `files` as a network. The loader's rule that every `node_id` fits each network it is added to,
+/// and is not `0.0.0.0`, leaves the derived addresses distinct and none with a host part of zeros.
 pub fn lower(files: &File) -> Result<Network, Error> {
     let written = files.network();
     let prefix = written
@@ -99,7 +31,7 @@ pub fn lower(files: &File) -> Result<Network, Error> {
     let tunnel = written.addressing.tunnel.as_ref();
     let link_local = tunnel
         .and_then(|tunnel| tunnel.link_local)
-        .map_or(DEFAULT_LINK_LOCAL, |prefix| prefix.0);
+        .map(|prefix| prefix.0);
     let tunnel_ipv4 = tunnel.and_then(|tunnel| tunnel.ipv4).map(|prefix| prefix.0);
     // The links' interfaces are announced if and only if they carry an IPv4 address, so their
     // pattern joins a node's list here and is never written by hand.
@@ -124,14 +56,18 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             {
                 direct_interfaces.push(pattern.clone());
             }
+            let ipv6_loopback = addressing::ipv6_in(ipv6.addr(), ipv6.prefix_len(), id);
             Node {
                 name: name.to_string(),
                 platform: node.platform,
                 loopback: (
                     addressing::ipv4_in(ipv4.addr(), ipv4.prefix_len(), id),
-                    addressing::ipv6_in(ipv6.addr(), ipv6.prefix_len(), id),
+                    ipv6_loopback,
                 ),
-                link_local: addressing::ipv6_in(link_local.addr(), link_local.prefix_len(), id),
+                link_local: link_local.map_or_else(
+                    || addressing::link_local_from_loopback(ipv6_loopback),
+                    |network| addressing::ipv6_in(network.addr(), network.prefix_len(), id),
+                ),
                 tunnel_ipv4: tunnel_ipv4
                     .map(|net| addressing::ipv4_in(net.addr(), net.prefix_len(), id)),
                 private_key: node
@@ -157,21 +93,6 @@ pub fn lower(files: &File) -> Result<Network, Error> {
             }
         })
         .collect();
-
-    distinct(&nodes, &IPV4_LOOPBACK, |node| Some(node.loopback.0.into()))?;
-    distinct(&nodes, &LINK_LOCAL, |node| Some(node.link_local.into()))?;
-    distinct(&nodes, &TUNNEL_IPV4, |node| {
-        node.tunnel_ipv4.map(IpAddr::from)
-    })?;
-    for node in &nodes {
-        let on_the_link = Ipv6Net::new_assert(node.link_local, LINK_LOCAL_PREFIX_LEN);
-        if sliplib_net::reserved(IpNet::V6(on_the_link)).is_some() {
-            return Err(Error::AnycastLinkLocal {
-                node: node.name.clone(),
-                address: node.link_local,
-            });
-        }
-    }
 
     Ok(Network {
         nodes,
@@ -270,10 +191,8 @@ mod tests {
             own.node("node-b").unwrap().link_local.to_string(),
             "fe80:0:0:1::2"
         );
-        // A network that leaves fewer than 32 bits free takes only the low bits of `node_id`.
-        let narrow = lowered(
-            "{addressing: {tunnel: {link_local: 'fe80::1:0/120'}}, nodes: {node-b: {node_id: 0.0.1.2}}}",
-        );
+        // A network that leaves fewer than 32 bits free keeps its own bits above the `node_id`.
+        let narrow = lowered("{addressing: {tunnel: {link_local: 'fe80::1:0/120'}}}");
         assert_eq!(
             narrow.node("node-b").unwrap().link_local.to_string(),
             "fe80::1:2"
@@ -447,74 +366,33 @@ mod tests {
     }
 
     #[test]
-    fn two_nodes_with_one_ipv4_loopback_are_refused_naming_both() {
-        // In a /25 the node_id gives its low 7 bits: 129 and 1 are the same there.
-        let refusal = refusal("{nodes: {node-b: {node_id: 0.0.0.129}}}");
+    fn an_ipv6_loopback_network_longer_than_96_takes_a_node_id_that_fits_it() {
+        // What v0.19's `ipv6_loopback` derived: the network's bits and the 8 of 0.0.0.200.
+        let network = lowered(
+            "{addressing: {loopback: {ipv4: 198.18.0.0/24, ipv6: '3fff:0:0:1::/120'}, tunnel: \
+             {ipv4: null}}, nodes: {node-b: {node_id: 0.0.0.200}}}",
+        );
+        let node = network.node("node-b").unwrap();
+        assert_eq!(node.loopback.0.to_string(), "198.18.0.200");
+        assert_eq!(node.loopback.1.to_string(), "3fff:0:0:1::c8");
         assert_eq!(
-            refusal,
-            Error::SameAddress {
-                what: "IPv4 loopback",
-                key: "addressing.loopback.ipv4",
-                address: "198.51.100.1".parse().unwrap(),
-                first: "node-a".into(),
-                second: "node-b".into(),
-            }
+            network.node("node-a").unwrap().loopback.1.to_string(),
+            "3fff:0:0:1::1"
         );
     }
 
     #[test]
-    fn two_nodes_with_one_link_local_are_refused() {
-        // 65 and 1 differ in the 7 bits of the loopback and agree in the 6 of this network.
-        let refusal = refusal(
-            "{addressing: {tunnel: {ipv4: null, link_local: 'fe80::/122'}}, nodes: {node-b: {node_id: 0.0.0.65}}}",
-        );
+    fn without_a_link_local_network_the_links_take_the_link_local_of_the_loopback() {
+        // As v0.19 gave them: fe80:: and the low 32 bits of the IPv6 loopback, the network's own
+        // bits there among them.
+        let network =
+            lowered("{addressing: {loopback: {ipv6: '3fff::1:0/120'}, tunnel: {ipv4: null}}}");
+        let node = network.node("node-c").unwrap();
+        assert_eq!(node.loopback.1.to_string(), "3fff::1:3");
+        assert_eq!(node.link_local.to_string(), "fe80::1:3");
         assert_eq!(
-            refusal,
-            Error::SameAddress {
-                what: "link-local address",
-                key: "addressing.tunnel.link_local",
-                address: "fe80::1".parse().unwrap(),
-                first: "node-a".into(),
-                second: "node-b".into(),
-            }
-        );
-    }
-
-    #[test]
-    fn two_nodes_with_one_ipv4_address_on_their_links_are_refused() {
-        let refusal = refusal(
-            "{addressing: {tunnel: {ipv4: 198.51.100.192/26}}, nodes: {node-b: {node_id: 0.0.0.65}}}",
-        );
-        assert_eq!(
-            refusal,
-            Error::SameAddress {
-                what: "IPv4 address on its links",
-                key: "addressing.tunnel.ipv4",
-                address: "198.51.100.193".parse().unwrap(),
-                first: "node-a".into(),
-                second: "node-b".into(),
-            }
-        );
-    }
-
-    #[test]
-    fn a_link_local_with_a_host_part_of_zeros_is_refused() {
-        let narrow = "addressing: {tunnel: {link_local: 'fe80::/120'}}";
-        let refusal = refusal(&format!(
-            "{{{narrow}, nodes: {{node-b: {{node_id: 0.0.1.0}}}}}}"
-        ));
-        assert_eq!(
-            refusal,
-            Error::AnycastLinkLocal {
-                node: "node-b".into(),
-                address: "fe80::".parse().unwrap(),
-            }
-        );
-        // The same node_id in the default network leaves a bit set.
-        let wide = lowered("{nodes: {node-b: {node_id: 0.0.1.0}}}");
-        assert_eq!(
-            wide.node("node-b").unwrap().link_local.to_string(),
-            "fe80::100"
+            node.link_local,
+            addressing::link_local_from_loopback(node.loopback.1)
         );
     }
 

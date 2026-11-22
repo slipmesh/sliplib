@@ -34,9 +34,9 @@ In general:
   `address_family` it counted a host name for IPv6.
 - One rule for names, which version 1 did not have: ASCII letters, digits, `-`, `_` and `.`, with a
   letter or a digit first and last. `all` and `none` are reserved.
-- New refusals among the nodes, none of which version 1 checked: two nodes with the same loopback
-  address; an IPv6 loopback network longer than /96; two nodes with the same address on the links,
-  link-local or IPv4; a link-local whose low 64 bits are all zeros.
+- New refusals among the nodes, none of which version 1 checked: a `node_id` wider than the host
+  part of a network it is added to, which version 1 cut to the bits that network leaves free; and
+  `0.0.0.0`.
 - The network of the link-local addresses on the links is a key of its own,
   `addressing.tunnel.link_local`, written with or without an IPv4 network beside it. Version 1 took
   it from `tunnel_networks.ipv6`, which came only together with `ipv4`, and did not check that it
@@ -144,10 +144,9 @@ networks: what else step 6 shows comes from the conversion.
    1. In the `slipmesh:` block of the `network` document, write `version: 2` and `revision: 1`.
    2. Write `addressing`: `loopback` is `cluster.loopback_networks`. Where the file has
       `cluster.tunnel_networks`, `tunnel.ipv4` is its `ipv4`, and `tunnel.link_local` its `ipv6`,
-      moved as it is: the link-local addresses are derived from it as before. Version 1 took two
-      networks that step 5 refuses: an IPv6 loopback network longer than /96, and an `ipv6` of
-      `tunnel_networks` outside `fe80::/10`. Such a network has to change, and the addresses
-      derived from it move with it.
+      moved as it is: the link-local addresses are derived from it as before. Version 1 took a
+      network that step 5 refuses: an `ipv6` of `tunnel_networks` outside `fe80::/10`. Such a
+      network has to change, and the addresses derived from it move with it.
    3. Write `routing`: `bgp.as` is `cluster.bgp_as`; `direct_interfaces` is the list of the same
       name; `learn` holds `pod_subnet` and `announce` holds `service_subnet`, each in a list. The
       label `k8s-services` has no place in version 2. `bfd` moves here without `enable`: where
@@ -161,7 +160,12 @@ networks: what else step 6 shows comes from the conversion.
       rule](slipmesh-yaml.md#names), or `all` or `none`, has to change, and so do the names of the
       interfaces named after it on the node's peers. Give every node its `platform`. Its
       `mesh_private_key` becomes `wireguard.private_key`, and its `direct_interfaces` moves under
-      its `routing`.
+      its `routing`. A `node_id` wider than the host part of a network it is added to, which
+      version 1 cut there, and `0.0.0.0`, are refused by step 5. Give such a node the `node_id`
+      whose bits version 1 kept in its IPv4 loopback, the old one cut to the host bits of
+      `loopback.ipv4`, where that value is not `0.0.0.0` and fits every network the node's
+      addresses are derived from; otherwise any value that does. `198.51.100.133` under a /25
+      becomes `0.0.0.5`. The node's IPv4 loopback stays only in the first case.
    7. Give every node one `underlay` entry, named as you like. Its `mtu` is the node's `uplink_mtu`,
       left out where that was. Its `endpoint` holds the node's `endpoint` without any port and
       without the brackets of an IPv6 address, under the key of its family: the family of the
@@ -223,6 +227,12 @@ networks: what else step 6 shows comes from the conversion.
      link's `port`, every peer's endpoint for that node, in the `awg` config and on a RouterOS peer;
    - where step 4.2 changed a network, the addresses derived from it;
    - where a node was renamed in step 4.6, the interfaces named after it, and what refers to them;
+   - where step 4.6 gave a node another `node_id`, each address derived from it that the new one
+     changes, and what other nodes hold of it, the address of its iBGP sessions among them: its
+     IPv6 loopback where its network kept more bits of the old `node_id` than the new one has; its
+     IPv4 loopback where the new `node_id` is not the one version 1 kept there; its link-local
+     where it changes with them, which a `link_local` network that took only the kept low bits
+     leaves as it was;
    - where step 4.9 made a link to a `routeros` node, which version 1 could have marked as
      obfuscated, a link of type `wireguard`, the interface of its `talos` end has no obfuscation,
      and the peer's keepalive is 25 where an obfuscated link gave it `20-30`;
