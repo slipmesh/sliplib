@@ -4,8 +4,8 @@
 //! Mbit/s.
 
 use crate::network::{Mesh, UnknownNode};
-use sliplib_config::mtu::MIN_IPV6_MTU;
 use sliplib_config::v2::network::{Family, Link, Node};
+use sliplib_net::mtu::MIN_IPV6_MTU;
 
 /// Ethernet's.
 pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;

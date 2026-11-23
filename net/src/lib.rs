@@ -1,4 +1,7 @@
-//! CIDR on [`ipnet`]'s types, re-exported so one version reaches every component.
+//! CIDR on [`ipnet`]'s types, re-exported so one version reaches every component, and the mesh
+//! MTU's floor and annotation.
+
+pub mod mtu;
 
 use std::fmt;
 use std::net::IpAddr;

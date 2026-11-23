@@ -6,7 +6,7 @@ the command-line tool for `slipmesh.yaml` itself.
 
 | crate | what it gives |
 | --- | --- |
-| [`sliplib-net`](net) | CIDR parsing and arithmetic on `ipnet`'s types |
+| [`sliplib-net`](net) | CIDR parsing and arithmetic on `ipnet`'s types, and the mesh MTU's floor and annotation |
 | [`sliplib-fs`](fs) | Files written whole, and only when their text changes |
 | [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and turned back into text |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
@@ -148,6 +148,8 @@ reaches every component. On top of its methods:
 - `parse`, `parse_ipv4` and `parse_ipv6` read `"<address>/<prefix length>"`, host bits kept, with
   errors that name the input;
 - `exclude(net, excluded)`: the rest of `net`, as the fewest networks, in address order.
+- `mtu::MIN_IPV6_MTU`, 1280, the least MTU of a link that carries IPv6, and
+  `mtu::MESH_MTU_ANNOTATION`, the annotation of a node's `Node` object that carries the mesh MTU.
 
 ### `sliplib-fs`
 
@@ -214,8 +216,6 @@ chain prints the whole message, each part once.
   on. `trailer_loss` says how a tunnel with `random_trailers` on loses data packets, as
   `TrailerLoss`. `bytes_into_clear_header` says whether an offset reads a data packet's clear
   header.
-- `mtu::MIN_IPV6_MTU`, 1280, the least MTU of a link that carries IPv6, and
-  `mtu::MESH_MTU_ANNOTATION`, the annotation of a node's `Node` object that carries the mesh MTU.
 - `Prefix`, `Prefix4` and `Prefix6`: an address and its prefix length, host bits kept, read and
   written as `"<address>/<prefix length>"`.
 - `Range`: a number or `lo-hi` the module draws from. A range is written as a string, which a

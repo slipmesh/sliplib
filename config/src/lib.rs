@@ -1,7 +1,6 @@
 //! `slipmesh.yaml`, and what every platform's daemons share of their configs.
 
 pub mod awg;
-pub mod mtu;
 mod obfuscation;
 mod prefix;
 mod range;

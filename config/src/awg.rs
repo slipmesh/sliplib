@@ -1,8 +1,8 @@
 //! What every platform's `awg` daemon shares of its config.
 
-use crate::mtu::MIN_IPV6_MTU;
 use crate::{Obfuscation, Prefix, Range};
 use serde::{Deserialize, Serialize};
+use sliplib_net::mtu::MIN_IPV6_MTU;
 use sliplib_net::{Ipv4Net, Ipv6Net};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::collections::HashSet;
