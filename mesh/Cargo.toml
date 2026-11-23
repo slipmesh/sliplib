@@ -16,6 +16,7 @@ mint = ["dep:rand"]
 [dependencies]
 rand = { workspace = true, optional = true }
 sliplib-config.workspace = true
+sliplib-net.workspace = true
 sliplib-secrets.workspace = true
 thiserror.workspace = true
 

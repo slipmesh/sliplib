@@ -6,9 +6,8 @@ use super::{ClassName, Map, Name, Platform, UniqueKeys, absent_when_null, unique
 use crate::router::{
     BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER, InterfacePattern,
 };
-use crate::{Obfuscation, Range};
+use crate::{Obfuscation, Prefix4, Prefix6, Range};
 use serde::{Deserialize, Deserializer, de};
-use sliplib_net::{Ipv4Net, Ipv6Net};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32};
@@ -33,32 +32,6 @@ pub struct Network {
     pub mesh: Mesh,
     #[serde(deserialize_with = "unique_keys")]
     pub nodes: Map<Name, Node>,
-}
-
-/// Host bits kept.
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(try_from = "String")]
-pub struct Prefix4(pub Ipv4Net);
-
-/// Host bits kept.
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(try_from = "String")]
-pub struct Prefix6(pub Ipv6Net);
-
-impl TryFrom<String> for Prefix4 {
-    type Error = sliplib_net::ParseError;
-
-    fn try_from(text: String) -> Result<Self, Self::Error> {
-        sliplib_net::parse_ipv4(&text).map(Self)
-    }
-}
-
-impl TryFrom<String> for Prefix6 {
-    type Error = sliplib_net::ParseError;
-
-    fn try_from(text: String) -> Result<Self, Self::Error> {
-        sliplib_net::parse_ipv6(&text).map(Self)
-    }
 }
 
 /// What a node's `node_id` is added to.

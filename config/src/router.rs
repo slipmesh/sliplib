@@ -1,7 +1,9 @@
 //! The `router` daemon's config, which the RouterOS tool reads too. Nothing is discovered.
 
 use crate::v2::network::InterfacePrefix;
-use serde::{Deserialize, Serialize};
+use crate::{Prefix4, Prefix6};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use sliplib_net::IpNet;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr};
 
@@ -130,9 +132,9 @@ pub struct RouterConfig {
     /// `protocol direct` sources, whose connected routes go out over iBGP as `router-lo`'s do.
     #[serde(default)]
     pub direct_interfaces: Vec<InterfacePattern>,
-    /// IPv4 CIDRs: a kernel route at or inside one is announced over iBGP.
+    /// A kernel route at or inside one is announced over iBGP.
     #[serde(default)]
-    pub learn: Vec<String>,
+    pub learn: Vec<Prefix4>,
     #[serde(default)]
     pub announce: Vec<AnnounceEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -141,21 +143,67 @@ pub struct RouterConfig {
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct NodeIdentity {
-    /// One IPv4, BIRD's router id and `krt_prefsrc`, and one IPv6, the iBGP source; a prefix length
-    /// left out is the host's.
-    pub loopback_addresses: Vec<String>,
+    pub loopback_addresses: Loopbacks,
+}
+
+/// The IPv4 one is BIRD's router id and `krt_prefsrc`, the IPv6 one the iBGP source. Written as a
+/// list of the two; read from one, a prefix length left out is the host's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Loopbacks {
+    pub ipv4: Prefix4,
+    pub ipv6: Prefix6,
+}
+
+impl Serialize for Loopbacks {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (self.ipv4, self.ipv6).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Loopbacks {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (mut ipv4, mut ipv6) = (Vec::new(), Vec::new());
+        for text in Vec::<String>::deserialize(deserializer)? {
+            let net = loopback(&text)
+                .map_err(|error| de::Error::custom(format!("loopback_addresses: {error}")))?;
+            match net {
+                IpNet::V4(net) => ipv4.push(net),
+                IpNet::V6(net) => ipv6.push(net),
+            }
+        }
+        match (ipv4.as_slice(), ipv6.as_slice()) {
+            ([v4], [v6]) => Ok(Self {
+                ipv4: Prefix4(*v4),
+                ipv6: Prefix6(*v6),
+            }),
+            _ => Err(de::Error::custom(format!(
+                "loopback_addresses holds {} IPv4 and {} IPv6 addresses, and takes one of each",
+                ipv4.len(),
+                ipv6.len()
+            ))),
+        }
+    }
+}
+
+fn loopback(text: &str) -> Result<IpNet, String> {
+    if text.contains('/') {
+        return sliplib_net::parse(text).map_err(|error| error.to_string());
+    }
+    text.parse::<IpAddr>()
+        .map(IpNet::from)
+        .map_err(|error| format!("{text:?} is not an IP address: {error}"))
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct BgpPeerEntry {
     pub name: String,
-    /// One bare IPv6 address, as BIRD's `neighbor` takes; RFC 8950 carries IPv4 over the session.
-    pub address: String,
+    /// As BIRD's `neighbor` takes it; RFC 8950 carries IPv4 over the session.
+    pub address: Ipv6Addr,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct AnnounceEntry {
-    pub net: String,
+    pub net: Prefix4,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
@@ -201,46 +249,12 @@ pub struct LabeledPrefix {
     pub label: Option<String>,
 }
 
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum LoopbackAddressError {
-    #[error(transparent)]
-    Cidr(#[from] sliplib_net::ParseError),
-    #[error("{text:?} is not a valid IP address: {error}")]
-    NotAnAddress {
-        text: String,
-        error: std::net::AddrParseError,
-    },
-}
-
-/// `"<addr>/<prefix>"`, or a bare address as the host's `/32` or `/128`.
-pub fn parse_loopback_address(s: &str) -> Result<(IpAddr, u8), LoopbackAddressError> {
-    if s.contains('/') {
-        let net = sliplib_net::parse(s)?;
-        return Ok((net.addr(), net.prefix_len()));
-    }
-    let addr: IpAddr = s
-        .parse()
-        .map_err(|error| LoopbackAddressError::NotAnAddress {
-            text: s.to_owned(),
-            error,
-        })?;
-    let prefix = if addr.is_ipv4() { 32 } else { 128 };
-    Ok((addr, prefix))
-}
-
 /// What the daemon would refuse, or fail on once running.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Invalid {
     #[error("bgp_as must not be 0 (reserved, RFC 7607)")]
     BgpAsZero,
-    #[error("node.loopback_addresses: {0}")]
-    LoopbackAddress(LoopbackAddressError),
-    #[error("node.loopback_addresses must contain exactly one IPv4 address, found {0}")]
-    Ipv4Loopbacks(usize),
-    #[error("node.loopback_addresses must contain exactly one IPv6 address, found {0}")]
-    Ipv6Loopbacks(usize),
     #[error("bfd: min_rx_ms and min_tx_ms must be greater than 0")]
     BfdIntervalZero,
     #[error("bfd: multiplier must be greater than 0")]
@@ -249,22 +263,6 @@ pub enum Invalid {
     EmptyPeerName,
     #[error("bgp_peers: duplicate name {0:?}")]
     DuplicatePeer(String),
-    #[error("bgp_peers {name:?}: address {address:?} is not a valid IPv6 address: {error}")]
-    PeerAddress {
-        name: String,
-        address: String,
-        error: std::net::AddrParseError,
-    },
-    #[error("learn: invalid IPv4 CIDR {cidr:?}: {error}")]
-    Learn {
-        cidr: String,
-        error: sliplib_net::ParseError,
-    },
-    #[error("announce: invalid IPv4 CIDR {cidr:?}: {error}")]
-    Announce {
-        cidr: String,
-        error: sliplib_net::ParseError,
-    },
     #[error("bypass.refresh_interval_secs must be greater than 0")]
     BypassRefreshZero,
     #[error("literal bypass source requires `prefixes`")]
@@ -289,22 +287,6 @@ pub fn validate(cfg: &RouterConfig) -> Result<(), Invalid> {
     if cfg.bgp_as == 0 {
         return Err(Invalid::BgpAsZero);
     }
-    let mut v4_count = 0;
-    let mut v6_count = 0;
-    for addr in &cfg.node.loopback_addresses {
-        let (addr, _prefix) = parse_loopback_address(addr).map_err(Invalid::LoopbackAddress)?;
-        match addr {
-            IpAddr::V4(_) => v4_count += 1,
-            IpAddr::V6(_) => v6_count += 1,
-        }
-    }
-    if v4_count != 1 {
-        return Err(Invalid::Ipv4Loopbacks(v4_count));
-    }
-    if v6_count != 1 {
-        return Err(Invalid::Ipv6Loopbacks(v6_count));
-    }
-
     if let Some(bfd) = &cfg.bfd {
         // BIRD refuses a zero, and the daemon would learn so only at `birdc configure`.
         if bfd.min_rx_ms == 0 || bfd.min_tx_ms == 0 {
@@ -323,27 +305,6 @@ pub fn validate(cfg: &RouterConfig) -> Result<(), Invalid> {
         if !seen_names.insert(peer.name.as_str()) {
             return Err(Invalid::DuplicatePeer(peer.name.clone()));
         }
-        peer.address
-            .parse::<Ipv6Addr>()
-            .map_err(|error| Invalid::PeerAddress {
-                name: peer.name.clone(),
-                address: peer.address.clone(),
-                error,
-            })?;
-    }
-
-    for cidr in &cfg.learn {
-        sliplib_net::parse_ipv4(cidr).map_err(|error| Invalid::Learn {
-            cidr: cidr.clone(),
-            error,
-        })?;
-    }
-
-    for entry in &cfg.announce {
-        sliplib_net::parse_ipv4(&entry.net).map_err(|error| Invalid::Announce {
-            cidr: entry.net.clone(),
-            error,
-        })?;
     }
 
     if let Some(bypass) = &cfg.bypass {
@@ -471,80 +432,102 @@ bypass:
     }
 
     #[test]
-    fn parse_loopback_address_defaults_prefix_by_family() {
-        assert_eq!(
-            parse_loopback_address("198.51.100.1").unwrap(),
-            ("198.51.100.1".parse().unwrap(), 32)
-        );
-        assert_eq!(
-            parse_loopback_address("3fff::1").unwrap(),
-            ("3fff::1".parse().unwrap(), 128)
-        );
-    }
-
-    #[test]
-    fn parse_loopback_address_accepts_explicit_prefix() {
-        assert_eq!(
-            parse_loopback_address("198.51.100.1/25").unwrap(),
-            ("198.51.100.1".parse().unwrap(), 25)
-        );
-    }
-
-    #[test]
-    fn rejects_missing_ipv4_loopback() {
-        let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.node.loopback_addresses = vec!["3fff::1/128".to_string()];
-        assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
-    fn rejects_missing_ipv6_loopback() {
-        let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.node.loopback_addresses = vec!["198.51.100.1/32".to_string()];
-        assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
     fn rejects_duplicate_peer_names() {
         let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
         cfg.bgp_peers = vec![
             BgpPeerEntry {
                 name: "east".to_string(),
-                address: "3fff::2".to_string(),
+                address: "3fff::2".parse().unwrap(),
             },
             BgpPeerEntry {
                 name: "east".to_string(),
-                address: "3fff::3".to_string(),
+                address: "3fff::3".parse().unwrap(),
             },
         ];
         assert!(validate(&cfg).is_err());
     }
 
-    #[test]
-    fn rejects_ipv4_peer_address() {
-        let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.bgp_peers = vec![BgpPeerEntry {
-            name: "east".to_string(),
-            address: "198.51.100.2".to_string(),
-        }];
-        assert!(validate(&cfg).is_err());
+    fn with_loopbacks(list: &str) -> Result<RouterConfig, String> {
+        sliplib_yaml::from_str(&format!(
+            "node:\n  loopback_addresses: {list}\nbgp_as: 64512\n"
+        ))
+        .map_err(|error| error.to_string())
     }
 
     #[test]
-    fn rejects_malformed_learn_cidr() {
-        let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.learn = vec!["not-a-cidr".to_string()];
-        assert!(validate(&cfg).is_err());
+    fn the_loopbacks_read_as_one_of_each_family_in_either_order() {
+        for list in [
+            "[198.51.100.1/32, 3fff::1/128]",
+            "[3fff::1/128, 198.51.100.1/32]",
+        ] {
+            let loopbacks = with_loopbacks(list).unwrap().node.loopback_addresses;
+            assert_eq!(loopbacks.ipv4.0.to_string(), "198.51.100.1/32", "{list}");
+            assert_eq!(loopbacks.ipv6.0.to_string(), "3fff::1/128", "{list}");
+        }
     }
 
     #[test]
-    fn rejects_malformed_announce_cidr() {
-        let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.announce = vec![AnnounceEntry {
-            net: "not-a-cidr".to_string(),
-            label: None,
-        }];
-        assert!(validate(&cfg).is_err());
+    fn a_loopback_without_a_prefix_length_is_the_hosts_and_one_with_it_keeps_it() {
+        let loopbacks = with_loopbacks("[198.51.100.1, 3fff::1/64]")
+            .unwrap()
+            .node
+            .loopback_addresses;
+        assert_eq!(loopbacks.ipv4.0.to_string(), "198.51.100.1/32");
+        assert_eq!(loopbacks.ipv6.0.to_string(), "3fff::1/64");
+        let ipv6 = with_loopbacks("[198.51.100.1/25, 3fff::1]").unwrap();
+        assert_eq!(
+            ipv6.node.loopback_addresses.ipv6.0.to_string(),
+            "3fff::1/128"
+        );
+        assert_eq!(
+            ipv6.node.loopback_addresses.ipv4.0.to_string(),
+            "198.51.100.1/25"
+        );
+    }
+
+    #[test]
+    fn loopbacks_other_than_one_of_each_family_are_refused_at_their_key() {
+        for list in [
+            "[3fff::1/128]",
+            "[198.51.100.1/32]",
+            "[198.51.100.1/32, 198.51.100.2/32, 3fff::1/128]",
+            "[198.51.100.1/32, 3fff::1/128, 3fff::2/128]",
+            "[198.51.100.1/32, not-an-address]",
+        ] {
+            let err = with_loopbacks(list).unwrap_err();
+            assert!(
+                err.starts_with("node: loopback_addresses") && err.contains("at line 2"),
+                "{list}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_loopbacks_are_written_as_read() {
+        let cfg = with_loopbacks("[3fff::1/128, 198.51.100.1/32]").unwrap();
+        assert_eq!(
+            sliplib_yaml::to_string(&cfg.node).unwrap(),
+            "loopback_addresses:\n- 198.51.100.1/32\n- 3fff::1/128\n"
+        );
+    }
+
+    #[test]
+    fn a_peer_address_learn_or_announce_of_the_wrong_family_is_refused_at_its_key() {
+        for (yaml, key) in [
+            (
+                "bgp_peers: [{name: east, address: 198.51.100.2}]",
+                "bgp_peers[0].address",
+            ),
+            ("learn: [not-a-cidr]", "learn"),
+            ("learn: [\"3fff::/64\"]", "learn"),
+            ("announce: [{net: \"3fff::/64\"}]", "announce[0]"),
+        ] {
+            let text = format!("{}{yaml}\n", minimal_yaml());
+            let err = sliplib_yaml::from_str::<RouterConfig>(&text)
+                .unwrap_err()
+                .to_string();
+            assert!(err.starts_with(&format!("{key}: ")), "{yaml}: {err}");
+        }
     }
 
     #[test]

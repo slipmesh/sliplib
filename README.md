@@ -203,13 +203,16 @@ chain prints the whole message, each part once.
 - `awg`: `AwgConfig` and `validate`. `InterfaceEntry::keepalive_of` is a peer's keepalive: none
   for one without an `endpoint`; else its own, or 25 on a plain interface and 20 to 30 on an
   obfuscated one.
-- `router`: `RouterConfig` and `validate`. `InterfacePattern` is an entry of `ospf_interfaces` or
+- `router`: `RouterConfig` and `validate`. `Loopbacks` is the node's pair, written as a list of
+  the two. `InterfacePattern` is an entry of `ospf_interfaces` or
   `direct_interfaces`, an interface name or a prefix and `*`: `matches` a name, `name` gives an
   exact one, `is_router_loopback` tells the entry of `ROUTER_LOOPBACK`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would fail
   on. `trailer_loss` says how a tunnel with `random_trailers` on loses data packets, as
   `TrailerLoss`. `bytes_into_clear_header` says whether an offset reads a data packet's clear
   header.
+- `Prefix`, `Prefix4` and `Prefix6`: an address and its prefix length, host bits kept, read and
+  written as `"<address>/<prefix length>"`.
 - `Range`: a number or `lo-hi` the module draws from. A range is written as a string, which a
   daemon built before ranges refuses; nothing here checks a node's release.
 

@@ -632,6 +632,7 @@ dependencies = [
  "rand",
  "serde",
  "sliplib-config",
+ "sliplib-net",
  "sliplib-secrets",
  "sliplib-yaml",
  "thiserror",
