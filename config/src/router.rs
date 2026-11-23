@@ -1,5 +1,6 @@
 //! The `router` daemon's config, which the RouterOS tool reads too. Nothing is discovered.
 
+use crate::v2::is_name_character;
 use crate::v2::network::InterfacePrefix;
 use crate::{Prefix4, Prefix6};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -61,9 +62,9 @@ pub enum InterfacePatternError {
     #[error("an interface pattern must not be empty")]
     Empty,
     #[error(
-        "{0:?} is not an interface pattern: write an interface name, or a prefix and `*` - `?`, `/` and a `*` before the end are not taken"
+        "interface pattern {pattern:?} holds {character:?}: write an interface name of ASCII letters, digits, `-`, `_` and `.`, or a prefix of them and `*`"
     )]
-    NotAPattern(String),
+    Character { pattern: String, character: char },
 }
 
 impl InterfacePattern {
@@ -105,8 +106,11 @@ impl TryFrom<String> for InterfacePattern {
             return Err(InterfacePatternError::Empty);
         }
         let body = text.strip_suffix('*').unwrap_or(&text);
-        if body.contains(['*', '?', '/']) {
-            return Err(InterfacePatternError::NotAPattern(text));
+        if let Some(character) = body.chars().find(|&c| !is_name_character(c)) {
+            return Err(InterfacePatternError::Character {
+                pattern: text,
+                character,
+            });
         }
         Ok(Self(text))
     }
@@ -610,15 +614,30 @@ bypass:
     }
 
     #[test]
-    fn a_pattern_takes_no_wildcard_but_a_star_at_the_end_and_no_cidr() {
-        for text in ["mesh-?", "me*sh", "**", "192.0.2.0/24"] {
+    fn a_pattern_takes_the_characters_of_a_name_and_a_star_at_the_end_only() {
+        for (text, character) in [
+            ("mesh-?", '?'),
+            ("me*sh", '*'),
+            ("**", '*'),
+            ("192.0.2.0/24", '/'),
+            ("a\"b", '"'),
+            ("lan 0", ' '),
+            ("lan\n0", '\n'),
+            ("lan:0", ':'),
+        ] {
             assert_eq!(
                 pattern(text),
-                Err(InterfacePatternError::NotAPattern(text.to_owned())),
+                Err(InterfacePatternError::Character {
+                    pattern: text.to_owned(),
+                    character
+                }),
                 "{text}"
             );
         }
         assert_eq!(pattern(""), Err(InterfacePatternError::Empty));
+        for text in ["mesh-*", "*", "eth0.100", "bridge_lan"] {
+            assert!(pattern(text).is_ok(), "{text}");
+        }
     }
 
     #[test]

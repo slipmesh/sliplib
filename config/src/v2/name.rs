@@ -93,7 +93,7 @@ impl Name {
     }
 }
 
-pub(super) fn is_name_character(c: char) -> bool {
+pub(crate) fn is_name_character(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')
 }
 

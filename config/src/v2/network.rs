@@ -272,7 +272,7 @@ impl TryFrom<String> for InterfacePrefix {
         if prefix.is_empty() {
             return Err(InterfacePrefixError::Empty);
         }
-        // The kernel refuses `/`, `:` and whitespace; in a routing pattern `*`, `?` and `[` would match
+        // The kernel refuses `/`, `:` and whitespace; in a routing pattern `*` and `?` would match
         // other interfaces.
         if !prefix.chars().all(is_name_character) {
             return Err(InterfacePrefixError::Character(prefix));
