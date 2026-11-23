@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.22.0] - 2026-11-23
+
+### Breaking changes 💥
+
+- Read each type from its own text, with sliplib-yaml's own error (#88)
+- Give the tools one implementation per shared job (#89)
+
 ## [0.21.0] - 2026-11-23
 
 ### Breaking changes 💥
