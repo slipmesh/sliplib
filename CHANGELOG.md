@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.23.0] - 2026-11-23
+
+### Breaking changes 💥
+
+- Write a file only into a directory that exists (#91)
+
 ## [0.22.0] - 2026-11-23
 
 ### Breaking changes 💥
