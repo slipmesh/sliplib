@@ -1,34 +1,5 @@
 //! `slipmesh.yaml` of format version 2, as `docs/slipmesh-yaml.md` describes it.
 
-/// `Deserialize` from a mapping alone, over a `#[serde(remote = "Self")]` derive: serde reads an
-/// internally tagged enum from a list too, by position.
-macro_rules! from_a_mapping {
-    ($type:ty) => {
-        impl<'de> serde::Deserialize<'de> for $type {
-            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                struct Keys;
-
-                impl<'de> serde::de::Visitor<'de> for Keys {
-                    type Value = $type;
-
-                    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        f.write_str("a mapping")
-                    }
-
-                    fn visit_map<A: serde::de::MapAccess<'de>>(
-                        self,
-                        keys: A,
-                    ) -> Result<$type, A::Error> {
-                        <$type>::deserialize(serde::de::value::MapAccessDeserializer::new(keys))
-                    }
-                }
-
-                deserializer.deserialize_map(Keys)
-            }
-        }
-    };
-}
-
 mod block;
 mod check;
 mod file;
@@ -38,7 +9,10 @@ pub mod network;
 #[cfg(test)]
 mod testing;
 
-pub use block::{ALL, Aimed, Block, Exclude, Include, NONE, Order, Platform, Rank};
+pub use block::{
+    ALL, Aimed, Block, Exclude, GroupsBlock, Include, NONE, NetworkBlock, Order, Platform,
+    PlatformBlock, Rank,
+};
 pub use check::Invalid;
 pub use file::{
     Aim, AimedDocument, BlockError, Error, File, META_KEY, Place, PlatformDocument, REVISION,

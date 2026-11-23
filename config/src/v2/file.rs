@@ -1,7 +1,7 @@
 //! The files read as a whole: the blocks, the network in force, the groups as nodes, and each
 //! platform document with its aim.
 
-use super::block::{Aimed, Block, Rank};
+use super::block::{Aimed, Block, PlatformBlock, Rank};
 use super::check::Invalid;
 use super::groups::{Groups, GroupsError, Resolved, Selection};
 use super::network::{AMNEZIAWG, Network, WIREGUARD};
@@ -139,14 +139,12 @@ struct Read {
 impl Read {
     fn block(mut body: Document) -> Result<Self, Error> {
         let line = body.line;
-        let block = body
-            .take(META_KEY)
-            .ok_or(BlockError::Missing)
-            .and_then(|block| {
-                sliplib_yaml::from_value::<Block>(block)
-                    .map_err(|source| BlockError::Malformed(source.into()))
-            })
-            .map_err(|source| Error::Block { line, source })?;
+        let block = match body.value.get(META_KEY) {
+            None => Err(BlockError::Missing),
+            Some(_) => Block::read(&body).map_err(|source| BlockError::Malformed(source.into())),
+        }
+        .map_err(|source| Error::Block { line, source })?;
+        body.take(META_KEY);
         Ok(Self { block, body })
     }
 }
@@ -462,9 +460,9 @@ impl File {
         let mut aimed_documents = Vec::new();
         for Read { block, body } in documents {
             match block {
-                Block::Network { .. } => networks.push(body),
-                Block::Groups { .. } => groups.push(body),
-                Block::Platform { platform, .. } => {
+                Block::Network(_) => networks.push(body),
+                Block::Groups(_) => groups.push(body),
+                Block::Platform(PlatformBlock { platform, .. }) => {
                     if let Some((_, first)) = platforms.iter().find(|(of, _)| *of == platform) {
                         let first = first.body.line;
                         return Err(Error::PlatformTwice {
@@ -989,6 +987,115 @@ mod tests {
                 "{block}: {refusal:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_empty_block_is_refused_as_malformed_and_a_key_written_twice_as_not_yaml() {
+        let network = network("{}");
+        for block in ["slipmesh:\n", "slipmesh: null\n"] {
+            let refusal = refusal(&[&network, block]);
+            assert!(
+                matches!(
+                    refusal,
+                    Error::Block {
+                        source: BlockError::Malformed(_),
+                        ..
+                    }
+                ),
+                "{block}: {refusal:?}"
+            );
+        }
+        let twice = "slipmesh: {kind: patch, platform: talos, include: [a], include: [b]}\n";
+        let refusal = refusal(&[&network, twice]);
+        assert!(matches!(refusal, Error::Yaml(_)), "{refusal:?}");
+    }
+
+    #[test]
+    fn a_tagged_kind_or_platform_is_refused_by_the_rule_on_tags() {
+        let newer = network_edited("{kind: !network, version: 3, revision: 1}", |_| ());
+        let network = network("{}");
+        for (documents, tagged) in [
+            (vec![newer.as_str()], "slipmesh.kind"),
+            (
+                vec![
+                    network.as_str(),
+                    "slipmesh:\n  kind: platform\n  platform: !talos\n",
+                ],
+                "slipmesh.platform",
+            ),
+        ] {
+            let refusal = refusal(&documents);
+            let Error::Yaml(source) = &refusal else {
+                panic!("{refusal:?}");
+            };
+            assert!(
+                matches!(
+                    source.downcast_ref::<sliplib_yaml::Error>(),
+                    Some(sliplib_yaml::Error::InDocument { source, .. })
+                        if matches!(&**source, sliplib_yaml::Error::Tagged { key, .. } if key == tagged)
+                ),
+                "{refusal:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_document_reads_beside_top_level_keys_that_are_not_strings() {
+        let network = network("{}");
+        for other in ["5: x\n", "? [a, b]\n: c\n"] {
+            let patch = format!("{META_KEY}: {{kind: patch, platform: talos}}\n{other}");
+            file(&[&network, &patch]).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_value_of_a_block_that_does_not_fit_is_refused_by_its_key_and_line() {
+        let wrong_version = network_edited("{kind: network, version: abc, revision: 1}", |_| ());
+        let network = network("{}");
+        for (documents, key, written) in [
+            ([wrong_version.as_str(), ""], "version", "version: abc"),
+            (
+                [
+                    network.as_str(),
+                    "slipmesh:\n  kind: platform\n  platform: nope\n",
+                ],
+                "platform",
+                "platform: nope",
+            ),
+            (
+                [
+                    network.as_str(),
+                    "slipmesh:\n  kind: template\n  platform: talos\n  include: 5\n",
+                ],
+                "include",
+                "include: 5",
+            ),
+        ] {
+            let line = file_line(&documents, written);
+            let refusal = refusal(&documents);
+            let Error::Block {
+                source: BlockError::Malformed(source),
+                ..
+            } = &refusal
+            else {
+                panic!("{refusal:?}");
+            };
+            let source = source.to_string();
+            assert!(
+                source.starts_with(&format!("{META_KEY}.{key}: "))
+                    && source.contains(&format!(" at line {line} ")),
+                "{source}"
+            );
+        }
+    }
+
+    /// The line of `documents` joined that holds `written`.
+    fn file_line(documents: &[&str], written: &str) -> usize {
+        let text = documents.join("\n---\n");
+        text.lines()
+            .position(|line| line.trim_start() == written)
+            .unwrap()
+            + 1
     }
 
     #[test]

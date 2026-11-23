@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use serde::de::value::{MapAccessDeserializer, StrDeserializer};
 use serde::de::{
     DeserializeOwned, DeserializeSeed, Deserializer as _, IgnoredAny, IntoDeserializer, MapAccess,
@@ -11,6 +10,8 @@ use serde::de::{
 };
 use serde::{Deserialize, Serialize};
 use yaml_serde::{Deserializer, Serializer, Value};
+
+use crate::error::{Error, Result};
 
 /// Written back without its comments and documents of only comments.
 pub struct MultiDoc {
@@ -22,13 +23,18 @@ impl MultiDoc {
         let source: Arc<str> = text.into();
         let mut documents = Vec::new();
         for (index, document) in Deserializer::from_str(text).enumerate() {
-            let value = Value::deserialize(document).context("not valid YAML")?;
+            let value = Value::deserialize(document).map_err(Error::NotYaml)?;
             if value.is_null() {
                 continue;
             }
+            let line = line_of(&source, index)?;
+            crate::tag::refuse(&value).map_err(|source| Error::InDocument {
+                line,
+                source: Box::new(source),
+            })?;
             documents.push(Document {
                 index,
-                line: line_of(&source, index)?,
+                line,
                 value,
                 source: Some(Arc::clone(&source)),
                 taken: Vec::new(),
@@ -38,9 +44,7 @@ impl MultiDoc {
     }
 
     pub fn read(path: &Path) -> Result<Self> {
-        let text =
-            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        Self::parse(&text).with_context(|| format!("reading {}", path.display()))
+        crate::file::reading(path, Self::parse)
     }
 
     /// Those that hold more than comments, in file order.
@@ -59,12 +63,16 @@ impl MultiDoc {
         let mut text = Vec::new();
         let mut serializer = Serializer::new(&mut text);
         for document in &self.documents {
-            document.value.serialize(&mut serializer).with_context(|| {
-                format!("writing the document starting at line {}", document.line)
-            })?;
+            document
+                .value
+                .serialize(&mut serializer)
+                .map_err(|source| Error::WritingDocument {
+                    line: document.line,
+                    source,
+                })?;
         }
         drop(serializer);
-        String::from_utf8(text).context("the written YAML is not UTF-8")
+        String::from_utf8(text).map_err(Error::NotUtf8)
     }
 }
 
@@ -95,11 +103,12 @@ impl Document {
         };
         let document = Deserializer::from_str(source)
             .nth(self.index)
-            .context("the document is no longer in the file")?;
-        Ok(document.deserialize_map(Without {
-            keys: &self.taken,
-            target: PhantomData,
-        })?)
+            .ok_or(Error::Gone)?;
+        if self.taken.is_empty() {
+            return Ok(T::deserialize(document)?);
+        }
+        let taken: Vec<&str> = self.taken.iter().map(String::as_str).collect();
+        Ok(document.deserialize_map(Without::new(&taken))?)
     }
 }
 
@@ -114,17 +123,28 @@ fn line_of(source: &str, index: usize) -> Result<usize> {
     }
     let document = Deserializer::from_str(source)
         .nth(index)
-        .context("a document the parser did not keep")?;
-    let stop = document
+        .ok_or(Error::NotKept)?;
+    Ok(document
         .deserialize_any(Nothing)
-        .expect_err("no YAML value is nothing");
-    Ok(stop.location().map_or(1, |location| location.line()))
+        .err()
+        .and_then(|stop| stop.location())
+        .map_or(1, |location| location.line()))
 }
 
-/// A mapping as `T`, less `keys`.
-struct Without<'k, T> {
-    keys: &'k [String],
+/// A mapping as `T`, `keys` passed over unread: a field of `T` among them reads as missing. A key
+/// that is a sequence or a mapping is refused.
+pub struct Without<'k, T> {
+    keys: &'k [&'k str],
     target: PhantomData<T>,
+}
+
+impl<'k, T> Without<'k, T> {
+    pub fn new(keys: &'k [&'k str]) -> Self {
+        Self {
+            keys,
+            target: PhantomData,
+        }
+    }
 }
 
 impl<'de, T: Deserialize<'de>> Visitor<'de> for Without<'_, T> {
@@ -144,7 +164,7 @@ impl<'de, T: Deserialize<'de>> Visitor<'de> for Without<'_, T> {
 
 struct Skipping<'k, A> {
     map: A,
-    keys: &'k [String],
+    keys: &'k [&'k str],
 }
 
 impl<'de, A: MapAccess<'de>> MapAccess<'de> for Skipping<'_, A> {
@@ -152,18 +172,18 @@ impl<'de, A: MapAccess<'de>> MapAccess<'de> for Skipping<'_, A> {
 
     fn next_key_seed<K: DeserializeSeed<'de>>(
         &mut self,
-        seed: K,
+        mut seed: K,
     ) -> Result<Option<K::Value>, A::Error> {
-        let mut seed = Some(seed);
         loop {
             let key = KeySeed {
-                seed: &mut seed,
+                seed,
                 skipped: self.keys,
             };
             match self.map.next_key_seed(key)? {
                 None => return Ok(None),
-                Some(Key::Skipped) => {
+                Some(Key::Skipped(unused)) => {
                     self.map.next_value::<IgnoredAny>()?;
+                    seed = unused;
                 }
                 Some(Key::Read(key)) => return Ok(Some(key)),
             }
@@ -175,39 +195,39 @@ impl<'de, A: MapAccess<'de>> MapAccess<'de> for Skipping<'_, A> {
     }
 }
 
-enum Key<K> {
-    Skipped,
-    Read(K),
+/// A skipped key gives its seed back for the next.
+enum Key<K, V> {
+    Skipped(K),
+    Read(V),
 }
 
 /// Read by the parser itself, so an unknown field's error carries its line.
-struct KeySeed<'s, 'k, K> {
-    seed: &'s mut Option<K>,
-    skipped: &'k [String],
+struct KeySeed<'k, K> {
+    seed: K,
+    skipped: &'k [&'k str],
 }
 
-impl<'de, K: DeserializeSeed<'de>> DeserializeSeed<'de> for KeySeed<'_, '_, K> {
-    type Value = Key<K::Value>;
+impl<'de, K: DeserializeSeed<'de>> DeserializeSeed<'de> for KeySeed<'_, K> {
+    type Value = Key<K, K::Value>;
 
     fn deserialize<D: serde::Deserializer<'de>>(self, key: D) -> Result<Self::Value, D::Error> {
         key.deserialize_str(self)
     }
 }
 
-impl<'de, K: DeserializeSeed<'de>> Visitor<'de> for KeySeed<'_, '_, K> {
-    type Value = Key<K::Value>;
+impl<'de, K: DeserializeSeed<'de>> Visitor<'de> for KeySeed<'_, K> {
+    type Value = Key<K, K::Value>;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a string key")
     }
 
     fn visit_str<E: serde::de::Error>(self, key: &str) -> Result<Self::Value, E> {
-        if self.skipped.iter().any(|skipped| skipped == key) {
-            return Ok(Key::Skipped);
+        if self.skipped.contains(&key) {
+            return Ok(Key::Skipped(self.seed));
         }
-        let seed = self.seed.take().expect("a key is read once");
         let key: StrDeserializer<E> = key.into_deserializer();
-        seed.deserialize(key).map(Key::Read)
+        self.seed.deserialize(key).map(Key::Read)
     }
 }
 

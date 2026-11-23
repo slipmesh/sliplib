@@ -1,48 +1,40 @@
 //! Each file of version 2 against the configs version 1 gave the network it was converted from,
 //! derived public keys named by their owner.
 
-use serde::{Deserialize, Serialize};
-use sliplib_config::awg::{AwgConfig, InterfaceEntry};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use sliplib_config::awg::AwgConfig;
 use sliplib_config::router::RouterConfig;
 use sliplib_mesh::render::node_configs;
 use sliplib_yaml::Value;
 
-// Version 1 wrote, beside the shared keys, those only its daemon reads: each type below takes the
-// ones of its level alone.
-
-#[derive(Deserialize, Serialize)]
-struct Router {
-    #[serde(flatten)]
-    shared: RouterConfig,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    metrics: Option<Value>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Awg {
-    interfaces: Vec<Interface>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    metrics: Option<Value>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Interface {
-    #[serde(flatten)]
-    shared: InterfaceEntry,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    handshake_stale_secs: Option<u64>,
-}
-
-impl Awg {
-    fn shared(self) -> AwgConfig {
-        AwgConfig {
-            interfaces: self
-                .interfaces
-                .into_iter()
-                .map(|interface| interface.shared)
-                .collect(),
+/// Less `metrics` and an interface's `handshake_stale_secs`, which version 1 wrote for its daemons
+/// alone.
+fn without_daemon_keys(mut config: Value) -> Value {
+    config.as_mapping_mut().unwrap().shift_remove("metrics");
+    if let Some(interfaces) = config
+        .get_mut("interfaces")
+        .and_then(Value::as_sequence_mut)
+    {
+        for interface in interfaces {
+            interface
+                .as_mapping_mut()
+                .unwrap()
+                .shift_remove("handshake_stale_secs");
         }
     }
+    config
+}
+
+/// Panics on a key the shared type does not take.
+fn shared<T: DeserializeOwned + Serialize>(text: &str, which: &str) -> T {
+    let shared: T = sliplib_yaml::from_str(text).unwrap();
+    assert_eq!(
+        sliplib_yaml::to_value(&shared).unwrap(),
+        without_daemon_keys(sliplib_yaml::from_str(text).unwrap()),
+        "{which}"
+    );
+    shared
 }
 
 /// Version 1's, by directory, with the nodes in the order written.
@@ -128,34 +120,18 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
 
     for host in twin.v1.nodes {
         let directory = twin.v1.directory;
-        let golden_text = |config: &str| golden(directory, &format!("{host}.{config}.yaml"));
-        // Here, not unseen below: a key the types do not take.
-        let read_awg: Awg = sliplib_yaml::from_str(&golden_text("awg")).unwrap();
-        let read_router: Router = sliplib_yaml::from_str(&golden_text("router")).unwrap();
-        let as_read = |config: &str| sliplib_yaml::from_str::<Value>(&golden_text(config)).unwrap();
-        assert_eq!(
-            sliplib_yaml::to_value(&read_awg).unwrap(),
-            as_read("awg"),
-            "{directory}/{host}.awg.yaml"
-        );
-        assert_eq!(
-            sliplib_yaml::to_value(&read_router).unwrap(),
-            as_read("router"),
-            "{directory}/{host}.router.yaml"
-        );
         let renumbered = |config: &str| {
-            twin.renumbered
-                .iter()
-                .fold(golden_text(config), |text, (was, now)| {
-                    text.replace(was, now)
-                })
+            twin.renumbered.iter().fold(
+                golden(directory, &format!("{host}.{config}.yaml")),
+                |text, (was, now)| text.replace(was, now),
+            )
         };
-        let mut expected_awg = sliplib_yaml::from_str::<Awg>(&renumbered("awg"))
-            .unwrap()
-            .shared();
-        let mut expected_router = sliplib_yaml::from_str::<Router>(&renumbered("router"))
-            .unwrap()
-            .shared;
+        let mut expected_awg: AwgConfig =
+            shared(&renumbered("awg"), &format!("{directory}/{host}.awg.yaml"));
+        let mut expected_router: RouterConfig = shared(
+            &renumbered("router"),
+            &format!("{directory}/{host}.router.yaml"),
+        );
         expected_awg
             .interfaces
             .retain(|interface| !interface.name.starts_with("rw-"));
