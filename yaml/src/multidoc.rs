@@ -119,13 +119,15 @@ fn line_of(source: &str, index: usize) -> Result<usize> {
     let document = Deserializer::from_str(source)
         .nth(index)
         .ok_or(Error::NotKept)?;
-    let stop = document
+    Ok(document
         .deserialize_any(Nothing)
-        .expect_err("no YAML value is nothing");
-    Ok(stop.location().map_or(1, |location| location.line()))
+        .err()
+        .and_then(|stop| stop.location())
+        .map_or(1, |location| location.line()))
 }
 
-/// A mapping as `T`, less `keys`; a key that is not a string is refused.
+/// A mapping as `T`, `keys` passed over unread: a field of `T` among them reads as missing. A key
+/// that is a sequence or a mapping is refused.
 pub struct Without<'k, T> {
     keys: &'k [&'k str],
     target: PhantomData<T>,
@@ -165,18 +167,18 @@ impl<'de, A: MapAccess<'de>> MapAccess<'de> for Skipping<'_, A> {
 
     fn next_key_seed<K: DeserializeSeed<'de>>(
         &mut self,
-        seed: K,
+        mut seed: K,
     ) -> Result<Option<K::Value>, A::Error> {
-        let mut seed = Some(seed);
         loop {
             let key = KeySeed {
-                seed: &mut seed,
+                seed,
                 skipped: self.keys,
             };
             match self.map.next_key_seed(key)? {
                 None => return Ok(None),
-                Some(Key::Skipped) => {
+                Some(Key::Skipped(unused)) => {
                     self.map.next_value::<IgnoredAny>()?;
+                    seed = unused;
                 }
                 Some(Key::Read(key)) => return Ok(Some(key)),
             }
@@ -188,27 +190,28 @@ impl<'de, A: MapAccess<'de>> MapAccess<'de> for Skipping<'_, A> {
     }
 }
 
-enum Key<K> {
-    Skipped,
-    Read(K),
+/// A skipped key gives its seed back for the next.
+enum Key<K, V> {
+    Skipped(K),
+    Read(V),
 }
 
 /// Read by the parser itself, so an unknown field's error carries its line.
-struct KeySeed<'s, 'k, K> {
-    seed: &'s mut Option<K>,
+struct KeySeed<'k, K> {
+    seed: K,
     skipped: &'k [&'k str],
 }
 
-impl<'de, K: DeserializeSeed<'de>> DeserializeSeed<'de> for KeySeed<'_, '_, K> {
-    type Value = Key<K::Value>;
+impl<'de, K: DeserializeSeed<'de>> DeserializeSeed<'de> for KeySeed<'_, K> {
+    type Value = Key<K, K::Value>;
 
     fn deserialize<D: serde::Deserializer<'de>>(self, key: D) -> Result<Self::Value, D::Error> {
         key.deserialize_str(self)
     }
 }
 
-impl<'de, K: DeserializeSeed<'de>> Visitor<'de> for KeySeed<'_, '_, K> {
-    type Value = Key<K::Value>;
+impl<'de, K: DeserializeSeed<'de>> Visitor<'de> for KeySeed<'_, K> {
+    type Value = Key<K, K::Value>;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a string key")
@@ -216,11 +219,10 @@ impl<'de, K: DeserializeSeed<'de>> Visitor<'de> for KeySeed<'_, '_, K> {
 
     fn visit_str<E: serde::de::Error>(self, key: &str) -> Result<Self::Value, E> {
         if self.skipped.contains(&key) {
-            return Ok(Key::Skipped);
+            return Ok(Key::Skipped(self.seed));
         }
-        let seed = self.seed.take().expect("a key is read once");
         let key: StrDeserializer<E> = key.into_deserializer();
-        seed.deserialize(key).map(Key::Read)
+        self.seed.deserialize(key).map(Key::Read)
     }
 }
 
