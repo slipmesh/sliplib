@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use serde::de::value::{MapAccessDeserializer, StrDeserializer};
 use serde::de::{
     DeserializeOwned, DeserializeSeed, Deserializer as _, IgnoredAny, IntoDeserializer, MapAccess,
@@ -11,6 +10,8 @@ use serde::de::{
 };
 use serde::{Deserialize, Serialize};
 use yaml_serde::{Deserializer, Serializer, Value};
+
+use crate::error::{Error, Result};
 
 /// Written back without its comments and documents of only comments.
 pub struct MultiDoc {
@@ -22,7 +23,7 @@ impl MultiDoc {
         let source: Arc<str> = text.into();
         let mut documents = Vec::new();
         for (index, document) in Deserializer::from_str(text).enumerate() {
-            let value = Value::deserialize(document).context("not valid YAML")?;
+            let value = Value::deserialize(document).map_err(Error::NotYaml)?;
             if value.is_null() {
                 continue;
             }
@@ -38,9 +39,7 @@ impl MultiDoc {
     }
 
     pub fn read(path: &Path) -> Result<Self> {
-        let text =
-            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        Self::parse(&text).with_context(|| format!("reading {}", path.display()))
+        crate::file::reading(path, Self::parse)
     }
 
     /// Those that hold more than comments, in file order.
@@ -59,12 +58,16 @@ impl MultiDoc {
         let mut text = Vec::new();
         let mut serializer = Serializer::new(&mut text);
         for document in &self.documents {
-            document.value.serialize(&mut serializer).with_context(|| {
-                format!("writing the document starting at line {}", document.line)
-            })?;
+            document
+                .value
+                .serialize(&mut serializer)
+                .map_err(|source| Error::WritingDocument {
+                    line: document.line,
+                    source,
+                })?;
         }
         drop(serializer);
-        String::from_utf8(text).context("the written YAML is not UTF-8")
+        String::from_utf8(text).map_err(Error::NotUtf8)
     }
 }
 
@@ -95,7 +98,7 @@ impl Document {
         };
         let document = Deserializer::from_str(source)
             .nth(self.index)
-            .context("the document is no longer in the file")?;
+            .ok_or(Error::Gone)?;
         Ok(document.deserialize_map(Without {
             keys: &self.taken,
             target: PhantomData,
@@ -114,7 +117,7 @@ fn line_of(source: &str, index: usize) -> Result<usize> {
     }
     let document = Deserializer::from_str(source)
         .nth(index)
-        .context("a document the parser did not keep")?;
+        .ok_or(Error::NotKept)?;
     let stop = document
         .deserialize_any(Nothing)
         .expect_err("no YAML value is nothing");

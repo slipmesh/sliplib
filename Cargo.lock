@@ -667,6 +667,7 @@ dependencies = [
  "atomic-write-file",
  "serde",
  "tempfile",
+ "thiserror",
  "yaml_serde",
 ]
 

@@ -9,10 +9,11 @@ publish.workspace = true
 description = "Multi-document YAML files read, edited and written for the slipmesh components"
 
 [dependencies]
-anyhow.workspace = true
 atomic-write-file.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 yaml_serde.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 tempfile.workspace = true

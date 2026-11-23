@@ -30,5 +30,5 @@ pub fn write_edits(config_path: &Path, yaml: &MultiDoc) -> Result<()> {
 /// Once it reads.
 pub fn write_text(config_path: &Path, updated: &str) -> Result<()> {
     File::parse(updated).context("the edited slipmesh.yaml does not read back - not written")?;
-    sliplib_yaml::replace_file(config_path, updated)
+    Ok(sliplib_yaml::replace_file(config_path, updated)?)
 }

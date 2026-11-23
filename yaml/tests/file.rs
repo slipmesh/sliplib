@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use serde::Deserialize;
-use sliplib_yaml::{read, read_or_empty, replace_file, write_if_changed};
+use sliplib_yaml::{Error, MultiDoc, read, read_or_empty, replace_file, write_if_changed};
 
 #[test]
 fn a_missing_file_reads_as_empty_and_an_existing_one_as_its_text() {
@@ -17,8 +17,8 @@ fn a_file_that_cannot_be_read_is_an_error_naming_it() {
     let dir = tempfile::tempdir().unwrap();
     let err = read_or_empty(dir.path()).unwrap_err();
     assert!(
-        format!("{err:#}").contains(&dir.path().display().to_string()),
-        "{err:#}"
+        matches!(&err, Error::Reading { path, .. } if path == dir.path()),
+        "{err:?}"
     );
 }
 
@@ -107,7 +107,7 @@ fn a_file_reads_as_the_type_it_holds() {
 fn a_missing_file_is_an_error_naming_it_once() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("node-a.yaml");
-    let err = format!("{:#}", read::<Config>(&path).unwrap_err());
+    let err = chain(read::<Config>(&path).unwrap_err());
     assert_eq!(err.matches(&path.display().to_string()).count(), 1, "{err}");
 }
 
@@ -132,10 +132,81 @@ fn a_wrong_value_is_an_error_naming_the_file_once_its_key_and_line() {
         "interfaces:\n  - name: mesh-a\n    listen_port: abc\n",
     )
     .unwrap();
-    let err = format!("{:#}", read::<Interfaces>(&path).unwrap_err());
+    let err = chain(read::<Interfaces>(&path).unwrap_err());
     assert_eq!(err.matches(&path.display().to_string()).count(), 1, "{err}");
     assert!(
         err.contains("interfaces[0].listen_port: ") && err.contains("at line 3 column 18"),
         "{err}"
+    );
+}
+
+/// As a caller over `anyhow` prints it.
+fn chain(err: Error) -> String {
+    format!("{:#}", anyhow::Error::from(err))
+}
+
+#[test]
+fn a_file_that_is_not_there_is_refused_as_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("node-a.yaml");
+    for err in [
+        read::<Config>(&path).unwrap_err(),
+        MultiDoc::read(&path).err().unwrap(),
+    ] {
+        let Error::Reading { path: read, source } = &err else {
+            panic!("{err:?}");
+        };
+        assert_eq!(read, &path);
+        assert!(
+            matches!(&**source, Error::Io(io) if io.kind() == std::io::ErrorKind::NotFound),
+            "{err:?}"
+        );
+    }
+}
+
+#[test]
+fn a_file_that_is_not_yaml_is_refused_as_such_naming_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("node-a.yaml");
+    std::fs::write(&path, "a: [unterminated\n").unwrap();
+    let err = MultiDoc::read(&path).err().unwrap();
+    assert!(
+        matches!(&err, Error::Reading { path: read, source } if read == &path && matches!(**source, Error::NotYaml(_))),
+        "{err:?}"
+    );
+    assert!(
+        matches!(read::<Config>(&path).unwrap_err(), Error::Reading { source, .. } if matches!(*source, Error::Yaml(_)))
+    );
+}
+
+#[test]
+fn a_file_that_is_not_there_is_not_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("slipmesh.yaml");
+    let err = replace_file(&path, "a: 1\n").unwrap_err();
+    assert!(
+        matches!(&err, Error::Resolving { path: resolved, .. } if resolved == &path),
+        "{err:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_directory_it_cannot_write_is_refused_naming_what_it_could_not_create() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+    let file = dir.path().join("node-a.yaml");
+    let in_a_new_directory = dir.path().join("patches").join("node-a.yaml");
+    let opening = write_if_changed(&file, "a: 1\n").unwrap_err();
+    let creating = write_if_changed(&in_a_new_directory, "a: 1\n").unwrap_err();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(
+        matches!(&opening, Error::Opening { path, .. } if path == &file),
+        "{opening:?}"
+    );
+    assert!(
+        matches!(&creating, Error::Creating { path, .. } if path == &dir.path().join("patches")),
+        "{creating:?}"
     );
 }

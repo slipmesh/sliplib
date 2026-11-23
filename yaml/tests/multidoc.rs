@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use sliplib_yaml::{MultiDoc, Value, join};
+use sliplib_yaml::{Error, MultiDoc, Value, join};
 
 #[test]
 fn documents_keep_their_position_and_line_and_comment_only_ones_are_skipped() {
@@ -33,7 +33,9 @@ fn a_deserialize_error_names_the_field_and_its_line_in_the_file() {
     let file = MultiDoc::parse("a: 1\n---\nmeta: x\nfield: 2\nstray: 3\n").unwrap();
     let mut document = file.documents()[1].clone();
     document.take("meta");
-    let err = format!("{:#}", document.deserialize::<Strict>().unwrap_err());
+    let err = document.deserialize::<Strict>().unwrap_err();
+    assert!(matches!(err, Error::Yaml(_)), "{err:?}");
+    let err = err.to_string();
     assert!(err.contains("stray"), "{err}");
     assert!(err.contains("line 5"), "{err}");
 }
@@ -77,7 +79,10 @@ fn an_edit_shows_in_the_text_with_the_key_order_kept() {
 fn a_file_that_cannot_be_read_is_an_error_naming_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("missing.yaml");
-    let err = format!("{:#}", MultiDoc::read(&path).err().unwrap());
+    let err = format!(
+        "{:#}",
+        anyhow::Error::from(MultiDoc::read(&path).err().unwrap())
+    );
     assert!(err.contains("missing.yaml"), "{err}");
 }
 

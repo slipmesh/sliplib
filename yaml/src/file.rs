@@ -1,20 +1,24 @@
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
+
+use crate::error::{Error, Result};
 
 /// The one document. An error names the file, and the line of a value that does not fit.
 pub fn read<T: DeserializeOwned>(path: &Path) -> Result<T> {
-    parse(path, &text(path)?)
+    reading(path, |text| Ok(yaml_serde::from_str(text)?))
 }
 
-fn text(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
-}
-
-fn parse<T: DeserializeOwned>(path: &Path, text: &str) -> Result<T> {
-    yaml_serde::from_str(text).with_context(|| format!("reading {}", path.display()))
+/// The file's text as `parse` takes it; either failure names the file.
+pub(crate) fn reading<T>(path: &Path, parse: impl FnOnce(&str) -> Result<T>) -> Result<T> {
+    std::fs::read_to_string(path)
+        .map_err(Error::from)
+        .and_then(|text| parse(&text))
+        .map_err(|source| Error::Reading {
+            path: path.to_owned(),
+            source: Box::new(source),
+        })
 }
 
 /// Empty where there is no file; any other failure is an error.
@@ -22,7 +26,10 @@ pub fn read_or_empty(path: &Path) -> Result<String> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+        Err(e) => Err(Error::Reading {
+            path: path.to_owned(),
+            source: Box::new(e.into()),
+        }),
     }
 }
 
@@ -32,7 +39,10 @@ pub fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
         return Ok(false);
     }
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        std::fs::create_dir_all(dir).map_err(|source| Error::Creating {
+            path: dir.to_owned(),
+            source,
+        })?;
     }
     write_atomically(path, content)?;
     Ok(true)
@@ -40,15 +50,23 @@ pub fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
 
 /// Atomically, keeping its permissions and following a symlink.
 pub fn replace_file(path: &Path, content: &str) -> Result<()> {
-    let target =
-        std::fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))?;
+    let target = std::fs::canonicalize(path).map_err(|source| Error::Resolving {
+        path: path.to_owned(),
+        source,
+    })?;
     write_atomically(&target, content)
 }
 
 fn write_atomically(path: &Path, content: &str) -> Result<()> {
-    let mut file = atomic_write_file::AtomicWriteFile::open(path)
-        .with_context(|| format!("opening {} for writing", path.display()))?;
+    let mut file =
+        atomic_write_file::AtomicWriteFile::open(path).map_err(|source| Error::Opening {
+            path: path.to_owned(),
+            source,
+        })?;
     file.write_all(content.as_bytes())
         .and_then(|()| file.commit())
-        .with_context(|| format!("writing {}", path.display()))
+        .map_err(|source| Error::Writing {
+            path: path.to_owned(),
+            source,
+        })
 }
