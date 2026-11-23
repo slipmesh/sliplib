@@ -40,7 +40,7 @@ pub mod network;
 #[cfg(test)]
 mod testing;
 
-pub use block::{ALL, Block, Exclude, Include, NONE, Order, Platform, Rank};
+pub use block::{ALL, Aimed, Block, Exclude, Include, NONE, Order, Platform, Rank};
 pub use check::Invalid;
 pub use file::{
     Aim, AimedDocument, BlockError, Error, File, META_KEY, Place, PlatformDocument, REVISION,

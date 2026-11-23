@@ -194,11 +194,6 @@ fn select(
 }
 
 impl Resolved {
-    /// The nodes of the group `name`, if there is such a group.
-    pub fn group(&self, name: &str) -> Option<&[Name]> {
-        self.groups.get(name).map(Vec::as_slice)
-    }
-
     /// The nodes `selection` reaches, in the order of the network's nodes the groups were
     /// resolved against. `all` is what the word stands for where the selection is written: every
     /// node, or every node of a document's platform. `whose` names the selection in a refusal.
@@ -239,10 +234,7 @@ mod tests {
     }
 
     fn group(yaml: &str, name: &str) -> Vec<String> {
-        resolved(yaml)
-            .unwrap()
-            .group(name)
-            .unwrap()
+        resolved(yaml).unwrap().groups[name]
             .iter()
             .map(Name::to_string)
             .collect()
@@ -386,7 +378,7 @@ mod tests {
             .unwrap()
             .resolve(&nodes)
             .unwrap();
-        assert_eq!(groups.group("odd").unwrap(), &nodes[..1]);
+        assert_eq!(groups.groups["odd"], &nodes[..1]);
     }
 
     #[test]

@@ -105,11 +105,12 @@ pub(crate) fn underlay_mtu(node: &Node) -> u32 {
 /// The largest MTU at which a full-size packet crosses `link` unfragmented.
 fn link_limit(mesh: &Mesh<'_>, link: &Link) -> Result<u32, LinkError> {
     let [a, b] = link.ends.each_ref().map(|end| end.as_str());
-    let ip_header = match link_family(mesh, a, b)? {
+    let ends = [(a, mesh.node(a)?), (b, mesh.node(b)?)];
+    let ip_header = match link_family(ends)? {
         Family::Ipv4 => 20,
         Family::Ipv6 => 40,
     };
-    let uplink = underlay_mtu(mesh.node(a)?).min(underlay_mtu(mesh.node(b)?));
+    let uplink = underlay_mtu(ends[0].1).min(underlay_mtu(ends[1].1));
     let junk = link.kind.obfuscation().s4.map_or(0, u32::from);
     // An underlay the link's bytes fill leaves 0, which `mesh_mtu` refuses as any limit below
     // 1280, as it does the limit of an underlay below its family's least.
@@ -117,15 +118,13 @@ fn link_limit(mesh: &Mesh<'_>, link: &Link) -> Result<u32, LinkError> {
 }
 
 /// The family of the endpoint a link is dialed at: either side's, and the same when both have one.
-fn link_family(mesh: &Mesh<'_>, a: &str, b: &str) -> Result<Family, LinkError> {
-    let family = |name: &str| -> Result<Option<Family>, UnknownNode> {
-        Ok(mesh
-            .node(name)?
-            .underlay()
+fn link_family([(a, a_node), (b, b_node)]: [(&str, &Node); 2]) -> Result<Family, LinkError> {
+    let family = |node: &Node| {
+        node.underlay()
             .and_then(|underlay| underlay.endpoint.as_ref())
-            .map(|endpoint| endpoint.family()))
+            .map(|endpoint| endpoint.family())
     };
-    match (family(a)?, family(b)?) {
+    match (family(a_node), family(b_node)) {
         (Some(x), Some(y)) if x != y => Err(LinkError::FamiliesDiffer(a.to_owned(), b.to_owned())),
         (Some(family), _) | (None, Some(family)) => Ok(family),
         (None, None) => Err(LinkError::NoEndpoint(a.to_owned(), b.to_owned())),

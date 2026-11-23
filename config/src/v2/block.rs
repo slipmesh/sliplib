@@ -155,27 +155,24 @@ pub enum Block {
         #[serde(default)]
         order: Order,
     },
-    Template {
-        platform: Platform,
-        #[serde(default)]
-        include: Include,
-        #[serde(default)]
-        exclude: Exclude,
-        #[serde(default)]
-        order: Order,
-    },
-    Patch {
-        platform: Platform,
-        #[serde(default)]
-        include: Include,
-        #[serde(default)]
-        exclude: Exclude,
-        #[serde(default)]
-        order: Order,
-    },
+    Template(Aimed),
+    Patch(Aimed),
 }
 
 from_a_mapping!(Block);
+
+/// The block of a `template` or a `patch`.
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Aimed {
+    pub platform: Platform,
+    #[serde(default)]
+    pub include: Include,
+    #[serde(default)]
+    pub exclude: Exclude,
+    #[serde(default)]
+    pub order: Order,
+}
 
 impl Block {
     pub fn order(&self) -> Order {
@@ -183,8 +180,8 @@ impl Block {
             Self::Network { order, .. }
             | Self::Groups { order }
             | Self::Platform { order, .. }
-            | Self::Template { order, .. }
-            | Self::Patch { order, .. } => *order,
+            | Self::Template(Aimed { order, .. })
+            | Self::Patch(Aimed { order, .. }) => *order,
         }
     }
 }
@@ -245,12 +242,12 @@ mod tests {
                 "{{kind: {kind}, platform: talos, include: [workers], exclude: [node-c]}}"
             ))
             .unwrap();
-            let (Block::Template {
+            let (Block::Template(Aimed {
                 include, exclude, ..
-            }
-            | Block::Patch {
+            })
+            | Block::Patch(Aimed {
                 include, exclude, ..
-            }) = read
+            })) = read
             else {
                 panic!("{read:?}");
             };
@@ -378,9 +375,9 @@ mod tests {
     fn a_name_yaml_reads_as_a_number_or_a_boolean_is_the_name_written() {
         let yaml = "{kind: patch, platform: talos, include: [7, 1.5], exclude: [true]}";
         for read in [block(yaml).unwrap(), block_from_value(yaml)] {
-            let Block::Patch {
+            let Block::Patch(Aimed {
                 include, exclude, ..
-            } = read
+            }) = read
             else {
                 panic!("{read:?}");
             };
@@ -406,9 +403,9 @@ mod tests {
 
     fn aim(keys: &str) -> (Include, Exclude) {
         match block(&format!("{{kind: patch, platform: talos{keys}}}")).unwrap() {
-            Block::Patch {
+            Block::Patch(Aimed {
                 include, exclude, ..
-            } => (include, exclude),
+            }) => (include, exclude),
             other => panic!("{other:?}"),
         }
     }
