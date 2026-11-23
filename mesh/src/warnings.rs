@@ -1,11 +1,10 @@
-//! What the files do that the tools accept and whoever wrote them should still hear of. Nothing
-//! here refuses a file or changes what a node gets.
+//! What the tools accept and tell of; nothing here refuses a file or changes a config.
 
 use crate::network::Mesh;
 use sliplib_config::TrailerLoss;
 use std::fmt;
 
-/// A link that loses data packets it should deliver, and how.
+/// A link that loses data packets, and how.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Warning {
     link: String,
@@ -14,7 +13,7 @@ pub struct Warning {
 }
 
 impl Warning {
-    /// Whether `node` is an end of the link: a tool run for some nodes warns about their links.
+    /// Whether `node` is an end: a tool run for some nodes tells of their links.
     pub fn concerns(&self, node: &str) -> bool {
         self.ends.iter().any(|end| end == node)
     }
@@ -50,8 +49,7 @@ pub fn warnings(mesh: &Mesh<'_>) -> Vec<Warning> {
 mod tests {
     use super::*;
 
-    /// The links of the example of the specification with its secrets, and `overlay` laid over
-    /// both: what is told of them.
+    /// Of the example's links, `overlay` laid over.
     fn told_of(overlay: &str) -> Vec<Warning> {
         let network = crate::test_support::example(overlay);
         warnings(&network)

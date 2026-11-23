@@ -1,4 +1,4 @@
-//! What is wrong in a network across its tree: what no one key can refuse by itself.
+//! What no one key of a network refuses by itself.
 
 use super::network::{Addressing, Class, LinkKind, Mesh, Network, Node};
 use super::{ClassName, Map, Name, Platform};
@@ -6,16 +6,14 @@ use crate::Range;
 use sliplib_net::Ipv6Net;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-/// The link-local unicast range of IPv6.
 const LINK_LOCAL: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10);
 
-/// The protocol numbers the kernel keeps for its own routes.
+/// The kernel's own.
 const KERNEL_PROTOCOLS: std::ops::RangeInclusive<u8> = 0..=4;
 
-/// The protocol number of the routes to the clients of roadwarriors pools.
+/// The routes to pool clients'.
 const POOL_PROTOCOL: u8 = 200;
 
-/// Why a network that reads key by key is refused.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Invalid {
@@ -106,10 +104,6 @@ pub enum Invalid {
 }
 
 impl Network {
-    /// Refuses what is wrong across the tree, which no one key refuses by itself: names, the
-    /// ends and the ports of the links, the platforms that serve them, the route classes, the
-    /// networks no address can come from, a `node_id` of `0.0.0.0` or one wider than a network it
-    /// is added to, a keepalive that starts at zero.
     pub fn check(&self) -> Result<(), Invalid> {
         check(self)
     }
@@ -136,8 +130,7 @@ fn addressing(addressing: &Addressing) -> Result<(), Invalid> {
     }
 }
 
-/// Refuses a `node_id` with more significant bits than the host part of a network it is added
-/// to holds: then two `node_id`s never give one address, and none gives a host part of zeros.
+/// A `node_id` that fits each network's host part gives distinct addresses, none of host part 0.
 fn node_ids_fit(network: &Network) -> Result<(), Invalid> {
     let addressing = &network.addressing;
     let tunnel = addressing.tunnel.as_ref();
@@ -210,7 +203,6 @@ fn nodes(nodes: &Map<Name, Node>) -> Result<(), Invalid> {
     Ok(())
 }
 
-/// Whether the tool of `platform` serves a link of this type.
 fn serves(platform: Platform, kind: &LinkKind) -> bool {
     match (platform, kind) {
         (Platform::Talos, LinkKind::Wireguard(_) | LinkKind::Amneziawg(_))
@@ -290,7 +282,7 @@ fn classes(classes: &Map<ClassName, Class>) -> Result<(), Invalid> {
     Ok(())
 }
 
-/// Only `amneziawg` takes a range, so only its keepalive can start at 0 without being 0.
+/// Only `amneziawg`'s is a range, which can start at 0 without being 0.
 fn keepalive(mesh: &Mesh) -> Result<(), Invalid> {
     let network = mesh
         .amneziawg
@@ -333,7 +325,7 @@ mod tests {
         ClassName::try_from(text.to_owned()).unwrap()
     }
 
-    /// A node that reads, to be laid into the example under another name.
+    /// To be laid into the example under another name.
     const NODE: &str = "{platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}";
 
     #[test]

@@ -2,7 +2,7 @@
 
 use sliplib_config::Obfuscation;
 
-/// A key or an obfuscation the rendered node needs and the file does not set.
+/// A key or an obfuscation the node needs and the files lack.
 #[derive(Debug)]
 pub struct MissingSecret(pub(crate) String);
 
@@ -14,13 +14,11 @@ impl std::fmt::Display for MissingSecret {
 
 impl std::error::Error for MissingSecret {}
 
-/// The obfuscation fields a link of type `amneziawg` carries once its secrets are minted, each
-/// with the type of its value. One that lacks any of them has not been minted yet: a config
-/// rendered from it would differ from the one rendered after minting. What is looked for and what
-/// minting fills are generated from this one list, so they cannot differ.
+/// The fields a minted `amneziawg` obfuscation carries, with their types. What is looked for and
+/// what minting fills come from this one list.
 macro_rules! minted_fields {
     ($($field:ident: $value:ty),* $(,)?) => {
-        /// The fields `obfuscation` lacks of those a minted one carries, in the list's order.
+        /// In the list's order.
         pub(crate) fn unminted(obfuscation: &Obfuscation) -> Vec<&'static str> {
             let mut lacking = Vec::new();
             $(if obfuscation.$field.is_none() {
@@ -29,15 +27,13 @@ macro_rules! minted_fields {
             lacking
         }
 
-        /// A new value for every minted field.
         #[cfg(feature = "mint")]
         #[derive(Debug)]
         pub(crate) struct Fresh {
             $(pub(crate) $field: $value,)*
         }
 
-        /// Sets each minted field `obfuscation` lacks to its value in `fresh`, and returns the
-        /// fields it set - `None` when `obfuscation` lacked none.
+        /// The fields set, `None` for none.
         #[cfg(feature = "mint")]
         pub(crate) fn fill(obfuscation: &mut Obfuscation, fresh: &Fresh) -> Option<Obfuscation> {
             let mut filled = Obfuscation::default();

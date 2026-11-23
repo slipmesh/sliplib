@@ -1,6 +1,5 @@
-//! `fmt`: the file rewritten in the form every write leaves it in, with no value changed, so that
-//! the reformatting of a hand-written file can be a change of its own and a later edit shows as
-//! that edit alone.
+//! `fmt`: the file in the form every write leaves it, no value changed, so a later edit shows
+//! alone.
 
 use crate::file::{parse_slipmesh, read_text, write_text};
 use anyhow::Result;
@@ -24,8 +23,7 @@ pub fn run(config_path: &Path) -> Result<()> {
         println!("{path}: already in the form slipmesh writes");
         return Ok(());
     }
-    // The one promise of this command, so it is checked on the very text that is then written
-    // rather than taken from the serializer.
+    // Its one promise, checked on the text written.
     anyhow::ensure!(
         holds_the_values_of(&rewritten, &yaml)?,
         "{path}: rewriting it would change a value - not written"

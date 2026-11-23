@@ -1,15 +1,12 @@
-//! The `router` daemon's config, and the part of it the RouterOS side reads: everything the daemon
-//! needs is declared statically - nothing is discovered from the cluster or from the node's own
-//! interfaces.
+//! The `router` daemon's config, which the RouterOS tool reads too. Nothing is discovered.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr};
 
-/// BIRD's own defaults (`min tx 100 ms`, multiplier 5) declare a session dead after ~500 ms.
-/// These links cannot honour that: every mesh interface is an obfuscated WireGuard tunnel,
-/// several of them intercontinental, where a brief stall is normal and a flap costs more than
-/// slow convergence. 300 ms with the default multiplier detects in ~1.5s, against OSPF's 40s.
+/// BIRD's defaults call a session dead after ~500 ms, too short over long tunnels where a stall is
+/// normal and a flap costs more than slow convergence. 300 ms, multiplier 5: ~1.5 s, against
+/// OSPF's 40 s.
 pub const BFD_DEFAULT_MIN_RX_MS: u32 = 300;
 pub const BFD_DEFAULT_MIN_TX_MS: u32 = 300;
 pub const BFD_DEFAULT_MULTIPLIER: u8 = 5;
@@ -24,10 +21,8 @@ fn default_bfd_multiplier() -> u8 {
     BFD_DEFAULT_MULTIPLIER
 }
 
-/// Only what both BIRD and RouterOS accept. BIRD alone also offers `idle tx interval`, `passive`
-/// and packet authentication, and MikroTik has none of the three - stating one here would leave
-/// the two ends of a link configured differently, which is the opposite of what a shared
-/// document is for. Authentication is moot regardless: these packets travel inside WireGuard.
+/// Only what both BIRD and RouterOS take: one end set otherwise would differ from the other. No
+/// authentication: the packets travel inside WireGuard.
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 pub struct BfdSettings {
     #[serde(default = "default_bfd_min_rx_ms")]
@@ -54,25 +49,17 @@ pub struct RouterConfig {
     pub bgp_as: u32,
     #[serde(default)]
     pub bgp_peers: Vec<BgpPeerEntry>,
-    /// Present when the mesh asked for BFD on its OSPF links, absent otherwise. `routeros` reads
-    /// this same field to configure the MikroTik side, which is why it lives here rather than in
-    /// either consumer - and why it carries only the three settings both ends can honour.
+    /// BFD on the OSPF links; the RouterOS tool reads it too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bfd: Option<BfdSettings>,
-    /// Interface-matching entries fed straight into BIRD's own `interface` clause: an exact name,
-    /// a shell-glob pattern (`"mesh-*"`), or a CIDR matching by the interface's address - BIRD
-    /// accepts all three forms in the same list, a name or pattern quoted and a CIDR bare.
+    /// BIRD's `interface` clause: a name, a glob (`"mesh-*"`) or a CIDR of an interface's address.
     #[serde(default)]
     pub ospf_interfaces: Vec<String>,
-    /// Extra interfaces (same grammar as `ospf_interfaces`: exact name, glob, or CIDR) to treat as
-    /// `protocol direct` sources - each one's connected route gets exported over iBGP by the
-    /// existing `RTS_DEVICE` clause, same as `router-lo`'s own loopback already is. Not tied to any
-    /// one purpose (a pod-network bridge is the motivating case) - whoever authors the config
-    /// decides what belongs here.
+    /// As `ospf_interfaces`: `protocol direct` sources, whose connected routes go out over iBGP as
+    /// `router-lo`'s do.
     #[serde(default)]
     pub direct_interfaces: Vec<String>,
-    /// IPv4 CIDRs - any kernel-learned route equal to or inside one of these is re-announced over
-    /// iBGP. IPv4 only: the payload routes the mesh carries are IPv4, over IPv6 iBGP sessions.
+    /// IPv4 CIDRs: a kernel route at or inside one is announced over iBGP.
     #[serde(default)]
     pub learn: Vec<String>,
     #[serde(default)]
@@ -83,23 +70,15 @@ pub struct RouterConfig {
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct NodeIdentity {
-    /// CIDR strings, exactly one IPv4 and exactly one IPv6 entry (see `validate`) - both are used
-    /// simultaneously for different roles (v4: BIRD router id / `krt_prefsrc` / OSPFv3 stub
-    /// network; v6: this node's iBGP session source address), not "any one of these". The prefix
-    /// length can be omitted (defaults to `/32` for v4, `/128` for v6, since these are always
-    /// loopback identities, never networks) - see `parse_loopback_address`.
+    /// One IPv4, BIRD's router id and `krt_prefsrc`, and one IPv6, the iBGP source; a prefix length
+    /// left out is the host's.
     pub loopback_addresses: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct BgpPeerEntry {
     pub name: String,
-    /// A single bare IPv6 address (no prefix length - this isn't a network). Not a list: a
-    /// `protocol bgp` instance in BIRD takes exactly one `local`/`neighbor` address each, so a
-    /// list here would imply failover/multi-address support BIRD's config syntax doesn't have.
-    /// Always IPv6: the iBGP session itself runs over
-    /// IPv6 loopbacks (RFC 8950 extended next hop carries the IPv4 payload prefixes on top of
-    /// that IPv6-only session), same as `node.loopback_addresses`'s v6 entry.
+    /// One bare IPv6 address, as BIRD's `neighbor` takes; RFC 8950 carries IPv4 over the session.
     pub address: String,
 }
 
@@ -119,20 +98,17 @@ pub struct BypassConfig {
     pub exclude: Vec<BypassSourceEntry>,
 }
 
-/// How often the bypass sources are resolved again when the config does not say.
 pub const DEFAULT_BYPASS_REFRESH_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
 fn default_bypass_refresh_interval_secs() -> u64 {
     DEFAULT_BYPASS_REFRESH_INTERVAL_SECS
 }
 
-/// One bypass-prefix source, resolved into concrete CIDRs by the daemon: `asn` via RIPEstat's
-/// announced-prefixes API, `literal` verbatim, `geoip` via RIPEstat's country-resource-list, `dns`
-/// via a live A-record lookup.
+/// Resolved by the daemon: `asn` and `geoip` through RIPEstat, `literal` as written, `dns` by its A
+/// records.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct BypassSourceEntry {
-    /// "asn" | "literal" | "geoip" | "dns" - checked by [`validate`] and when the daemon resolves
-    /// the source, not by the deserializer.
+    /// `asn`, `literal`, `geoip` or `dns`, checked by [`validate`].
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -142,8 +118,7 @@ pub struct BypassSourceEntry {
     pub prefixes: Option<Vec<LabeledPrefix>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub country: Option<String>,
-    /// "dns" only - resolved via a live A-record lookup at resolve time, on the same
-    /// startup/refresh-interval schedule as everything else. Whole list shares `label`.
+    /// `dns` only; the list shares `label`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hostnames: Option<Vec<String>>,
 }
@@ -155,7 +130,6 @@ pub struct LabeledPrefix {
     pub label: Option<String>,
 }
 
-/// What is wrong with an entry of `node.loopback_addresses`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum LoopbackAddressError {
@@ -168,10 +142,7 @@ pub enum LoopbackAddressError {
     },
 }
 
-/// Parses a loopback-identity address: `"<addr>/<prefix>"`, or a bare address (defaults to `/32`
-/// for IPv4, `/128` for IPv6 - the whole point of a loopback identity is that it has no host
-/// bits). Delegates to `sliplib_net::parse` whenever a prefix is present, so it accepts exactly
-/// what every other CIDR in the configs accepts.
+/// `"<addr>/<prefix>"`, or a bare address as the host's `/32` or `/128`.
 pub fn parse_loopback_address(s: &str) -> Result<(IpAddr, u8), LoopbackAddressError> {
     if s.contains('/') {
         let net = sliplib_net::parse(s)?;
@@ -187,7 +158,7 @@ pub fn parse_loopback_address(s: &str) -> Result<(IpAddr, u8), LoopbackAddressEr
     Ok((addr, prefix))
 }
 
-/// What the `router` daemon would refuse a config for, or fail on once it is running.
+/// What the daemon would refuse, or fail on once running.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Invalid {
@@ -234,7 +205,6 @@ pub enum Invalid {
         net: String,
         error: sliplib_net::ParseError,
     },
-    /// A bypass source of `kind` lacks the key `field`.
     #[error("{kind} bypass source requires `{field}`")]
     SourceLacks {
         kind: &'static str,
@@ -244,18 +214,9 @@ pub enum Invalid {
     UnknownSourceKind(String),
 }
 
-/// Pure validation, no I/O: `node.loopback_addresses` has exactly one IPv4 and one IPv6 entry,
-/// every `bgp_peers` name is non-empty/unique and its address is a valid IPv6 address, every
-/// `ospf_interfaces`/ entry is non-empty, every `learn`/`announce[].net` entry is a valid IPv4
-/// CIDR, and every `bypass` entry's `kind` is recognized (with `literal` prefixes validated
-/// eagerly, since that's a local check - `asn`/`geoip`/`dns` are only checked when the daemon
-/// resolves them, since that's genuinely network-dependent).
+/// No I/O: a `literal` source's prefixes are checked, the others' only once resolved.
 pub fn validate(cfg: &RouterConfig) -> Result<(), Invalid> {
-    // AS 0 is reserved and explicitly invalid per RFC 7607 ("Codification of AS 0 Processing") -
-    // BIRD would only surface this once it tries to actually start an iBGP session, well past
-    // where this config's own fail-fast validation should have caught it. Not checking against
-    // the private-use ranges (64512-65534/4200000000-4294967294): this project's own test nodes
-    // use 64512, a legitimate and common choice for an internal-only network like this one.
+    // RFC 7607: BIRD would refuse it only when a session starts. Private-use numbers are taken.
     if cfg.bgp_as == 0 {
         return Err(Invalid::BgpAsZero);
     }
@@ -276,10 +237,7 @@ pub fn validate(cfg: &RouterConfig) -> Result<(), Invalid> {
     }
 
     if let Some(bfd) = &cfg.bfd {
-        // A zero here renders a bird.conf BIRD refuses, which the daemon would only discover
-        // when `birdc configure` fails on the node - long past where a typo in the topology should
-        // have been caught. BIRD's own documentation puts the practical floor at tens of
-        // milliseconds, so this checks for the meaningless value rather than for a good one.
+        // BIRD refuses a zero, and the daemon would learn so only at `birdc configure`.
         if bfd.min_rx_ms == 0 || bfd.min_tx_ms == 0 {
             return Err(Invalid::BfdIntervalZero);
         }
@@ -324,9 +282,7 @@ pub fn validate(cfg: &RouterConfig) -> Result<(), Invalid> {
     }
 
     if let Some(bypass) = &cfg.bypass {
-        // `bypass_refresh_loop` builds `tokio::time::interval(Duration::from_secs(refresh_interval_secs))`
-        // - a zero period panics there per tokio's own documented contract, taking the whole
-        // process down instead of failing here with a clear message.
+        // `tokio::time::interval` panics on a zero period.
         if bypass.refresh_interval_secs == 0 {
             return Err(Invalid::BypassRefreshZero);
         }
@@ -392,8 +348,7 @@ bgp_as: 64512
         assert!(matches!(refusal("multiplier"), Invalid::BfdMultiplierZero));
     }
 
-    /// A zero interval renders a bird.conf BIRD refuses, and the daemon would only find out
-    /// when `birdc configure` fails on the node.
+    /// BIRD refuses a zero interval.
     #[test]
     fn validate_rejects_a_bfd_interval_of_zero() {
         let yaml = format!(

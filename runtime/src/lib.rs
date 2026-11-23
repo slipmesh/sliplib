@@ -1,4 +1,4 @@
-//! What every slipmesh daemon and tool sets up the same way around its own work.
+//! Logging and shutdown, set up alike for every daemon and tool.
 
 #[cfg(feature = "serve")]
 mod serve;
@@ -8,9 +8,8 @@ pub use serve::{Shutdown, serve};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
 
-/// Logs to stdout, filtered by `RUST_LOG`, at INFO without it. No timestamp and no colour: what
-/// collects the output, Talos's service log or the container runtime, stamps every line itself and
-/// stores it as text.
+/// To stdout, by `RUST_LOG`. No timestamp or colour: Talos's service log and the container runtime
+/// stamp each line and store it as text.
 pub fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(filter(std::env::var("RUST_LOG").ok().as_deref()))
@@ -19,8 +18,7 @@ pub fn init_tracing() {
         .init();
 }
 
-/// INFO and above when `RUST_LOG` is unset or empty: Talos starts an extension service with no
-/// environment of its own, and a daemon has to say at least what it is and what it did.
+/// INFO where `RUST_LOG` is unset or empty: Talos starts an extension service with no environment.
 fn filter(rust_log: Option<&str>) -> EnvFilter {
     EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())

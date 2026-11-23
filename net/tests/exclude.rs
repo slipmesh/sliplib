@@ -52,8 +52,7 @@ fn host_bits_count_as_the_network_they_sit_in() {
     );
 }
 
-/// Every subnet of a /28, at every prefix length: what is left plus what was excluded covers the
-/// network once, address by address, with nothing outside it.
+/// Every subnet of a /28: the rest and the excluded cover it once, address by address.
 #[test]
 fn the_rest_and_the_excluded_network_partition_the_network() {
     let whole = net("203.0.113.0/28");

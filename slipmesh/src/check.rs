@@ -1,5 +1,4 @@
-//! `check`: the whole file through the loader every tool reads it with, then every node's configs
-//! computed and checked the way the tool that configures the node would. It writes nothing.
+//! `check`: the file through the loader, then every node's configs as its tool would check them.
 
 use anyhow::{Context, Result};
 use sliplib_config::v2::File;
@@ -14,8 +13,7 @@ fn read(config_path: &Path) -> Result<File> {
         .with_context(|| format!("reading {}", config_path.display()))
 }
 
-/// Every node of `network` in its order, each with what refuses its configs: one refusal says
-/// nothing about the next node, so all of them are checked.
+/// In order, each with its refusal: one says nothing of the next.
 pub fn nodes<'a>(network: &Mesh<'a>) -> Vec<(&'a str, Result<()>)> {
     network
         .network()
@@ -28,9 +26,8 @@ pub fn nodes<'a>(network: &Mesh<'a>) -> Vec<(&'a str, Result<()>)> {
         .collect()
 }
 
-/// Prints `<node>: ok` for each node that passes and every refusal on a line of its own. Where
-/// nothing was refused it then prints every warning, which fails nothing: a warning is counted
-/// from settings that pass the checks.
+/// `<node>: ok` or the refusal, each on a line. Warnings only where nothing was refused: they are
+/// counted from settings that pass.
 pub fn run(config_path: &Path) -> ExitCode {
     let mut passed = ExitCode::SUCCESS;
     let mut refuse = |refusal: anyhow::Error| {

@@ -1,22 +1,18 @@
-//! The one MTU every mesh interface gets: the largest at which a full-size packet, with its
-//! WireGuard and junk overhead, still crosses every link's underlay unfragmented.
-//!
-//! A link's limit is `U - 32 - 8 - IP - S4`. `U` is the smaller uplink MTU of its two nodes, 32 is
-//! WireGuard's own header and tag, 8 the UDP header, `IP` 20 or 40 for the underlay family, and S4
-//! the junk AmneziaWG adds to every data packet. WireGuard pads a packet to a multiple of 16, but
-//! never past the MTU, so a full-size packet carries no padding. A fragmented outer packet takes
-//! TCP in the tunnel down to a few Mbit/s, which is what this guards against.
+//! A link's limit is `U - 32 - 8 - IP - S4`: the smaller underlay MTU, WireGuard's header and tag,
+//! UDP, IPv4 20 or IPv6 40, and the junk on every data packet. WireGuard pads to 16 but never past
+//! the MTU, so a full-size packet has none. A fragmented outer packet takes TCP down to a few
+//! Mbit/s.
 
 use crate::network::{Mesh, UnknownNode};
 use sliplib_config::v2::network::{Family, Link, Node};
 
-/// A node's underlay MTU when the files set none: that of Ethernet.
+/// Ethernet's.
 pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
 
-/// The least MTU IPv6 allows a link (RFC 8200); the mesh carries OSPFv3 over IPv6 link-locals.
+/// RFC 8200: the mesh carries OSPFv3 over IPv6 link-locals.
 pub(crate) const MIN_MESH_MTU: u32 = 1280;
 
-/// Why the mesh has no MTU: every node's interfaces take the same one, so this stops them all.
+/// Every node takes the one MTU, so this stops them all.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum MtuError {
@@ -38,7 +34,6 @@ pub enum MtuError {
     LimitBelowMinimum { link: String, limit: u32 },
 }
 
-/// Why a link has no limit to count.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum LinkError {
@@ -52,9 +47,7 @@ pub enum LinkError {
     NoEndpoint(String, String),
 }
 
-/// The MTU of every mesh interface: the one the files set for the mesh when it fits every link,
-/// else the least link limit. None for a mesh without links, which has no mesh interface to give
-/// it to.
+/// `mesh.mtu` where it fits every link, else the least limit. None without links.
 pub fn mesh_mtu(mesh: &Mesh<'_>) -> Result<Option<u32>, MtuError> {
     let mut least: Option<(u32, &str)> = None;
     for (name, link) in &mesh.network().mesh.links {
@@ -102,7 +95,7 @@ pub(crate) fn underlay_mtu(node: &Node) -> u32 {
         .unwrap_or(DEFAULT_UPLINK_MTU)
 }
 
-/// The largest MTU at which a full-size packet crosses `link` unfragmented.
+/// The largest MTU a full-size packet crosses `link` at unfragmented.
 fn link_limit(mesh: &Mesh<'_>, link: &Link) -> Result<u32, LinkError> {
     let [a, b] = link.ends.each_ref().map(|end| end.as_str());
     let ends = [(a, mesh.node(a)?), (b, mesh.node(b)?)];
@@ -112,12 +105,11 @@ fn link_limit(mesh: &Mesh<'_>, link: &Link) -> Result<u32, LinkError> {
     };
     let uplink = underlay_mtu(ends[0].1).min(underlay_mtu(ends[1].1));
     let junk = link.kind.obfuscation().s4.map_or(0, u32::from);
-    // An underlay the link's bytes fill leaves 0, which `mesh_mtu` refuses as any limit below
-    // 1280, as it does the limit of an underlay below its family's least.
+    // 0 where the link's bytes fill the underlay, refused by `mesh_mtu` as any limit below 1280.
     Ok(uplink.saturating_sub(32 + 8 + ip_header + junk))
 }
 
-/// The family of the endpoint a link is dialed at: either side's, and the same when both have one.
+/// Either end's, the same where both have one.
 fn link_family([(a, a_node), (b, b_node)]: [(&str, &Node); 2]) -> Result<Family, LinkError> {
     let family = |node: &Node| {
         node.underlay()
@@ -136,14 +128,12 @@ mod tests {
     use super::*;
     use crate::test_support::example;
 
-    /// The outer packet as it leaves the node: the inner packet padded to 16 but never past the
-    /// MTU, then the WireGuard header and tag, the junk, UDP and the underlay's IP header.
+    /// Padded to 16 but not past the MTU, with WireGuard's header and tag, the junk, UDP and IP.
     fn outer(inner: u32, mtu: u32, s4: u32, ip: u32) -> u32 {
         inner.div_ceil(16).saturating_mul(16).min(mtu) + 32 + s4 + 8 + ip
     }
 
-    /// A network of `mesh_and_nodes`, its `mesh` and `nodes`, under one `slipmesh:` block, its
-    /// addressing and its AS number.
+    /// `mesh` and `nodes` under a block, an addressing and an AS number.
     fn mesh_of(mesh_and_nodes: &str) -> Mesh<'static> {
         let text = format!(
             "slipmesh: {{kind: network, version: 2, revision: 1}}\naddressing: {{loopback: \
@@ -153,8 +143,7 @@ mod tests {
         crate::test_support::mesh(sliplib_config::v2::File::parse(&text).unwrap())
     }
 
-    /// Two nodes `a` and `b` and the link `a-b` between them: `a` and `b` are their underlay
-    /// entries, `link` the link's keys after its ends, `mesh` keys of `mesh`.
+    /// Nodes `a` and `b`, of these underlay entries, joined by `a-b` with `link`'s keys.
     fn network(a: &str, b: &str, link: &str, mesh: &str) -> Mesh<'static> {
         mesh_of(&format!(
             "mesh: {{interface_prefix: mesh-, links: {{a-b: {{ends: {{a: {{}}, b: {{}}}}, \

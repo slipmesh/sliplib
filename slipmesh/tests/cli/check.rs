@@ -17,8 +17,7 @@ fn names_in(dir: &Path) -> Vec<std::ffi::OsString> {
         .collect()
 }
 
-/// What `check` gives for a file holding `content`, and the file's path. Whatever it gives, it
-/// has left the file as it was and nothing beside it.
+/// And the file's path; the file left as it was, with nothing beside it.
 fn check(content: &str) -> (Ran, String) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("network.yaml");
@@ -29,7 +28,7 @@ fn check(content: &str) -> (Ran, String) {
     (checked, path.display().to_string())
 }
 
-/// The lines of `stderr`, each of which has to name every one of `named` in its place.
+/// Each line naming every one of `named` in its place.
 fn refusals<'a>(stderr: &'a str, named: &[&[&str]]) -> Vec<&'a str> {
     let refusals: Vec<&str> = stderr.lines().collect();
     assert_eq!(refusals.len(), named.len(), "{stderr}");
@@ -60,7 +59,7 @@ fn a_file_that_is_not_there_is_one_refusal_naming_the_path_and_is_not_created() 
     assert!(names_in(dir.path()).is_empty());
 }
 
-/// `check` on `config`, which it has to leave as it was and nothing beside it.
+/// Which it leaves as it was, with nothing beside it.
 fn checked(config: &Config) -> Ran {
     let before = config.text();
     let ran = config.run(&["check"]);

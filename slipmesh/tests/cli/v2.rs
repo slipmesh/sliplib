@@ -210,7 +210,7 @@ fn rekey_of_an_unknown_node_is_refused_naming_the_nodes_and_writes_nothing() {
     assert_eq!(config.text(), before);
 }
 
-/// The link in force of `name` in the file, its obfuscation as the loader lays it.
+/// As the loader lays it.
 fn obfuscation_in_force(config: &Config, name: &str) -> sliplib_config::Obfuscation {
     let files = File::parse(&config.text()).unwrap();
     match &files.network().mesh.links[name].kind {

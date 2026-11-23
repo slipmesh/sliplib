@@ -1,14 +1,5 @@
-//! Every edit made to `slipmesh.yaml`: minted secrets and a node's new key written into the
-//! fields they belong to, and `mesh.interface_prefix`'s reference value where the files leave it
-//! out.
-//!
-//! Written, a minted value is the operator's like any other: the next run mints nothing, and
-//! deleting it mints a new identity for that node or link, and for every peer that refers to it.
-//! Only what the run generated is written - a field set on the link or on its type is never copied
-//! down, and neither are the switches that are never generated.
-//!
-//! An edit changes one document's values. The file is written back from the values, so its
-//! comments are not kept.
+//! Every edit to `slipmesh.yaml`. Only what a run generated is written, never a field copied down
+//! from the link's type. Written back from values, the file keeps no comments.
 
 use anyhow::{Context, Result};
 use sliplib_config::Obfuscation;
@@ -29,8 +20,7 @@ pub fn record(yaml: &mut MultiDoc, files: &File, minted: &Minted) -> Result<()> 
         set_node_key(yaml, files, name.as_str(), key)?;
     }
     let mesh = document(yaml, files.network_document())?.get_mut("mesh");
-    // The fields of the type's own obfuscation, which a link that writes `null` there goes
-    // without.
+    // Those a link writing `null` there goes without.
     let of_the_type: Vec<Value> = mesh
         .as_deref()
         .and_then(|mesh| mesh.get("amneziawg"))
@@ -49,7 +39,7 @@ pub fn record(yaml: &mut MultiDoc, files: &File, minted: &Minted) -> Result<()> 
             .get_index(*link)
             .context("no link at that position")?;
         let name = name.as_str();
-        // Only a link of type `amneziawg` is minted for, under the block of its type.
+        // Only `amneziawg` is minted for, under its block.
         let entry = named(links.as_deref_mut(), name)
             .and_then(|link| link.get_mut("amneziawg"))
             .with_context(|| format!("the link {name} is not in the network document"))?;
@@ -58,7 +48,6 @@ pub fn record(yaml: &mut MultiDoc, files: &File, minted: &Minted) -> Result<()> 
     Ok(())
 }
 
-/// Sets the key of `node` in `yaml`, the `slipmesh.yaml` `files` was read from.
 pub fn set_node_key(yaml: &mut MultiDoc, files: &File, node: &str, key: &PrivateKey) -> Result<()> {
     let nodes = document(yaml, files.network_document())?.get_mut("nodes");
     let entry = named(nodes, node)
@@ -69,18 +58,16 @@ pub fn set_node_key(yaml: &mut MultiDoc, files: &File, node: &str, key: &Private
     set(&mut entry["wireguard"], "private_key", key.expose().into())
 }
 
-/// Writes `mesh.interface_prefix`'s reference value in the network document of `yaml`, the
-/// `slipmesh.yaml` `files` was read from. Indexing inserts `mesh` where it is missing, and panics
-/// on none: a `mesh` that is there is a mapping, or the file would not have parsed.
+/// Indexing inserts a missing `mesh` and panics on none: one that is there is a mapping, or the
+/// file would not have parsed.
 pub fn write_interface_prefix(yaml: &mut MultiDoc, files: &File) -> Result<()> {
     let network = document(yaml, files.network_document())?;
     network["mesh"]["interface_prefix"] = InterfacePrefix::REFERENCE.into();
     Ok(())
 }
 
-/// Writes the minted fields into `owner`'s `obfuscation`. Where it is written `null`, which takes
-/// away every field laid under it, each of `laid_under` not minted is written `null` too, so that
-/// minting brings back none of them.
+/// Where `obfuscation` is written `null`, each of `laid_under` not minted is written `null` too, so
+/// minting brings none back.
 fn write_obfuscation(
     owner: &mut Value,
     generated: &Obfuscation,
@@ -108,8 +95,7 @@ fn write_obfuscation(
     Ok(())
 }
 
-/// The entry of `mapping` whose key reads as `name`, as the loader reads it: a name YAML reads as
-/// a number, `7`, stands under a key that is one.
+/// As the loader reads keys: a name YAML reads as a number stands under a key that is one.
 fn named<'a>(mapping: Option<&'a mut Value>, name: &str) -> Option<&'a mut Value> {
     mapping?
         .as_mapping_mut()?
@@ -140,7 +126,7 @@ mod tests {
 
     const NINE: [&str; 9] = ["jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"];
 
-    /// One run: read, mint, write down what was minted.
+    /// Read, mint, write.
     fn run(raw: &str) -> String {
         let mut yaml = MultiDoc::parse(raw).unwrap();
         let files = File::read(&yaml).unwrap();
@@ -158,8 +144,7 @@ mod tests {
             .collect()
     }
 
-    /// Whether everything `part` holds is in `whole` as well: its keys with their values, its
-    /// items in their places.
+    /// Its keys with their values, its items in their places.
     fn within(part: &Value, whole: &Value) -> bool {
         match (part, whole) {
             (Value::Mapping(part), Value::Mapping(whole)) => part
@@ -172,11 +157,10 @@ mod tests {
         }
     }
 
-    /// The example of the specification with nothing minted.
+    /// Nothing minted.
     const EXAMPLE: &str = include_str!("../../docs/example/mesh.yaml");
 
-    /// The example with a node and a link whose names YAML reads as numbers: they
-    /// stand under keys that are numbers.
+    /// With a node and a link whose names YAML reads as numbers.
     fn numbered() -> String {
         format!(
             "{}  7: {{platform: talos, node_id: 0.0.0.7, underlay: {{wan: {{}}}}}}\n",
@@ -209,7 +193,7 @@ mod tests {
         assert!(node["wireguard"]["private_key"].is_string());
     }
 
-    /// The keys of the obfuscation the link `link` of `raw` writes, once minted.
+    /// Once minted.
     fn written_under(raw: &str, link: &str) -> Vec<String> {
         let written: Value = sliplib_yaml::from_str(&run(raw)).unwrap();
         written["mesh"]["links"][link]["amneziawg"]["obfuscation"]

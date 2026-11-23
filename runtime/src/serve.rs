@@ -4,14 +4,9 @@ use std::time::Duration;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tokio_util::sync::CancellationToken;
 
-/// Runs `work` until it returns, and asks it to stop on SIGTERM or SIGINT through the
-/// [`Shutdown`] it is given. Work still running `shutdown_timeout` after that request is dropped
-/// and `serve` fails, so the timeout has to end before whatever sent the signal gives up and sends
-/// SIGKILL.
-///
-/// The handlers are installed before `work` starts. A failed `work` is logged as `name` with its
-/// whole chain, `{:#}`: the log line is all an operator sees of it, and `anyhow`'s plain `Display`
-/// is only the outermost context.
+/// Asks `work` to stop on SIGTERM or SIGINT, and drops it and fails `shutdown_timeout` later: keep
+/// that below the sender's wait before SIGKILL. A failure is logged with `{:#}`, its whole chain:
+/// plain `Display` is only the outermost context.
 pub async fn serve<W, Fut>(
     name: &'static str,
     shutdown_timeout: Duration,
@@ -21,8 +16,7 @@ where
     W: FnOnce(Shutdown) -> Fut + Send + 'static,
     Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
 {
-    // `Toplevel::new` spawns at once, so on a multi-threaded runtime `work` could otherwise start
-    // before `catch_signals` has installed the handlers.
+    // `Toplevel::new` spawns at once: `work` could start before the handlers are in.
     let signals_caught = CancellationToken::new();
     let start_work = signals_caught.clone();
     let toplevel = Toplevel::new(async move |toplevel: &mut SubsystemHandle| {
@@ -44,12 +38,11 @@ where
         .map_err(Into::into)
 }
 
-/// The stop request [`serve`] passes to its work.
 #[derive(Clone)]
 pub struct Shutdown(CancellationToken);
 
 impl Shutdown {
-    /// Completes once a stop is requested, at once if it already has been.
+    /// At once if already requested.
     pub async fn requested(&self) {
         self.0.cancelled().await;
     }

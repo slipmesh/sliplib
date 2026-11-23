@@ -1,5 +1,4 @@
-//! Every read, edit and write of a YAML file the slipmesh components do. It knows YAML and files,
-//! not what the documents mean: a caller brings its own types.
+//! YAML files read, edited and written; what the documents mean is the caller's.
 
 mod file;
 mod merge;

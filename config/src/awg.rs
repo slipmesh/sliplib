@@ -14,25 +14,17 @@ pub struct AwgConfig {
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct InterfaceEntry {
-    /// Valid Linux interface name (`IFNAMSIZ` is 16 bytes including the NUL terminator, so 15
-    /// usable bytes) - no other naming convention required: the daemon does not tell its own
-    /// interfaces by a name prefix.
+    /// At most 15 bytes: `IFNAMSIZ` is 16 with the NUL.
     pub name: String,
     pub listen_port: u16,
-    /// CIDR strings, IPv4 and IPv6 freely mixed, any count of either.
+    /// CIDRs of either family.
     #[serde(default)]
     pub addresses: Vec<String>,
-    /// Base64 X25519 private key. Always supplied here - the daemon never generates or persists
-    /// a key itself; whoever renders the machine config is responsible for
-    /// giving a node its own per-interface key, or the same key across every node's config when a
-    /// single shared identity is needed (e.g. so roaming clients see one consistent server
-    /// identity regardless of which node they connect to).
+    /// The daemon generates and keeps none.
     pub private_key: PrivateKey,
     #[serde(default)]
     pub obfuscation: Obfuscation,
-    /// The interface's MTU. Unset leaves it as it is: the kernel's default for a new interface. The
-    /// generator sets one MTU on every mesh interface, low enough that a full-size packet with
-    /// its WireGuard and junk overhead still fits the underlay unfragmented.
+    /// Unset leaves the kernel's default for a new interface.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mtu: Option<u32>,
     #[serde(default)]
@@ -50,37 +42,29 @@ pub struct PeerEntry {
     /// `None`: `0.0.0.0/0` and `::/0`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_ips: Option<Vec<String>>,
-    /// Seconds without traffic after which this node sends the peer a packet, so that a NAT on
-    /// the way keeps its mapping: a number, or a range the kernel module draws an interval from
-    /// each time it sets the timer. It counts only for a peer with an `endpoint`, which this node
-    /// dials; `0` sends none. What a peer ends up with, set or unset, is what
-    /// [`InterfaceEntry::keepalive_of`] gives.
+    /// Seconds, or a range the module draws from at every timer; `0` sends none. What counts is
+    /// [`InterfaceEntry::keepalive_of`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persistent_keepalive: Option<Range<u16>>,
 }
 
-/// The keepalive of a dialed peer whose entry sets none, on an interface that sets nothing of the
-/// obfuscation: the interval WireGuard's own tools suggest behind a NAT.
+/// Of a dialed peer that sets none, on a plain interface: what WireGuard's tools suggest behind
+/// NAT.
 pub const PLAIN_KEEPALIVE: Range<u16> = Range::constant(25, 25);
 
-/// The same on an interface that sets any of the obfuscation: around that interval, drawn anew at
-/// every timer, so that the keepalives are no clock to tell the tunnel by.
+/// On an obfuscated interface: drawn anew at every timer, so they are no clock to tell it by.
 pub const OBFUSCATED_KEEPALIVE: Range<u16> = Range::constant(20, 30);
 
-/// The keepalive of a peer that is sent none.
 pub const NO_KEEPALIVE: Range<u16> = Range::constant(0, 0);
 
 impl InterfaceEntry {
-    /// Whether the interface sets nothing of the obfuscation.
+    /// No field of the obfuscation set.
     pub fn is_plain(&self) -> bool {
         self.obfuscation == Obfuscation::default()
     }
 
-    /// The keepalive of `peer`, one of this interface's. A peer without an `endpoint` is only
-    /// waited for and is sent none, whatever its entry sets. A dialed one has its own, or
-    /// without one the default of the interface: [`PLAIN_KEEPALIVE`] where it is plain,
-    /// [`OBFUSCATED_KEEPALIVE`] where it is not. Whoever writes a config leaves out a keepalive
-    /// that does not change what this gives.
+    /// None for a peer without an `endpoint`; else its own, or [`PLAIN_KEEPALIVE`] or
+    /// [`OBFUSCATED_KEEPALIVE`].
     pub fn keepalive_of(&self, peer: &PeerEntry) -> Range<u16> {
         if peer.endpoint.is_none() {
             return NO_KEEPALIVE;
@@ -93,7 +77,7 @@ impl InterfaceEntry {
     }
 }
 
-/// What a daemon would refuse an `awg` config for, or fail on once it is converging the node.
+/// What the daemon would refuse, or fail on while converging the node.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Invalid {
@@ -139,9 +123,6 @@ pub enum Invalid {
     },
 }
 
-/// Pure validation, no I/O: interface names are non-empty, fit `IFNAMSIZ`, and are unique;
-/// every `addresses`/`allowed_ips` entry is a parseable CIDR (either family); a peer's keepalive
-/// range starts at 1 or above.
 pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
     let mut seen_names = HashSet::new();
     for iface in &cfg.interfaces {
@@ -164,8 +145,7 @@ pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
             carries_ipv6 |= net.addr().is_ipv6();
         }
         if let Some(mtu) = iface.mtu {
-            // The smallest MTU each family allows a link (RFC 8200, RFC 791); the kernel refuses
-            // less, and only once the daemon is already converging the node.
+            // RFC 8200, RFC 791: the kernel refuses less, once the daemon is converging.
             let floor = if carries_ipv6 { 1280 } else { 68 };
             if mtu < floor {
                 return Err(Invalid::MtuTooSmall {
@@ -183,8 +163,7 @@ pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
                     public_key: peer.public_key.clone(),
                 });
             }
-            // The module draws the interval out of the range as written, and a draw of 0 sends
-            // a packet at once and again at every re-arm.
+            // The module draws as written: 0 sends at once and at every re-arm.
             if let Some(range) = peer.persistent_keepalive
                 && range.starts_at_zero()
             {

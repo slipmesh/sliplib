@@ -1,9 +1,7 @@
-//! `slipmesh.yaml` in format version 2, as `docs/slipmesh-yaml.md` describes it: every tool reads
-//! it here.
+//! `slipmesh.yaml` of format version 2, as `docs/slipmesh-yaml.md` describes it.
 
-/// Implements `Deserialize` for `$type`, whose `#[serde(remote = "Self")]` derive gives the reading
-/// of its keys, so that it is read from a mapping alone. serde reads an internally tagged enum
-/// through a buffer that takes a list as well, by position, and the format writes none as one.
+/// `Deserialize` from a mapping alone, over a `#[serde(remote = "Self")]` derive: serde reads an
+/// internally tagged enum from a list too, by position.
 macro_rules! from_a_mapping {
     ($type:ty) => {
         impl<'de> serde::Deserialize<'de> for $type {
@@ -55,12 +53,11 @@ use std::fmt;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-/// What is named, by its name, in the order written: the order reaches the nodes' configs.
+/// In the order written, which reaches the nodes' configs.
 pub type Map<K, V> = indexmap::IndexMap<K, V>;
 
-/// Reads a mapping into a [`Map`], an entry written `null` read as the entry left out, and refusing
-/// a key that stands twice. YAML reads `1.0` and `1`, or `True` and `true`, as one value: a mapping
-/// can hold one name under two spellings, and the later entry would replace the earlier.
+/// An entry written `null` is left out, and a key twice refused: YAML reads `1.0` and `1`, or `True`
+/// and `true`, as one, and the later would replace the earlier.
 pub(crate) fn unique_keys<'de, D, K, V>(deserializer: D) -> Result<Map<K, V>, D::Error>
 where
     D: Deserializer<'de>,
@@ -99,7 +96,7 @@ where
     deserializer.deserialize_map(Entries(PhantomData))
 }
 
-/// A key written with `null` reads as the key left out.
+/// `null` reads as the key left out.
 pub(crate) fn absent_when_null<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
@@ -108,7 +105,7 @@ where
     Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
-/// A [`Map`] read by [`unique_keys`], for a field that also takes `null` as the map left out.
+/// Through [`unique_keys`], for a field that also takes `null` as left out.
 pub(crate) struct UniqueKeys<K, V>(pub Map<K, V>);
 
 impl<'de, K, V> Deserialize<'de> for UniqueKeys<K, V>

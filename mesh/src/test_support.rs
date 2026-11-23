@@ -1,9 +1,8 @@
-//! What the tests share: an obfuscation with every minted field, and the example of the
-//! specification.
+//! The tests' minted obfuscation, and the specification's example.
 
 use sliplib_config::Obfuscation;
 
-/// Every field a minted obfuscation carries, at values the kernel module accepts.
+/// At values the module accepts.
 pub fn minted_obfuscation() -> Obfuscation {
     Obfuscation {
         jc: Some(4),
@@ -19,12 +18,10 @@ pub fn minted_obfuscation() -> Obfuscation {
     }
 }
 
-/// The network of the specification's example.
 pub const EXAMPLE_MESH: &str = include_str!("../../docs/example/mesh.yaml");
-/// The secrets of the specification's example, laid over its network.
 pub const EXAMPLE_SECRETS: &str = include_str!("../../docs/example/secrets.yaml");
 
-/// `layers` laid over each other in order, as the files of version 2 are, read as one file.
+/// In order, as one file.
 pub fn laid(layers: &[&str]) -> sliplib_config::v2::File {
     let tree = layers
         .iter()
@@ -34,13 +31,12 @@ pub fn laid(layers: &[&str]) -> sliplib_config::v2::File {
     sliplib_config::v2::File::parse(&sliplib_yaml::to_string(&tree).unwrap()).unwrap()
 }
 
-/// The example of the specification, its secrets laid over its mesh as the two files are read, and
-/// `overlay` over both.
+/// The secrets over the mesh, `overlay` over both.
 pub fn example_files(overlay: &str) -> sliplib_config::v2::File {
     laid(&[EXAMPLE_MESH, EXAMPLE_SECRETS, overlay])
 }
 
-/// A node of `talos` without a key, to be laid on no link.
+/// Keyless, to be laid on no link.
 pub const NODE_D: &str = "{platform: talos, node_id: 0.0.0.5, underlay: {wan: {}}}";
 
 /// [`example_files`] as a mesh.

@@ -24,7 +24,7 @@ pub fn slipmesh() -> Command {
     Command::new(env!("CARGO_BIN_EXE_slipmesh"))
 }
 
-/// A `slipmesh.yaml` in a directory of its own, gone with the value.
+/// In a directory of its own, gone with the value.
 pub struct Config {
     _dir: tempfile::TempDir,
     pub path: PathBuf,
@@ -42,7 +42,6 @@ impl Config {
         std::fs::read_to_string(&self.path).unwrap()
     }
 
-    /// Every document of the file, as its value.
     pub fn documents(&self) -> Vec<Value> {
         MultiDoc::parse(&self.text())
             .unwrap()
@@ -52,7 +51,7 @@ impl Config {
             .collect()
     }
 
-    /// `slipmesh <command>` on the file, its path given as the last argument.
+    /// The path given last.
     pub fn run(&self, command: &[&str]) -> Ran {
         slipmesh()
             .args(command)
@@ -64,32 +63,32 @@ impl Config {
     }
 }
 
-/// `slipmesh mint` on the file, which has to pass.
+/// Which has to pass.
 pub fn mint(config: &Config) {
     let ran = config.run(&["mint"]);
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
 }
 
-/// The mesh of the example, with none of its secrets written.
+/// No secret written.
 pub const MESH: &str = include_str!("../../../docs/example/mesh.yaml");
-/// The documents of `talos` of the example, and its groups.
+/// And the groups.
 pub const TALOS: &str = include_str!("../../../docs/example/talos.yaml");
 
-/// Whether `text` names line `line`: the number whole, not the start of a longer one.
+/// The number whole, not the start of a longer one.
 pub fn names_line(text: &str, line: usize) -> bool {
     let named = format!("line {line}");
     text.match_indices(&named)
         .any(|(at, _)| !text[at + named.len()..].starts_with(|c: char| c.is_ascii_digit()))
 }
 
-/// The example in one file, minted.
+/// In one file, minted.
 pub fn minted() -> Config {
     let config = Config::holding(&format!("{MESH}---\n{TALOS}"));
     mint(&config);
     config
 }
 
-/// The file with `edit` made to its first document, the network.
+/// To the network document.
 pub fn edited(config: &Config, edit: impl FnOnce(&mut Value)) {
     let mut yaml = MultiDoc::parse(&config.text()).unwrap();
     edit(yaml.document_mut(0).unwrap());
