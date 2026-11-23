@@ -612,6 +612,7 @@ dependencies = [
  "sliplib-net",
  "sliplib-secrets",
  "sliplib-yaml",
+ "tempfile",
  "thiserror",
 ]
 

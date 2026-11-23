@@ -16,3 +16,6 @@ sliplib-net.workspace = true
 sliplib-secrets.workspace = true
 sliplib-yaml.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

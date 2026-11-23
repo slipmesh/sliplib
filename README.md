@@ -187,8 +187,9 @@ A cause it names itself is a field, and one of its own line is its `source`, nev
 chain prints the whole message, each part once.
 
 - `v2`: [format version 2](docs/slipmesh-yaml.md).
-  - `File` (`parse`, `read`) refuses what its specification has the loader refuse, as `v2::Error`;
-    a file of version 1 as `VersionOne`, naming the conversion document.
+  - `File` (`open`, `parse`, `read`) refuses what its specification has the loader refuse, as
+    `v2::Error`; a file of version 1 as `VersionOne`, naming the conversion document. A refusal of
+    `open` names the file.
   - `network()` gives what is in force under each node's `routing` and in each link's block.
   - A node gives its `underlay` and `private_key`; a `LinkKind` its `port`, `obfuscation` (empty
     on `wireguard`) and `persistent_keepalive`.
