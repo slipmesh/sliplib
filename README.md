@@ -185,7 +185,7 @@ alone, such as its metrics listener, is its platform's tool's.
 
 Each check and the loader returns an error of its own, one variant per refusal: `v2::Error`,
 `v2::Invalid`, `v2::NameError`, those of `v2::groups` and `v2::network`, `awg::Invalid`,
-`router::Invalid`, `LoopbackAddressError` and `ObfuscationError`. A variant's text is one line.
+`router::Invalid`, `router::InterfacePatternError` and `ObfuscationError`. A variant's text is one line.
 A cause it names itself is a field, and one of its own line is its `source`, never both: the whole
 chain prints the whole message, each part once.
 
