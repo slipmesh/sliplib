@@ -990,6 +990,31 @@ mod tests {
     }
 
     #[test]
+    fn a_tagged_kind_or_platform_is_refused() {
+        let newer = network_edited("{kind: !network, version: 3, revision: 1}", |_| ());
+        let network = network("{}");
+        for documents in [
+            vec![newer.as_str()],
+            vec![
+                network.as_str(),
+                "slipmesh:\n  kind: platform\n  platform: !talos\n",
+            ],
+        ] {
+            let refusal = refusal(&documents);
+            assert!(
+                matches!(
+                    refusal,
+                    Error::Block {
+                        source: BlockError::Malformed(_),
+                        ..
+                    }
+                ),
+                "{refusal:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_document_reads_beside_top_level_keys_that_are_not_strings() {
         let network = network("{}");
         for other in ["5: x\n", "? [a, b]\n: c\n"] {
