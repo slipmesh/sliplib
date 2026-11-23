@@ -43,12 +43,12 @@ pub fn example_files(overlay: &str) -> sliplib_config::v2::File {
 /// A node of `talos` without a key, to be laid on no link.
 pub const NODE_D: &str = "{platform: talos, node_id: 0.0.0.5, underlay: {wan: {}}}";
 
-/// [`example_files`] as the mesh the configs are computed from.
+/// [`example_files`] as a mesh.
 pub fn example(overlay: &str) -> crate::Mesh<'static> {
     mesh(example_files(overlay))
 }
 
-/// Leaked, so that a test holds the mesh alone.
+/// Leaked: a test holds the mesh alone.
 pub fn mesh(files: sliplib_config::v2::File) -> crate::Mesh<'static> {
     crate::Mesh::of(Box::leak(Box::new(files))).unwrap()
 }

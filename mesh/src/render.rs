@@ -227,7 +227,7 @@ pub struct NodeConfigs {
     pub router: RouterConfig,
 }
 
-/// `host`'s configs, each checked the way the node would check it.
+/// Each checked as its node would.
 pub fn node_configs(mesh: &Mesh<'_>, host: &str) -> std::result::Result<NodeConfigs, Error> {
     let node = || host.to_owned();
     // Refused as the `awg` config, computed first, refuses a node it does not know.

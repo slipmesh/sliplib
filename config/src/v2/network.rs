@@ -166,7 +166,7 @@ pub struct Node {
 }
 
 impl Node {
-    /// The one entry the loader leaves.
+    /// The loader leaves one.
     pub fn underlay(&self) -> Option<&Underlay> {
         self.underlay.values().next()
     }

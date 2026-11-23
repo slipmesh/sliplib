@@ -16,8 +16,7 @@ use sliplib_mesh::mint::Minted;
 use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{Mapping, MultiDoc, Value};
 
-/// Writes every value of `minted` into its field of `yaml`, the `slipmesh.yaml` `files` were read
-/// from: `minted` names nodes and links by their positions in the network.
+/// Into the `yaml` `files` were read from; `minted` names nodes and links by position.
 pub fn record(yaml: &mut MultiDoc, files: &File, minted: &Minted) -> Result<()> {
     let network = files.network();
     for (node, key) in &minted.node_keys {

@@ -1,11 +1,9 @@
-//! The loader's network, as the configs are computed from it.
-
 use crate::addressing;
 use sliplib_config::v2::File;
 use sliplib_config::v2::network::{Network, Node};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-/// Why files that read give no mesh to compute from.
+/// Why files that read give no mesh.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -13,38 +11,37 @@ pub enum Error {
     NoInterfacePrefix,
 }
 
-/// A name that is not one of the network's nodes.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error("unknown node {0:?}")]
 pub struct UnknownNode(pub String);
 
-/// How the files name a node's private key, under the node.
+/// Under the node.
 pub const PRIVATE_KEY: &str = "wireguard.private_key";
 
-/// Where the files hold the key of `node`, as a message names it.
+/// Its path in the files.
 pub fn node_key(node: &str) -> String {
     format!("nodes.{node}.{PRIVATE_KEY}")
 }
 
-/// Where the files hold the obfuscation of `link`, as a message names it.
+/// Its path in the files.
 pub fn link_obfuscation(link: &str) -> String {
     format!("mesh.links.{link}.amneziawg.obfuscation")
 }
 
-/// The loader's network with its interface prefix, which every config needs.
+/// The loader's network and its interface prefix.
 #[derive(Debug, Clone, Copy)]
 pub struct Mesh<'a> {
     network: &'a Network,
     interface_prefix: &'a str,
 }
 
-/// The addresses a node's `node_id` gives it.
+/// What a node's `node_id` gives it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Addresses {
     pub loopback: (Ipv4Addr, Ipv6Addr),
     /// Of every link's interface on the node.
     pub link_local: Ipv6Addr,
-    /// Of every link's interface on the node, where the network gives links one.
+    /// Of every link's interface, where the network gives links one.
     pub tunnel_ipv4: Option<Ipv4Addr>,
 }
 
@@ -87,8 +84,7 @@ impl<'a> Mesh<'a> {
             .any(|link| link.ends.iter().any(|end| end.as_str() == node))
     }
 
-    /// The loader leaves every `node_id` fitting each network it is added to, and not `0.0.0.0`:
-    /// the addresses are distinct, and none has a host part of zeros.
+    /// Distinct, none with a host part of zeros: the loader refuses a `node_id` that does not fit.
     pub fn addresses(&self, node: &Node) -> Addresses {
         let addressing = &self.network.addressing;
         let (ipv4, ipv6) = (addressing.loopback.ipv4.0, addressing.loopback.ipv6.0);
@@ -110,8 +106,8 @@ impl<'a> Mesh<'a> {
         }
     }
 
-    /// The node's list, with the links' pattern appended unless listed, where the links carry
-    /// IPv4: then, and only then, they are announced.
+    /// With the links' pattern appended unless listed, where the links carry IPv4: that announces
+    /// them.
     pub fn direct_interfaces(&self, node: &Node) -> Vec<String> {
         let mut list = node.routing.direct_interfaces.clone();
         let tunnel = self.network.addressing.tunnel.as_ref();

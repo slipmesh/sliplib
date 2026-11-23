@@ -193,15 +193,15 @@ the whole message, each part once.
   document that converts them. `missing_reference_values` lists the required keys the files lack
   that `slipmesh mint` writes, and `network_document` says where the network stands in the file, for
   a write. It gives the `network` with what is in force for each node and each link written where
-  they hold their own: a node's `routing`, a link's block of its type. A node gives its one
-  `underlay` entry and its `private_key`; a link's `LinkKind` its `port`, its `obfuscation`, empty
-  on `wireguard`, and its `persistent_keepalive`. The `template` and `patch` documents come with
-  their `Aim`: the nodes each reaches, and its rank among those that reach one node
-  (`templates_for`, `patches_for`), as an `AimedDocument`; a `platform` document as a
-  `PlatformDocument` (`platform`). The body is its platform's tool's: `read` gives it as the tool's
-  type, a refusal naming the document and the line, and a template or patch also gives its `value`.
-  This release reads one `network` and one `groups` document, and refuses a second, which the format
-  lays over the first, until the tools read several files.
+  they hold their own: a node's `routing`, a link's block of its type. A node gives its `underlay`
+  and `private_key`, a `LinkKind` its `port`, `obfuscation` (empty on `wireguard`) and
+  `persistent_keepalive`. The `template` and `patch` documents come with their `Aim`: the nodes each
+  reaches, and its rank among those that reach one node (`templates_for`, `patches_for`), as an
+  `AimedDocument`; a `platform` document as a `PlatformDocument` (`platform`). The body is its
+  platform's tool's: `read` gives it as the tool's type, a refusal naming the document and the line,
+  and a template or patch also gives its `value`. This release reads one `network` and one `groups`
+  document, and refuses a second, which the format lays over the first, until the tools read several
+  files.
 - `awg`: `AwgConfig` with its interfaces and peers, and `validate`. A peer's `persistent_keepalive`
   is a number of seconds or a range of them. `InterfaceEntry::keepalive_of` gives what a peer ends
   up with: none for a peer without an `endpoint`, which is only waited for; for a dialed one its
@@ -227,16 +227,15 @@ What a node's daemons are configured with, computed from the file `sliplib-confi
 every tool that configures a node of any platform.
 
 A refusal is a `render::Error`, which names the node and which of its configs it is about, with its
-cause as its `source`, or an `mtu::MtuError`. Files that read and give no network to compute from
-are refused as `network::Error`; `sliplib-config`'s refuses those that do not read. `Mesh::node`
-refuses a name the network does not hold as `network::UnknownNode`.
+cause as its `source`, or an `mtu::MtuError`. Files that read but give no mesh are refused as
+`network::Error`; `sliplib-config`'s refuses those that do not read. `Mesh::node` refuses an unknown
+name as `network::UnknownNode`.
 
 - `Mesh`, what the configs are computed from: the loader's network (`network()`) and its interface
-  prefix. `Mesh::of` gives it for a `v2::File`, refusing one without `mesh.interface_prefix`. It
-  derives what a node's `node_id` gives it (`addresses`: the loopbacks, the link-local and the
-  tunnel IPv4) and its `direct_interfaces`, with the links' pattern appended unless listed, where
-  the links carry IPv4. `network::node_key` and `network::link_obfuscation` name where the files
-  hold a node's key and a link's obfuscation.
+  prefix. `Mesh::of` refuses a `v2::File` without `mesh.interface_prefix`. `addresses` gives what a
+  node's `node_id` gives it: loopbacks, link-local, tunnel IPv4. `direct_interfaces` appends the
+  links' pattern unless listed, where the links carry IPv4. `network::node_key` and
+  `network::link_obfuscation` name where the files hold a key and an obfuscation.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig` from the network, each
   checked as the node checks it. It refuses a missing key of the node, unless it is on no link, or
   of a peer, and a link of type `amneziawg` whose obfuscation lacks one of `jc`, `jmin`, `jmax`,
