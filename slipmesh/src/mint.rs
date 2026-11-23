@@ -1,6 +1,5 @@
-//! `mint`: writes whatever secrets the network lacks into the fields of `slipmesh.yaml` they
-//! belong to, and `mesh.interface_prefix`'s reference value where it leaves that out - once every
-//! node's config passes with them. A run with nothing to write leaves the file as it is.
+//! `mint`: the secrets the files lack, and `mesh.interface_prefix`'s reference value, written once
+//! every node passes with them.
 
 use crate::file::{read_slipmesh, write_edits};
 use crate::{check, edit};
@@ -10,7 +9,7 @@ use std::path::Path;
 
 pub fn run(config_path: &Path) -> Result<()> {
     let (mut yaml, mut file) = read_slipmesh(config_path)?;
-    // Before anything is minted: the files give no network without it.
+    // First: the files give no mesh without it.
     let unset = file.network().mesh.interface_prefix.is_none();
     if unset {
         edit::write_interface_prefix(&mut yaml, &file)?;
@@ -24,8 +23,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     }
     let path = config_path.display();
 
-    // What is written is the operator's from then on and is never minted again, so a value a
-    // node's config is refused with must not reach the file.
+    // A written value is never minted again, so one a node is refused with must not be written.
     let edited = File::read(&yaml)
         .context("slipmesh.yaml with what was minted does not read back - not written")?;
     let network = sliplib_mesh::Mesh::of(&edited)?;

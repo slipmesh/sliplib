@@ -1,6 +1,4 @@
-//! The `groups` documents of format version 2: named sets of nodes for documents to be aimed at,
-//! and the one rule by which a list of names is turned into nodes, for a group and for a
-//! document alike.
+//! Named sets of nodes to aim documents at, and the one rule turning names into nodes.
 
 use super::Map;
 use super::{ALL, Exclude, Include, Name};
@@ -9,17 +7,16 @@ use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 
-/// A group as written: a list of names, short for `include`, or `include` and `exclude`, the
-/// keys of a document's block.
+/// A list of names, short for `include`, or `include` and `exclude`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Group {
-    /// The names of its `include`. Empty, the group is left with no node.
+    /// Empty, no node.
     Short(Vec<Name>),
     Full(Selection),
 }
 
-// Not `untagged`: serde reads a struct from a list as well, so a list `Include` refuses, an empty
-// one, would be tried as a `Selection` and pass as one that sets nothing.
+// Not `untagged`: serde reads a struct from a list too, and an empty list would pass as a
+// `Selection` that sets nothing.
 impl<'de> Deserialize<'de> for Group {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct ListOrKeys;
@@ -44,7 +41,6 @@ impl<'de> Deserialize<'de> for Group {
     }
 }
 
-/// What `include` reaches less what `exclude` reaches.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Selection {
@@ -54,12 +50,11 @@ pub struct Selection {
     pub exclude: Exclude,
 }
 
-/// The body of a `groups` document: each group by its name.
+/// By name.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(transparent)]
 pub struct Groups(#[serde(deserialize_with = "super::unique_keys")] pub Map<Name, Group>);
 
-/// What is wrong with the groups, or with a list of names read by them.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum GroupsError {
@@ -75,22 +70,19 @@ pub enum GroupsError {
     Empty(String),
 }
 
-/// The nodes a group stands for, or why it stands for none.
 type Members = Result<Vec<Name>, GroupsError>;
 
-/// Every group turned into its nodes, and the nodes of the network they were turned against.
-/// Only [`Groups::resolve`] makes one: without the nodes, a selection would reach none.
+/// Only [`Groups::resolve`] makes one: without the nodes a selection would reach none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
-    /// Every node of the network, which the groups were resolved against.
+    /// The network's, which the groups were resolved against.
     nodes: Vec<Name>,
     groups: Map<Name, Vec<Name>>,
 }
 
 impl Groups {
-    /// Every group as the nodes it stands for, each in the order of `nodes`, which are all the
-    /// nodes of the network. A node named `all` or `none` is the network's checks to refuse;
-    /// given one, a selection here reads the name as the word.
+    /// In the order of `nodes`, every node of the network. A node named `all` or `none` is the
+    /// network's checks to refuse; here the name reads as the word.
     pub fn resolve(&self, nodes: &[Name]) -> Result<Resolved, GroupsError> {
         for name in self.0.keys() {
             if name.is_reserved() {
@@ -110,9 +102,8 @@ impl Groups {
         Ok(resolved)
     }
 
-    /// The nodes of the group `name`, which is one of these, kept in `resolved` once known.
-    /// `on_the_way` holds the groups whose expansion led here: meeting one of them again is a
-    /// group that reaches itself.
+    /// Kept in `resolved` once known. Meeting one of `on_the_way` again is a group that reaches
+    /// itself.
     fn expand(
         &self,
         name: &Name,
@@ -152,9 +143,7 @@ impl Groups {
     }
 }
 
-/// The nodes `selection` reaches, in the order of `nodes`: what its `include` lists less what its
-/// `exclude` lists, a name being a node, the word `all` or a group, which `group` turns into its
-/// nodes.
+/// In the order of `nodes`; `group` turns a group into its nodes.
 fn select(
     selection: &Selection,
     nodes: &[Name],
@@ -194,12 +183,8 @@ fn select(
 }
 
 impl Resolved {
-    /// The nodes `selection` reaches, in the order of the network's nodes the groups were
-    /// resolved against. `all` is what the word stands for where the selection is written: every
-    /// node, or every node of a document's platform. `whose` names the selection in a refusal.
-    ///
-    /// A node of another platform than the document's is the caller's to refuse: a group may
-    /// reach one, and so may `all` inside a group, which is every node.
+    /// In the network's order. `all` is what the word stands for where the selection is written;
+    /// `whose` names it in a refusal. A node of another platform is the caller's to refuse.
     pub fn reach(
         &self,
         selection: &Selection,

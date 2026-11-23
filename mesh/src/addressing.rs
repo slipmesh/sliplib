@@ -1,5 +1,4 @@
-//! Addresses derived from a node's `node_id`, an IPv4-shaped identity whose bits fill the host part
-//! of a network: `network | node_id`.
+//! Addresses a node's `node_id` gives: `network | node_id`.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -7,8 +6,7 @@ fn node_id_bits(node_id: Ipv4Addr) -> u32 {
     u32::from(node_id)
 }
 
-/// The address `node_id` gives in `network/prefix_len`: the network's bits, and the low bits of
-/// `node_id` in the host part.
+/// The low bits of `node_id` in the host part.
 pub fn ipv4_in(network: Ipv4Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv4Addr {
     let mask: u32 = if prefix_len == 0 {
         0
@@ -18,8 +16,7 @@ pub fn ipv4_in(network: Ipv4Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv4Addr
     Ipv4Addr::from((u32::from(network) & mask) | (node_id_bits(node_id) & !mask))
 }
 
-/// The address `node_id` gives in `network/prefix_len`: the network's bits, and `node_id` in the low
-/// bits of the host part, which the loader has checked it fits.
+/// `node_id` in the low bits of the host part, which the loader has checked it fits.
 pub(crate) fn ipv6_in(network: Ipv6Addr, prefix_len: u8, node_id: Ipv4Addr) -> Ipv6Addr {
     let mask: u128 = if prefix_len == 0 {
         0
@@ -30,7 +27,7 @@ pub(crate) fn ipv6_in(network: Ipv6Addr, prefix_len: u8, node_id: Ipv4Addr) -> I
     Ipv6Addr::from((u128::from(network) & mask) | (host & !mask))
 }
 
-/// A host name or an IP address with `port`, as an endpoint to dial: an IPv6 address in brackets.
+/// An IPv6 address in brackets.
 pub fn endpoint(endpoint: &str, port: u16) -> String {
     match endpoint.parse() {
         Ok(IpAddr::V6(v6)) => format!("[{v6}]:{port}"),
@@ -38,10 +35,8 @@ pub fn endpoint(endpoint: &str, port: u16) -> String {
     }
 }
 
-/// The link-local of a loopback: `fe80::` and the loopback's low 32 bits - `3fff::a1b2:c3d4` gives
-/// `fe80::a1b2:c3d4`. Under a loopback network of /96 or shorter they are the node's `node_id`.
-/// Under a longer one, /p, they are the network's own bits that fall there and the low 128 - p bits
-/// of `node_id`: under `3fff::ab:cd00/120` they are `ab:cdXX`.
+/// `fe80::` and the low 32 bits: `3fff::a1b2:c3d4` gives `fe80::a1b2:c3d4`. Under a /p longer than
+/// /96 they hold the network's bits too: under `3fff::ab:cd00/120`, `ab:cdXX`.
 pub fn link_local_from_loopback(ipv6_loopback: Ipv6Addr) -> Ipv6Addr {
     let bits = u128::from(ipv6_loopback) as u32;
     let mut segments = [0u16; 8];

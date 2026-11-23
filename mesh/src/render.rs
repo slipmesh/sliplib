@@ -12,8 +12,7 @@ use sliplib_config::v2::network::{LinkKind, Node, Prefix4};
 use sliplib_config::{Obfuscation, ObfuscationError};
 use sliplib_secrets::wireguard::KeyError;
 
-/// Why a node has no configs. Every variant names the node and which of its two configs it is
-/// about; the cause is its source.
+/// Each names the node and which config; the cause is its source.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -44,7 +43,6 @@ pub enum Error {
     },
 }
 
-/// What a node's config cannot be computed from.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum RenderError {
@@ -64,7 +62,7 @@ pub enum RenderError {
 
 type Result<T> = std::result::Result<T, RenderError>;
 
-/// Full mesh minus self: every other node, addressed by its IPv6 loopback.
+/// Every other node, at its IPv6 loopback.
 pub(crate) fn bgp_peers_for(mesh: &Mesh<'_>, node_name: &str) -> Vec<BgpPeerEntry> {
     mesh.network()
         .nodes
@@ -77,12 +75,12 @@ pub(crate) fn bgp_peers_for(mesh: &Mesh<'_>, node_name: &str) -> Vec<BgpPeerEntr
         .collect()
 }
 
-/// Every rendered node runs OSPF on the same two interface patterns: the mesh's and `router-lo`.
+/// The mesh's and `router-lo`.
 fn ospf_interfaces(mesh: &Mesh<'_>) -> Vec<String> {
     vec![mesh_glob(mesh), "router-lo".to_owned()]
 }
 
-/// Every mesh interface, as BIRD's `interface` clause and `direct_interfaces` match it.
+/// As BIRD's `interface` clause and `direct_interfaces` match it.
 fn mesh_glob(mesh: &Mesh<'_>) -> String {
     format!("{}*", mesh.interface_prefix())
 }
@@ -123,9 +121,7 @@ fn key_of(node: &str) -> impl Fn(KeyError) -> RenderError {
     }
 }
 
-/// The node's mesh interfaces: one full-tunnel interface per link it is on, named after the peer
-/// (`mesh-<peer>`). The name stays local - peers know each other by key - and must fit `IFNAMSIZ`,
-/// which the awg check enforces.
+/// One per link, named after the peer: peers know each other by key.
 fn mesh_interfaces_for(
     mesh: &Mesh<'_>,
     node_name: &str,
@@ -135,15 +131,14 @@ fn mesh_interfaces_for(
     if own_private_key.is_none() && mesh.needs_a_key(node_name) {
         return Err(MissingSecret(format!("node {node_name:?}: {PRIVATE_KEY} is not set")).into());
     }
-    // Decoded for every node, whether or not a link uses its key: where one does, the daemon
-    // would otherwise be the first to decode it, and refuse a config it is already running on.
+    // Decoded whether or not a link uses it: else the daemon would refuse it while running.
     if let Some(own_private_key) = own_private_key {
         own_private_key.public_key().map_err(key_of(node_name))?;
     }
 
-    // Before the node's links: what refuses the MTU of the mesh stops a node on no link too.
+    // Before the links: what refuses the mesh MTU stops a node on no link too.
     let mtu = crate::mtu::mesh_mtu(mesh)?;
-    // Only a node that needs no key has none, and it is on no link.
+    // Only a node on no link has none.
     let Some(own_private_key) = own_private_key else {
         return Ok(Vec::new());
     };
@@ -191,7 +186,7 @@ fn mesh_interfaces_for(
                 persistent_keepalive: None,
             }],
         };
-        // The link's keepalive is written only where it changes what the peer is sent.
+        // Written only where it changes what the peer is sent.
         let without = interface.keepalive_of(&interface.peers[0]);
         interface.peers[0].persistent_keepalive = link.kind.persistent_keepalive();
         let with = interface.keepalive_of(&interface.peers[0]);
@@ -213,7 +208,6 @@ pub(crate) fn render_awg_config(
     })
 }
 
-/// A node's configs, as its daemons would take them.
 #[derive(Debug)]
 pub struct NodeConfigs {
     pub awg: AwgConfig,
@@ -223,7 +217,7 @@ pub struct NodeConfigs {
 /// Each checked as its node would.
 pub fn node_configs(mesh: &Mesh<'_>, host: &str) -> std::result::Result<NodeConfigs, Error> {
     let node = || host.to_owned();
-    // Refused as the `awg` config, computed first, refuses a node it does not know.
+    // As the `awg` config, computed first, would refuse it.
     let found = mesh.node(host).map_err(|source| Error::RenderingAwg {
         node: node(),
         source: source.into(),
@@ -236,8 +230,7 @@ pub fn node_configs(mesh: &Mesh<'_>, host: &str) -> std::result::Result<NodeConf
         node: node(),
         source,
     })?;
-    // Checked here rather than by awg: the daemon can only refuse a config it is already running
-    // on, and a refusal there would leave every interface of the node down.
+    // Here: a refusal in the running daemon would leave every interface down.
     for iface in &awg_cfg.interfaces {
         iface
             .obfuscation
@@ -403,7 +396,7 @@ mod tests {
         configs_of(&network, "node-c").unwrap();
     }
 
-    /// `refusal` is for the key of `owner`, which does not decode, and creating none cures it.
+    /// `owner`'s key does not decode, and no secret cures it.
     fn assert_not_a_key(refusal: Error, owner: &str) {
         assert!(
             matches!(&refusal, Error::RenderingAwg { source: RenderError::Key { node, .. }, .. }
@@ -480,7 +473,7 @@ mod tests {
         assert_eq!(configs.router.bgp_peers.len(), 4);
     }
 
-    /// The example with a node of `name`, keyed, on a link to `node-a`.
+    /// With a keyed node of `name` on a link to `node-a`.
     fn with_a_node_named(name: &str) -> Mesh<'static> {
         let key = sliplib_secrets::wireguard::PrivateKey::generate();
         example(&format!(

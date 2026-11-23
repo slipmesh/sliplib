@@ -1,4 +1,4 @@
-//! Secrets the slipmesh components handle, in types that keep them out of logs and diffs.
+//! Secrets in types that keep them out of logs and diffs.
 
 mod secret;
 pub mod wireguard;

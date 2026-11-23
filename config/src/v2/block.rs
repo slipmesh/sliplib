@@ -1,12 +1,11 @@
-//! The `slipmesh:` block that opens every document of format version 2: what the document is,
-//! which nodes it reaches and where it stands among the others.
+//! The `slipmesh:` block of every document: its kind, aim and order.
 
 use super::Name;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 
-/// Who configures a node, and whose terms a document is written in.
+/// Whose tool configures a node, and whose terms a document is in.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
@@ -23,7 +22,7 @@ impl fmt::Display for Platform {
     }
 }
 
-/// Where a document stands among all the documents read: lower first, `1000` when left out.
+/// Lower first; `1000` left out.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Order(u16);
 
@@ -33,23 +32,23 @@ impl Default for Order {
     }
 }
 
-/// The group nobody defines: every node, and for a document of one platform every node of it.
+/// Every node, or for a document of one platform every node of it.
 pub const ALL: &str = "all";
 
-/// The word that stands for no node in `exclude`.
+/// No node, in `exclude`.
 pub const NONE: &str = "none";
 
-/// The names a document's `include` lists: nodes, groups and `all`. Left out, and written as the
-/// word `all`, it is the list of `all` alone. Never empty: `include: []` would reach no node.
+/// Nodes, groups and `all`; left out or written `all`, `all` alone. Never empty, or it would reach
+/// no node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Include(Vec<Name>);
 
-/// The names a document's `exclude` lists. Left out, and written as the word `none`, it is empty.
+/// Left out or written `none`, empty.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Exclude(Vec<Name>);
 
 impl Include {
-    /// `names` as an `include`; never empty, or it would reach no node.
+    /// Never empty.
     pub(super) fn listing(names: Vec<Name>) -> Self {
         debug_assert!(!names.is_empty());
         Self(names)
@@ -59,7 +58,7 @@ impl Include {
         &self.0
     }
 
-    /// Whether the document is for all: its `include` names nothing but `all`.
+    /// Nothing but `all`.
     pub fn is_all(&self) -> bool {
         self.0.iter().all(|name| name.as_str() == ALL)
     }
@@ -77,7 +76,7 @@ impl Exclude {
     }
 }
 
-/// A list of names, or the one word that may stand in its place.
+/// Or the one word that may stand in their place.
 struct Names {
     word: &'static str,
 }
@@ -127,9 +126,8 @@ impl<'de> Deserialize<'de> for Exclude {
     }
 }
 
-/// A `slipmesh:` block, one variant for each kind with the keys that kind takes: a key of
-/// another kind is an unknown one, so a misspelled `include` cannot aim a document at every
-/// node.
+/// One variant per kind, with its keys: a misspelled `include` is unknown, not a document aimed at
+/// every node.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(
     remote = "Self",
@@ -138,8 +136,7 @@ impl<'de> Deserialize<'de> for Exclude {
     deny_unknown_fields
 )]
 pub enum Block {
-    /// The values of `version` and `revision` are the loader's to check against the ones its
-    /// tool is built for.
+    /// The loader checks `version` and `revision` against its own.
     Network {
         version: u32,
         revision: u32,
@@ -161,7 +158,7 @@ pub enum Block {
 
 from_a_mapping!(Block);
 
-/// The block of a `template` or a `patch`.
+/// Of a `template` or a `patch`.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Aimed {
@@ -186,9 +183,8 @@ impl Block {
     }
 }
 
-/// Which of two documents of one kind that reach one node is laid over the other, or chosen: the
-/// greater over the lesser, and of two equal ones the later read. `order` decides first; among
-/// documents of one `order`, one aimed at some nodes ranks above one for all.
+/// Of two documents of one kind reaching one node, the greater is laid over or chosen, of equal
+/// ones the later read: `order` first, then one aimed at some nodes above one for all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Rank {
     order: Order,
@@ -365,7 +361,7 @@ mod tests {
         }
     }
 
-    /// The block as the loader takes it: out of its document as a value.
+    /// As the loader takes it, from a value.
     fn block_from_value(yaml: &str) -> Block {
         let value: sliplib_yaml::Value = sliplib_yaml::from_str(yaml).unwrap();
         sliplib_yaml::from_value(value).unwrap()

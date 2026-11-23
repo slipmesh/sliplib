@@ -12,8 +12,7 @@ use serde::de::{
 use serde::{Deserialize, Serialize};
 use yaml_serde::{Deserializer, Serializer, Value};
 
-/// A multi-document YAML file, read into values to be edited and written back. Writing it leaves
-/// out its comments, and every document of only comments.
+/// Written back without its comments and documents of only comments.
 pub struct MultiDoc {
     documents: Vec<Document>,
 }
@@ -44,19 +43,18 @@ impl MultiDoc {
         Self::parse(&text).with_context(|| format!("reading {}", path.display()))
     }
 
-    /// Every document that holds anything but comments, in file order, edits included.
+    /// Those that hold more than comments, in file order.
     pub fn documents(&self) -> &[Document] {
         &self.documents
     }
 
-    /// The value of the document at `index`, to edit; none for a document of only comments.
+    /// None for a document of only comments.
     pub fn document_mut(&mut self, index: usize) -> Option<&mut Value> {
         let document = self.documents.iter_mut().find(|d| d.index == index)?;
         document.source = None;
         Some(&mut document.value)
     }
 
-    /// The file's text with every edit in it.
     pub fn text(&self) -> Result<String> {
         let mut text = Vec::new();
         let mut serializer = Serializer::new(&mut text);
@@ -70,30 +68,27 @@ impl MultiDoc {
     }
 }
 
-/// One document of a [`MultiDoc`].
 #[derive(Clone)]
 pub struct Document {
-    /// Its position among the documents of the file, those of only comments included.
+    /// Among the file's documents, those of only comments included.
     pub index: usize,
-    /// The line of the file its content starts on.
+    /// Where its content starts.
     pub line: usize,
     pub value: Value,
-    /// The file it was read from, while it holds the document as read.
+    /// While the document is as read.
     source: Option<Arc<str>>,
     taken: Vec<String>,
 }
 
 impl Document {
-    /// Takes the top-level `key` out of the document: out of `value`, and out of what
-    /// [`Document::deserialize`] reads.
+    /// A top-level key, out of `value` and of what [`Document::deserialize`] reads.
     pub fn take(&mut self, key: &str) -> Option<Value> {
         let value = self.value.as_mapping_mut()?.shift_remove(key)?;
         self.taken.push(key.to_owned());
         Some(value)
     }
 
-    /// The document as `T`. As read from the file, an error names the field and the line of the
-    /// file it is on.
+    /// As read, an error names the field and its line.
     pub fn deserialize<T: DeserializeOwned>(&self) -> Result<T> {
         let Some(source) = &self.source else {
             return Ok(yaml_serde::from_value(self.value.clone())?);
@@ -108,8 +103,7 @@ impl Document {
     }
 }
 
-/// The line the content of document `index` of `source` starts on: where the parser stands when
-/// it is asked for something no YAML value is.
+/// Where the parser stands when asked for something no YAML value is.
 fn line_of(source: &str, index: usize) -> Result<usize> {
     struct Nothing;
     impl Visitor<'_> for Nothing {
@@ -127,7 +121,7 @@ fn line_of(source: &str, index: usize) -> Result<usize> {
     Ok(stop.location().map_or(1, |location| location.line()))
 }
 
-/// Deserializes a mapping as `T` without the entries of `keys`.
+/// A mapping as `T`, less `keys`.
 struct Without<'k, T> {
     keys: &'k [String],
     target: PhantomData<T>,
@@ -186,8 +180,7 @@ enum Key<K> {
     Read(K),
 }
 
-/// A key read by the parser itself, so that an error about it - an unknown field - carries its
-/// line.
+/// Read by the parser itself, so an unknown field's error carries its line.
 struct KeySeed<'s, 'k, K> {
     seed: &'s mut Option<K>,
     skipped: &'k [String],
@@ -218,7 +211,6 @@ impl<'de, K: DeserializeSeed<'de>> Visitor<'de> for KeySeed<'_, '_, K> {
     }
 }
 
-/// Documents joined into one multi-document text.
 pub fn join(documents: &[String]) -> String {
     documents.join("---\n")
 }

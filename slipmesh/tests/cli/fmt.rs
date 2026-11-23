@@ -20,9 +20,8 @@ fn inode(config: &Config) -> u64 {
     std::fs::metadata(&config.path).unwrap().ino()
 }
 
-/// Files as a hand leaves them, with node `a`'s key: flow collections, quotes,
-/// comments, and the shapes a rewrite could get wrong - a hexadecimal integer, a string that reads
-/// as a number, a block scalar, an alias, a document of only comments and one of only `~`.
+/// As a hand leaves them, with what a rewrite could get wrong: a hexadecimal integer, a string
+/// read as a number, a block scalar, an alias, documents of only comments and of only `~`.
 fn by_hand(key: &str) -> String {
     format!(
         r#"# The network, written by hand.

@@ -1,6 +1,4 @@
-//! `slipmesh`: the tool for `slipmesh.yaml` itself, whatever platform its nodes run, and the only
-//! one that writes into it. The file is plain text to it; decrypting it, and encrypting what a
-//! command wrote, is the caller's.
+//! The one tool that writes `slipmesh.yaml`. Plain text to it: encryption is the caller's.
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -33,8 +31,8 @@ enum Command {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,
     },
-    /// Write the secrets slipmesh.yaml lacks into it, and the reference values of the keys it
-    /// leaves out.
+    /// Write the secrets slipmesh.yaml lacks into it, and mesh.interface_prefix's reference value
+    /// where it leaves it out.
     Mint {
         #[arg(long, default_value = "slipmesh.yaml")]
         config: PathBuf,

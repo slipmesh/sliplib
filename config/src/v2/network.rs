@@ -1,8 +1,5 @@
-//! The `network` document of format version 2: the one tree of addressing, routing, links and
-//! nodes. Every type refuses a key it does not know, at any depth.
-//!
-//! As the loader returns it, a node's `routing` and the block of a link's type hold what is in
-//! force there: the node's and the link's own values laid over the network's.
+//! The `network` document. Every type refuses an unknown key. From the loader, a node's `routing`
+//! and a link's block hold what is in force: their own laid over the network's.
 
 use super::name::is_name_character;
 use super::{ClassName, Map, Name, Platform, UniqueKeys, absent_when_null, unique_keys};
@@ -14,8 +11,7 @@ use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32};
 
-/// A mapping whose keys are names, `null` read as the mapping left out, a key that stands twice
-/// refused.
+/// `null` as left out, a key twice refused.
 fn names_absent_when_null<'de, D, K, V>(deserializer: D) -> Result<Map<K, V>, D::Error>
 where
     D: Deserializer<'de>,
@@ -37,12 +33,12 @@ pub struct Network {
     pub nodes: Map<Name, Node>,
 }
 
-/// An IPv4 network as the files write it, host bits kept.
+/// Host bits kept.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(try_from = "String")]
 pub struct Prefix4(pub Ipv4Net);
 
-/// An IPv6 network as the files write it, host bits kept.
+/// Host bits kept.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(try_from = "String")]
 pub struct Prefix6(pub Ipv6Net);
@@ -63,7 +59,7 @@ impl TryFrom<String> for Prefix6 {
     }
 }
 
-/// The networks a node's addresses are derived from by its `node_id`.
+/// What a node's `node_id` is added to.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Addressing {
@@ -92,7 +88,7 @@ pub struct Tunnel {
 #[serde(deny_unknown_fields)]
 pub struct Routing {
     pub bgp: Bgp,
-    /// Present, every link has a BFD session; absent, none has.
+    /// Present, a BFD session on every link.
     #[serde(default)]
     pub bfd: Option<Bfd>,
     #[serde(default, deserialize_with = "absent_when_null")]
@@ -108,12 +104,11 @@ pub struct Routing {
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Bgp {
-    /// The AS number of the mesh, under which the nodes speak iBGP to each other.
     #[serde(rename = "as")]
     pub number: NonZeroU32,
 }
 
-// A default of zero would not compile: `unwrap` is evaluated with the constant.
+// A zero default fails to compile: `unwrap` runs with the constant.
 const DEFAULT_MIN_RX_MS: NonZeroU32 = NonZeroU32::new(BFD_DEFAULT_MIN_RX_MS).unwrap();
 const DEFAULT_MIN_TX_MS: NonZeroU32 = NonZeroU32::new(BFD_DEFAULT_MIN_TX_MS).unwrap();
 const DEFAULT_MULTIPLIER: NonZeroU8 = NonZeroU8::new(BFD_DEFAULT_MULTIPLIER).unwrap();
@@ -141,8 +136,7 @@ pub struct Bfd {
     pub multiplier: NonZeroU8,
 }
 
-/// A named protocol number for routes that something other than the router installs in a node's
-/// kernel.
+/// The protocol number of routes something other than the router installs.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Class {
@@ -153,14 +147,12 @@ pub struct Class {
 #[serde(deny_unknown_fields)]
 pub struct Node {
     pub platform: Platform,
-    /// An identity in the form of an IPv4 address, from which the node's addresses are derived.
+    /// An identity in IPv4 form, which the node's addresses are derived from.
     pub node_id: Ipv4Addr,
-    /// What the node reaches the world through, by name.
     #[serde(deserialize_with = "unique_keys")]
     pub underlay: Map<Name, Underlay>,
     #[serde(default)]
     pub wireguard: Option<NodeWireguard>,
-    /// The node's own values of the network's `routing`.
     #[serde(default, deserialize_with = "absent_when_null")]
     pub routing: NodeRouting,
 }
@@ -181,22 +173,20 @@ impl Node {
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Underlay {
-    /// Absent for a node behind NAT or without a fixed address: it is never dialed.
+    /// Absent, never dialed.
     #[serde(default)]
     pub endpoint: Option<Endpoint>,
     #[serde(default)]
     pub mtu: Option<u32>,
 }
 
-/// The family the links to a node are dialed over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Family {
     Ipv4,
     Ipv6,
 }
 
-/// Where a node's peers reach it: an address of the family its key names, or a name, taken as
-/// written, dialed over that family. Each link dials it at its own port.
+/// An address of its key's family, or a name taken as written and dialed over it; no port.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(try_from = "EndpointKeys")]
 pub struct Endpoint {
@@ -209,7 +199,7 @@ impl Endpoint {
         self.family
     }
 
-    /// The address or the host name, as written.
+    /// As written.
     pub fn host(&self) -> &str {
         &self.host
     }
@@ -224,7 +214,6 @@ struct EndpointKeys {
     ipv6: Option<String>,
 }
 
-/// What is wrong with an `endpoint`.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum EndpointError {
@@ -259,14 +248,12 @@ impl TryFrom<EndpointKeys> for Endpoint {
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct NodeWireguard {
-    /// The node's one identity on every link of type `wireguard` or `amneziawg`.
+    /// One identity on every link.
     #[serde(default)]
     pub private_key: Option<PrivateKey>,
 }
 
-/// The lists of the network's `routing` that a node may hold its own value of. As the loader
-/// returns them, each is the one in force for the node: its own where it wrote one, an empty one
-/// where it wrote `null`, the network's otherwise.
+/// From the loader, in force: its own, empty where written `null`, else the network's.
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct NodeRouting {
@@ -278,12 +265,11 @@ pub struct NodeRouting {
     pub announce: Vec<Prefix4>,
 }
 
-/// What every interface a tool creates for a link starts with.
+/// What every link's interface name starts with.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(try_from = "String")]
 pub struct InterfacePrefix(String);
 
-/// What keeps a text from being an interface prefix.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum InterfacePrefixError {
@@ -311,8 +297,8 @@ impl TryFrom<String> for InterfacePrefix {
         if prefix.is_empty() {
             return Err(InterfacePrefixError::Empty);
         }
-        // The kernel refuses `/`, `:` and whitespace in an interface name, and a routing daemon
-        // reads the prefix in a pattern, where `*`, `?` and `[` would match other interfaces.
+        // The kernel refuses `/`, `:` and whitespace; in a routing pattern `*`, `?` and `[` would match
+        // other interfaces.
         if !prefix.chars().all(is_name_character) {
             return Err(InterfacePrefixError::Character(prefix));
         }
@@ -323,7 +309,7 @@ impl TryFrom<String> for InterfacePrefix {
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Mesh {
-    /// Required by every tool, and written by `slipmesh mint`: a file may be read without it.
+    /// Every tool needs it and `slipmesh mint` writes it, so a file reads without it.
     #[serde(default)]
     pub interface_prefix: Option<InterfacePrefix>,
     #[serde(default)]
@@ -336,7 +322,6 @@ pub struct Mesh {
     pub links: Map<Name, Link>,
 }
 
-/// What every link of type `wireguard` starts from.
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct WireguardDefaults {
@@ -344,7 +329,6 @@ pub struct WireguardDefaults {
     pub persistent_keepalive: Option<u16>,
 }
 
-/// What every link of type `amneziawg` starts from.
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct AmneziawgDefaults {
@@ -354,21 +338,19 @@ pub struct AmneziawgDefaults {
     pub obfuscation: Option<StrictObfuscation>,
 }
 
-/// The keys of a link of type `wireguard`.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct WireguardLink {
-    /// The UDP port both ends listen on.
+    /// Both ends listen on it.
     pub port: NonZeroU16,
     #[serde(default)]
     pub persistent_keepalive: Option<u16>,
 }
 
-/// The keys of a link of type `amneziawg`.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AmneziawgLink {
-    /// The UDP port both ends listen on.
+    /// Both ends listen on it.
     pub port: NonZeroU16,
     #[serde(default)]
     pub persistent_keepalive: Option<Range<u16>>,
@@ -379,7 +361,6 @@ pub struct AmneziawgLink {
 pub(super) const WIREGUARD: &str = "wireguard";
 pub(super) const AMNEZIAWG: &str = "amneziawg";
 
-/// What carries a link, with the keys of that type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinkKind {
     Wireguard(WireguardLink),
@@ -387,7 +368,7 @@ pub enum LinkKind {
 }
 
 impl LinkKind {
-    /// The type as the files name it.
+    /// As the files name it.
     pub fn name(&self) -> &'static str {
         match self {
             Self::Wireguard(_) => WIREGUARD,
@@ -395,7 +376,7 @@ impl LinkKind {
         }
     }
 
-    /// The UDP port both ends listen on.
+    /// Both ends listen on it.
     pub fn port(&self) -> NonZeroU16 {
         match self {
             Self::Wireguard(block) => block.port,
@@ -423,7 +404,6 @@ impl LinkKind {
     }
 }
 
-/// A link: the two nodes it joins, and what carries it.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(try_from = "LinkKeys")]
 pub struct Link {
@@ -438,7 +418,7 @@ enum LinkType {
     Amneziawg,
 }
 
-/// The keys of a link's end. None today.
+/// None today.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct End {}
@@ -455,7 +435,6 @@ struct LinkKeys {
     amneziawg: Option<AmneziawgLink>,
 }
 
-/// What is wrong with a link by its own keys.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum LinkError {
@@ -501,7 +480,6 @@ impl TryFrom<LinkKeys> for Link {
     }
 }
 
-/// What is wrong with an `obfuscation` by its own keys.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ObfuscationError {
@@ -509,8 +487,7 @@ pub enum ObfuscationError {
     UnknownKey(String),
 }
 
-/// The obfuscation of a link as the files hold it: read like the daemons' own, but refusing a
-/// key that is not one of its fields, which a daemon passes over.
+/// Refusing an unknown key, which a daemon passes over.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StrictObfuscation(pub Obfuscation);
 
@@ -890,7 +867,7 @@ mod tests {
         }
     }
 
-    /// A node that reads, to be laid into the example under a name.
+    /// To be laid into the example under a name.
     const NODE: &str = "{platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}";
 
     // YAML reads `1.0` and `1` as one name: two entries would be one, the later replacing the

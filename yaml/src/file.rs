@@ -4,16 +4,14 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 
-/// The one document in `path`, as `T`. An error names the file, and the line for a value that
-/// does not fit `T`.
+/// The one document. An error names the file, and the line of a value that does not fit.
 pub fn read<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     yaml_serde::from_str(&text).with_context(|| format!("reading {}", path.display()))
 }
 
-/// The text of `path`, empty when there is no such file. Any other failure is an error: a file that
-/// cannot be read must not pass for one that is not there.
+/// Empty where there is no file; any other failure is an error.
 pub fn read_or_empty(path: &Path) -> Result<String> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(text),
@@ -22,8 +20,7 @@ pub fn read_or_empty(path: &Path) -> Result<String> {
     }
 }
 
-/// Writes `content` to `path`, creating its directory, unless the file already holds exactly that.
-/// Whether it wrote.
+/// Unless the file already holds it, creating the directory. Whether it wrote.
 pub fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
     if read_or_empty(path)? == content && path.exists() {
         return Ok(false);
@@ -35,8 +32,7 @@ pub fn write_if_changed(path: &Path, content: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Replaces `path` with `content` atomically, so an interrupted write cannot leave it half-written.
-/// Its permissions carry over, and a symlink is followed rather than replaced.
+/// Atomically, keeping its permissions and following a symlink.
 pub fn replace_file(path: &Path, content: &str) -> Result<()> {
     let target =
         std::fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))?;

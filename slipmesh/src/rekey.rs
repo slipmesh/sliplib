@@ -1,5 +1,4 @@
-//! `rekey`: a new mesh key for one node, whether or not it had one. Every peer of the node dials
-//! it by the public half, so their configs change with it.
+//! `rekey`: a new key for one node. Every peer dials it by the public half.
 
 use crate::edit;
 use crate::file::{read_slipmesh, write_edits};

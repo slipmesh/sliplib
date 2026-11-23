@@ -1,9 +1,5 @@
-//! The secrets `slipmesh.yaml` leaves unset, generated: a node's mesh private key and a link's
-//! obfuscation. What was generated comes back as `Minted`, for the caller to write into the field
-//! it belongs to - the next run finds it there and generates nothing.
-//!
-//! The whole network at once, not per node: a link's two ends share one obfuscation, and a node's
-//! config needs its peers' keys.
+//! The keys and obfuscation the files lack, generated as `Minted` for the caller to write. The whole
+//! network at once: a link's ends share one obfuscation, and a node needs its peers' keys.
 
 use crate::network::{self, Mesh};
 use crate::secrets;
@@ -14,14 +10,12 @@ use std::fmt;
 
 mod obfuscation_gen;
 
-/// What a run generated, by the entry it belongs to.
 #[derive(Default)]
 pub struct Minted {
-    /// By the node's position in `nodes`.
+    /// By position in `nodes`.
     pub node_keys: Vec<(usize, PrivateKey)>,
-    /// By the link's position in `mesh.links`; only the fields generated.
+    /// By position in `mesh.links`; only the fields generated.
     pub link_obfuscation: Vec<(usize, Obfuscation)>,
-    /// How a message names each value.
     names: Vec<String>,
 }
 
@@ -30,14 +24,13 @@ impl Minted {
         self.names.is_empty()
     }
 
-    /// Where each value goes, the way a message names it.
+    /// Where each value goes, as a message names it.
     pub fn routes(&self) -> &[String] {
         &self.names
     }
 }
 
-/// The entry whose magic headers, its own and its type's it takes where it sets none, leave
-/// fewer values than the headers it lacks.
+/// Its headers, and its type's where it sets none, leave fewer values than it lacks.
 #[derive(Debug, PartialEq, Eq)]
 pub struct NoHeaderLeft(String);
 
@@ -53,8 +46,7 @@ impl fmt::Display for NoHeaderLeft {
 
 impl std::error::Error for NoHeaderLeft {}
 
-/// Generates the minted fields `obfuscation` lacks and returns them, `None` when it lacked none.
-/// `entry` is how a message names what the obfuscation belongs to.
+/// The fields it lacked, `None` for none. `entry` names it in a message.
 fn mint_obfuscation(
     obfuscation: &mut Obfuscation,
     entry: &str,
@@ -64,8 +56,7 @@ fn mint_obfuscation(
     Ok(secrets::fill(obfuscation, &fresh))
 }
 
-/// Whatever secrets `network` lacks, generated, each by the entry it belongs to. A `plain` link
-/// gets no obfuscation generated: it would turn "no obfuscation" back into an obfuscated one.
+/// A `wireguard` link gets none: it would become an obfuscated one.
 pub fn create(mesh: &Mesh<'_>) -> Result<Minted, NoHeaderLeft> {
     let mut minted = Minted::default();
 
@@ -139,8 +130,7 @@ mod tests {
         assert!(generated.jmin.is_some());
     }
 
-    /// The example of the specification as it is before anything is minted, with `overlay` laid
-    /// over it.
+    /// The example before anything is minted.
     fn unminted(overlay: &str) -> Mesh<'static> {
         crate::test_support::mesh(crate::test_support::laid(&[
             crate::test_support::EXAMPLE_MESH,

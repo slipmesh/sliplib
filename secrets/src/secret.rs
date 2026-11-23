@@ -2,12 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use zeroize::ZeroizeOnDrop;
 
-/// A secret held as text, such as a password or AmneziaWG's header protection key.
-///
-/// It stays out of printed output: `Debug` prints `<redacted>` and there is no `Display`. It leaves
-/// through [`Self::expose`] and through `Serialize`, which writes it into a config, so a structure
-/// holding one is serialized only where the secret is meant to go. Only the stored text is wiped
-/// when it is dropped; every copy made from it is not.
+/// As text, such as AmneziaWG's header protection key. `Debug` prints `<redacted>`; no `Display`.
+/// It leaves through [`Self::expose`] and `Serialize`. Only the stored text is wiped on drop.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, ZeroizeOnDrop)]
 #[serde(transparent)]
 pub struct Secret(String);

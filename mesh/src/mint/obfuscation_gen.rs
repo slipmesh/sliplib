@@ -1,19 +1,15 @@
-//! Random values for the minted fields of an AmneziaWG obfuscation: `jc`, `jmin`, `jmax`, `s1`,
-//! `s2` and `h1` to `h4`, the only parameters the kernel module's README gives a recommended range
-//! for. `s3`, `s4`, `i1` to `i5`, `header_protection_key` and the timing knobs have no established
-//! safe default, so none of them is ever generated.
+//! `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1`..`h4`, the only fields the module recommends ranges
+//! for; nothing else has a safe default, so nothing else is generated.
 
 use crate::secrets::Fresh;
 use rand::{Rng, RngExt};
 use sliplib_config::{Obfuscation, Range};
 
-/// From 5 up, the floor the kernel module's README recommends: 1..4 are WireGuard's own message
-/// types, `sliplib_config::DEFAULT_MAGIC_HEADERS`, which amneziawg-tools' generator avoids too.
+/// Above WireGuard's own types 1..4, `sliplib_config::DEFAULT_MAGIC_HEADERS`.
 const FIRST_HEADER: u32 = 5;
 const LAST_HEADER: u32 = 2_147_483_647;
 
-/// A value a header is drawn from that is in none of `taken`, each as likely as any other;
-/// `None` when they leave none.
+/// Uniform; `None` when `taken` leaves none.
 fn draw_outside(rng: &mut impl Rng, taken: &[Range<u32>]) -> Option<u32> {
     let mut taken: Vec<(u32, u32)> = taken
         .iter()
@@ -35,7 +31,7 @@ fn draw_outside(rng: &mut impl Rng, taken: &[Range<u32>]) -> Option<u32> {
     if free == 0 {
         return None;
     }
-    // The free values counted from the first, each taken range in the way stepped over.
+    // Counted from the first free value, stepping over each taken range.
     let mut value = FIRST_HEADER + rng.random_range(0..free);
     for range in disjoint {
         if value < range.0 {
@@ -46,15 +42,12 @@ fn draw_outside(rng: &mut impl Rng, taken: &[Range<u32>]) -> Option<u32> {
     Some(value)
 }
 
-/// Every range is the recommended one from the kernel module's README. The s1/s2 floor of 15
-/// also leaves room for the 12-byte header protection nonce, should `slipmesh.yaml` set a key.
-/// `held` is the entry the values are for, with what it already carries; `None` when its headers
-/// leave no value for a new one.
+/// The module's recommended ranges; `s1`/`s2` from 15 also hold the 12-byte header protection
+/// nonce. `None` when `held`'s headers leave no value.
 pub fn generate(held: &Obfuscation) -> Option<Fresh> {
     let mut rng = rand::rng();
-    // A header for each one the entry lacks, sharing no value with one it holds or with another
-    // drawn here, which the module would refuse. For one it holds, its own low end, which is
-    // never written: only a field the entry lacks is filled.
+    // Each sharing no value with one held or drawn, which the module would refuse. For one held,
+    // its low end, never written.
     let mut taken: Vec<Range<u32>> = [held.h1, held.h2, held.h3, held.h4]
         .into_iter()
         .flatten()
@@ -73,9 +66,8 @@ pub fn generate(held: &Obfuscation) -> Option<Fresh> {
     let [h1, h2, h3, h4] = headers;
     let jmin: u16 = rng.random_range(10..=100);
     let jmax: u16 = jmin + rng.random_range(1..=900);
-    // An offset that reads the clear header of a data packet makes a link with `random_trailers`
-    // on and no header protection key drop data packets. Both can be switched once the offsets
-    // are written, so none is drawn there whatever the two are now.
+    // An offset into a data packet's clear header drops data packets with `random_trailers` on and
+    // no header protection key; either may be switched later, so none is drawn there.
     let data_junk = held.s4.unwrap_or(0);
     let mut offset = || loop {
         let offset: u16 = rng.random_range(15..=150);
@@ -83,8 +75,7 @@ pub fn generate(held: &Obfuscation) -> Option<Fresh> {
             break offset;
         }
     };
-    // S2 = S1 + 56 would give the handshake initiation and response the same length. It is the
-    // two the entry ends up with that must not: one it holds is kept, and the other is drawn
+    // S2 = S1 + 56 gives initiation and response one length; one held is kept, the other drawn
     // beside it.
     let same_length = |s1: u16, s2: u16| s1.checked_add(56) == Some(s2);
     let s1 = match held.s1 {
@@ -292,8 +283,8 @@ mod tests {
         assert_eq!(sorted.len(), 4, "h1-h4 must all be distinct");
     }
 
-    // The recommended ranges of the kernel module's README; s1/s2 also hold the header
-    // protection nonce, and S1 + 56 = S2 would give initiation and response the same length.
+    // The module's recommended ranges; s1/s2 hold the nonce, and S1 + 56 = S2 gives initiation and
+    // response one length.
     #[test]
     fn generates_values_in_the_documented_ranges() {
         for _ in 0..2000 {

@@ -1,18 +1,13 @@
-//! The names of format version 2: of nodes, groups, links, a node's underlay entries and route
-//! classes, each the key of the mapping that holds it. A name becomes part of an interface name,
-//! of a name in a node's routing configuration or of an annotation key, which take no more than
-//! this.
+//! Names of nodes, groups, links, underlay entries and route classes. A name becomes part of an
+//! interface name, a routing configuration and an annotation key, which take no more than this.
 
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 
-/// A name: ASCII letters, digits, `-`, `_` and `.`, with a letter or a digit first and last.
-///
-/// A name YAML reads as a number or a boolean, `7` or `true`, is the name written so, wherever it
-/// stands: as a key of a mapping or in a list, read from the text or from a value. Such a value
-/// becomes the name it prints as, so `1.0` is the name `1`, `1e3` the name `1000` and `True` the
-/// name `true`; quoted, a name keeps its spelling. `07` YAML reads as text, and it stays `07`.
+/// ASCII letters, digits, `-`, `_` and `.`, a letter or digit first and last. One YAML reads as a
+/// number or a boolean is the name it prints as: `1.0` is `1`, `True` is `true`; quoted, it keeps
+/// its spelling.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Name(String);
 
@@ -56,14 +51,13 @@ impl<'de> Deserialize<'de> for Name {
     }
 }
 
-// A refusal quotes a name with `{:?}`, as it quotes a text.
+// A refusal quotes it as a text.
 impl fmt::Debug for Name {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.0, f)
     }
 }
 
-/// What keeps a text from being a name.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum NameError {
@@ -89,18 +83,16 @@ impl Name {
         &self.0
     }
 
-    /// The name of the group nobody defines.
     pub(crate) fn all() -> Self {
         Self(super::ALL.to_owned())
     }
 
-    /// Whether the name is one of the words a selection takes, which no node or group is named.
+    /// A word of a selection, which no node or group is named.
     pub fn is_reserved(&self) -> bool {
         [super::ALL, super::NONE].contains(&self.as_str())
     }
 }
 
-/// Whether `c` may stand in a name: an ASCII letter or digit, `-`, `_` or `.`.
 pub(super) fn is_name_character(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')
 }
@@ -123,7 +115,7 @@ impl TryFrom<String> for Name {
     }
 }
 
-// A map keyed by names is looked up by the text of one; a `Name` hashes and compares as its text.
+// Looked up by text: it hashes and compares as its text.
 impl std::borrow::Borrow<str> for Name {
     fn borrow(&self) -> &str {
         &self.0
@@ -136,8 +128,7 @@ impl fmt::Display for Name {
     }
 }
 
-/// The name of a route class. It ends the key of a node annotation, which takes 63 characters,
-/// so it takes 48.
+/// It ends an annotation key, which takes 63 characters: 48.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
 #[serde(try_from = "Name")]
 pub struct ClassName(Name);

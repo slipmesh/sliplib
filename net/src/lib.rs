@@ -1,12 +1,11 @@
-//! CIDR for every slipmesh component, on [`ipnet`]'s types. They are re-exported so that each
-//! component takes them from here and one change reaches all of them.
+//! CIDR on [`ipnet`]'s types, re-exported so one version reaches every component.
 
 use std::fmt;
 use std::net::IpAddr;
 
 pub use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 
-/// What is wrong with a CIDR read from a config, naming the input as it was written.
+/// Names the input as written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError(String);
 
@@ -18,8 +17,7 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// `"<address>/<prefix length>"` of either family. The address keeps its host bits: a config
-/// gives an interface address and its network in one value, as `203.0.113.1/24`.
+/// `"<address>/<prefix length>"`, host bits kept: `203.0.113.1/24` is an address and its network.
 pub fn parse(cidr: &str) -> Result<IpNet, ParseError> {
     let (addr, prefix_len) = cidr
         .split_once('/')
@@ -38,7 +36,6 @@ pub fn parse(cidr: &str) -> Result<IpNet, ParseError> {
     })
 }
 
-/// [`parse`], for a value that may only be IPv4.
 pub fn parse_ipv4(cidr: &str) -> Result<Ipv4Net, ParseError> {
     match parse(cidr)? {
         IpNet::V4(net) => Ok(net),
@@ -46,7 +43,6 @@ pub fn parse_ipv4(cidr: &str) -> Result<Ipv4Net, ParseError> {
     }
 }
 
-/// [`parse`], for a value that may only be IPv6.
 pub fn parse_ipv6(cidr: &str) -> Result<Ipv6Net, ParseError> {
     match parse(cidr)? {
         IpNet::V6(net) => Ok(net),
@@ -54,9 +50,8 @@ pub fn parse_ipv6(cidr: &str) -> Result<Ipv6Net, ParseError> {
     }
 }
 
-/// What is left of `net` once `excluded` is taken out of it: the fewest networks that cover the
-/// rest, in address order. A network outside `net`, or of the other family, leaves it whole;
-/// one that covers it leaves nothing. Host bits count as the network they sit in.
+/// The fewest networks covering `net` less `excluded`, in address order. Host bits count as their
+/// network.
 pub fn exclude(net: IpNet, excluded: IpNet) -> Vec<IpNet> {
     let (net, excluded) = (net.trunc(), excluded.trunc());
     if excluded.contains(&net) {

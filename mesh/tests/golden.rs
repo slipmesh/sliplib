@@ -1,7 +1,5 @@
-//! What every node of the fixtures under `golden/` gets: each file of format version 2 is compared
-//! with the configs version 1 gave the network it was converted from, derived public keys named by
-//! their owner. A change of value fails here, and changes what the nodes of a working network are
-//! configured with.
+//! Each file of version 2 against the configs version 1 gave the network it was converted from,
+//! derived public keys named by their owner.
 
 use serde::{Deserialize, Serialize};
 use sliplib_config::awg::{AwgConfig, InterfaceEntry};
@@ -47,8 +45,7 @@ impl Awg {
     }
 }
 
-/// The configs version 1 gave the nodes of a network: the directory that holds them, and the
-/// nodes, in the order written.
+/// Version 1's, by directory, with the nodes in the order written.
 struct Configs {
     directory: &'static str,
     nodes: &'static [&'static str],
@@ -66,15 +63,13 @@ const ALTERNATE: Configs = Configs {
     nodes: &["east", "west", "south"],
 };
 
-/// The network written in version 2 by hand, beside the configs its file of version 1 gave.
+/// A network converted by hand, beside version 1's configs.
 struct Twin {
     v1: &'static Configs,
     text: &'static str,
-    /// An endpoint a peer dialed in version 1 because the node wrote a port into its own, and
-    /// the one it dials now: the node's address and the link's port.
+    /// What a peer dialed where the node wrote a port into its endpoint, and what it dials now.
     redialed: &'static [(&'static str, &'static str)],
-    /// An address version 1 derived from a `node_id` too wide for a network, which the conversion
-    /// replaced, and the one derived from the new `node_id`.
+    /// An address of a `node_id` too wide for its network, and the one of its replacement.
     renumbered: &'static [(&'static str, &'static str)],
 }
 
@@ -99,7 +94,7 @@ const ALTERNATE_TWIN: Twin = Twin {
     ],
 };
 
-/// `text` with each public key of `public_keys` replaced by the name of whose it is.
+/// Each public key replaced by its owner's name.
 fn named(text: String, public_keys: &[(String, String)]) -> String {
     public_keys
         .iter()
@@ -134,8 +129,7 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
     for host in twin.v1.nodes {
         let directory = twin.v1.directory;
         let golden_text = |config: &str| golden(directory, &format!("{host}.{config}.yaml"));
-        // Written back, each file holds what it held: a key the types do not take fails here and
-        // not unseen below, where both sides go through them.
+        // Here, not unseen below: a key the types do not take.
         let read_awg: Awg = sliplib_yaml::from_str(&golden_text("awg")).unwrap();
         let read_router: Router = sliplib_yaml::from_str(&golden_text("router")).unwrap();
         let as_read = |config: &str| sliplib_yaml::from_str::<Value>(&golden_text(config)).unwrap();

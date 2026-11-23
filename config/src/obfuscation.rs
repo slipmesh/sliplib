@@ -1,42 +1,19 @@
-//! AmneziaWG's device-level obfuscation parameters, covering the full protocol surface of the
-//! current (v3.0.20260805) kernel module - confirmed field-by-field against
-//! amneziawg-linux-kernel-module's `src/netlink.c` `device_policy` table and
-//! amneziawg-tools' `src/config.c` (the authoritative list of what's actually user-configurable;
-//! the kernel module's own README only documents jc/jmin/jmax/s1/s2/h1-h4).
-//!
-//! Grouped below by what each knob actually does, matching the struct's own field order, with the
-//! constraints `Obfuscation::validate` enforces because the kernel module refuses or mishandles
-//! anything else:
-//! - jc/jmin/jmax: how many junk packets to send before the handshake, and their size range;
-//!   jmin must not exceed jmax.
-//! - s1-s4: junk size for each handshake-adjacent packet type - s1/s2 for init/response, s3/s4
-//!   extending the same idea to cookie-reply and transport (data) packets. s3/s4 and i1-i5 came
-//!   with the 2025 releases of AmneziaWG 1.0, the header protection key and the six tuning
-//!   values with 3.0, the two switches with 3.1.
-//! - h1-h4: magic header replacement values, one per packet type (init/response/cookie/transport),
-//!   each a number or a range `lo-hi` out of which the module draws the header of every packet it
-//!   sends. Both ends of a tunnel carry the same four; the four must not share a value, an unset
-//!   one counting as its WireGuard message type 1..4.
-//! - i1-i5: decoy/cover packets with a configurable header spec, sent alongside real traffic.
-//! - header_protection_key: encrypts the WireGuard packet header's own type/reserved fields with a
-//!   separate key - a distinct obfuscation layer from the junk-packet tricks above. The key is
-//!   the interface's: once set, every handshake, cookie and data packet to and from every peer
-//!   of it is protected, so each peer needs the same key and the same s1..s4, every one of them
-//!   at least 12, room for the nonce. The module reads no per-peer switch for it.
-//! - content_padding_addition, rekey_after_time, rekey_timeout, reject_after_time,
-//!   keepalive_timeout, max_handshake_attempts: protocol timing/padding constants vanilla
-//!   WireGuard hardcodes - configurable here specifically so they stop being a fixed,
-//!   fingerprintable signature. Each is a number or a range `lo-hi` with ends up to 65535, out of
-//!   which the module draws; each end of a tunnel has its own. Zero or unset leaves a timing
-//!   value to the constants the module has for it, and a data packet to the padding it gets
-//!   without content_padding_addition: WireGuard's own, or the random trailer when
-//!   random_trailers is on. A range of a timing value starts at 1 or above, rekey_after_time
-//!   ends below 180, and reject_after_time stays above keepalive_timeout plus rekey_timeout.
+//! AmneziaWG's device-level obfuscation: every field the kernel module (v3.0.20260805) takes, and
+//! checks of what it refuses or mishandles.
+//! - `jc`, `jmin`, `jmax`: junk packets before a handshake; `jmin` up to `jmax`.
+//! - `s1`..`s4`: junk on initiation, response, cookie reply and data packets.
+//! - `h1`..`h4`: a magic header per message type, a number or a range the module draws from. Both
+//!   ends hold the same four, sharing no value; an unset one counts as its WireGuard type 1..4.
+//! - `i1`..`i5`: decoy packets.
+//! - `header_protection_key`: encrypts a header's type and reserved fields. It is the interface's,
+//!   so every peer holds the same key and the same `s1`..`s4`, each at least 12 for the nonce.
+//! - The six timing and padding values WireGuard fixes, each a number or a range with ends up to
+//!   65535, per end. Zero or unset leaves the module's constant, or the padding a data packet gets
+//!   otherwise. A timing range starts at 1 or above, `rekey_after_time` ends below 180, and
+//!   `reject_after_time` stays above `keepalive_timeout` plus `rekey_timeout`.
 //!
 //! Not checked: the module stops using a key 180 seconds after its handshake whatever
-//! reject_after_time says, so a reject_after_time far from 180 moves the timers that depend on it
-//! away from the moment the key really ends - one so large that the renewal on the receiving side
-//! falls due only after the key is gone, for one.
+//! `reject_after_time` says, so one far from 180 moves its timers off the key's real end.
 
 use crate::Range;
 use serde::{Deserialize, Serialize};
@@ -81,16 +58,12 @@ pub struct Obfuscation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub i5: Option<String>,
 
-    /// Base64 of 32 bytes like a WireGuard key, but the interface's: the same for every peer of
-    /// it. A pool's key is written into the config of each of its clients, so it is as secret as
-    /// all of them together.
+    /// Base64 of 32 bytes, the interface's: the same for every peer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header_protection_key: Option<Secret>,
 
-    /// Bytes added to a data packet in place of the padding it would otherwise get: WireGuard's
-    /// own, or the random trailer when `random_trailers` is on. With this non-zero,
-    /// `random_trailers` still lengthens handshake and cookie messages and no longer touches data
-    /// packets.
+    /// In place of a data packet's padding, WireGuard's or the random trailer. Non-zero, it leaves
+    /// `random_trailers` to handshake and cookie messages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_padding_addition: Option<Range<u16>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,36 +77,30 @@ pub struct Obfuscation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_handshake_attempts: Option<Range<u16>>,
 
-    /// AmneziaWG 3.1. Appends a random-length trailer to outgoing packets, sized against what
-    /// the peer has been seen to send, so the wire lengths stop being a fingerprint. Only an end
-    /// that sets it accepts a handshake or cookie message longer than its exact size, so an end
-    /// without it drops what an end with it sends: both ends of a tunnel set it, or neither.
+    /// AmneziaWG 3.1: a random-length trailer, sized to what the peer sends. An end without it
+    /// drops a longer handshake or cookie message: both ends set it, or neither.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub random_trailers: Option<bool>,
-    /// AmneziaWG 3.1. Suppresses cookie replies, which are a message type of their own and
-    /// therefore a signature. The cost is the load-shedding those replies exist for.
+    /// AmneziaWG 3.1: no cookie replies, a signature of their own, at the cost of their
+    /// load-shedding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_cookies: Option<bool>,
 }
 
-/// The AmneziaWG module refuses a header protection key unless every junk size s1..s4 can hold
-/// its nonce, and says why only in a debug log line that is off by default: userspace gets a bare
-/// `EINVAL` from `SetDevice`. `netlink::awg` sends an unset size as 0.
+/// The module refuses a header protection key, with a bare `EINVAL`, unless each of `s1`..`s4`
+/// holds its nonce; an unset one counts as 0.
 pub const HEADER_PROTECTION_NONCE_SIZE: u16 = 12;
 
-/// What `SetDevice` sends for an unset h1..h4: the real WireGuard message types (`enum
-/// message_type` in AmneziaWG's `messages.h`), which a fresh device already defaults to
-/// (`device.c`'s `wg_init`). Not 0, which would be a distinct, still obfuscated magic value.
+/// An unset `h1`..`h4`: the WireGuard message types, a fresh device's own. 0 would be a magic
+/// value.
 pub const DEFAULT_MAGIC_HEADERS: [u32; 4] = [1, 2, 3, 4];
 
-/// The module's own constants, in seconds. It uses each for the timing value of its name when
-/// that is zero, and the first also as the age at which a key is no longer used.
+/// The module's, in seconds, for a timing value left zero; the first is also a key's age limit.
 const REJECT_AFTER_TIME: u16 = 180;
 const KEEPALIVE_TIMEOUT: u16 = 10;
 const REKEY_TIMEOUT: u16 = 5;
 
-/// The least a timing value can come out as: the low end of its range, or the module's constant
-/// when it is unset or zero.
+/// The low end, or `constant` where unset or zero.
 fn least(value: Option<Range<u16>>, constant: u16) -> u32 {
     match value {
         Some(range) if !range.is_zero() => range.lo().into(),
@@ -141,8 +108,7 @@ fn least(value: Option<Range<u16>>, constant: u16) -> u32 {
     }
 }
 
-/// A combination the kernel module refuses when the interface is configured, or mishandles
-/// afterwards.
+/// What the module refuses at configuration, or mishandles after.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ObfuscationError {
@@ -156,7 +122,7 @@ pub enum ObfuscationError {
         .first.0, .first.1, .second.0, .second.1
     )]
     HeadersOverlap {
-        /// Which of h1..h4, and what it holds.
+        /// Which of `h1`..`h4`, and its value.
         first: (usize, Range<u32>),
         second: (usize, Range<u32>),
     },
@@ -183,20 +149,16 @@ pub enum ObfuscationError {
     JunkSizesReversed { jmin: u16, jmax: u16 },
 }
 
-/// How a tunnel with `random_trailers` on loses data packets it should have delivered. With the
-/// switch on, the receiving module no longer tells a handshake message from a data packet by its
-/// length: it reads the four bytes at the offsets `s1`, `s2` and `s3`, and a data packet whose
-/// bytes there fall inside `h1`, `h2` or `h3` is taken for that message and dropped.
+/// With `random_trailers` on, the receiving module tells a message by the four bytes at `s1`, `s2`
+/// and `s3`: a data packet whose bytes there fall in `h1`, `h2` or `h3` is dropped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TrailerLoss {
-    /// One of `h1` to `h3` is a range: of 2^32 data packets, up to `values`, the number of values
-    /// in the three together, are dropped. It is a bound where the bytes read are random.
+    /// One of `h1`..`h3` is a range: at most `values` of 2^32 data packets, where the bytes read
+    /// are random.
     Share { values: u64 },
-    /// There is no `header_protection_key`, and `field`, one of `s1` to `s3`, stands `above`
-    /// bytes over `data_junk`, the `s4` as it is set, 1 to 15: the bytes read there are the data
-    /// packet's own header in the clear, so which packets are dropped is decided by their key
-    /// index and counter.
+    /// No `header_protection_key`, and `field` stands `above` 1..15 bytes over `data_junk`, the
+    /// `s4` set: it reads the packet's clear header, so its key index and counter decide.
     ReadsHeader {
         field: &'static str,
         above: u16,
@@ -243,16 +205,15 @@ impl fmt::Display for TrailerLoss {
     }
 }
 
-/// How many values a magic header can take: the four bytes the module reads.
+/// The four bytes the module reads.
 const MAGIC_HEADER_VALUES: u64 = 1 << 32;
 
-/// The bytes of a data packet's header that follow its `s4` bytes of junk in the clear, less the
-/// first: an offset of `s4` itself reads the packet's type, which is never another header's.
+/// A data packet's clear header after its junk, less the first byte: that is its type, never
+/// another header's.
 const CLEAR_HEADER_REACH: u16 = 15;
 
 impl Obfuscation {
-    /// What the tunnel loses of its data packets because `random_trailers` is on; nothing when
-    /// it is off. Both ends of the tunnel hold the same values, so it is the same at both.
+    /// Nothing with `random_trailers` off; the same at both ends.
     pub fn trailer_loss(&self) -> Vec<TrailerLoss> {
         if self.random_trailers != Some(true) {
             return Vec::new();
@@ -285,15 +246,14 @@ impl Obfuscation {
         loss
     }
 
-    /// How far above `data_junk`, the `s4` of a data packet, `offset` stands, when that is
-    /// inside the header such a packet carries in the clear: the offset of a handshake or cookie
-    /// message, `s1` to `s3`, then reads a field of the data packet's own.
+    /// How far above `data_junk`, a data packet's `s4`, `offset` stands, where that reads into its
+    /// clear header.
     pub fn bytes_into_clear_header(offset: u16, data_junk: u16) -> Option<u16> {
         let above = offset.saturating_sub(data_junk);
         (1..=CLEAR_HEADER_REACH).contains(&above).then_some(above)
     }
 
-    /// The magic headers as the kernel module ends up with them, unset ones at their defaults.
+    /// Unset ones at their defaults.
     pub fn magic_headers(&self) -> [Range<u32>; 4] {
         let [d1, d2, d3, d4] = DEFAULT_MAGIC_HEADERS;
         [
@@ -304,7 +264,7 @@ impl Obfuscation {
         ]
     }
 
-    /// Rejects combinations the kernel module refuses at `SetDevice` or mishandles afterwards.
+    /// What the module refuses at `SetDevice` or mishandles after.
     pub fn validate(&self) -> Result<(), ObfuscationError> {
         if self.header_protection_key.is_some() {
             let too_small: Vec<_> = [
@@ -335,8 +295,8 @@ impl Obfuscation {
             }
         }
 
-        // The module draws from a range as written and treats only an all-zero one as unset: a
-        // draw of 0 is a timer that fires at once, or a handshake given up after one retry.
+        // The module draws as written, only an all-zero range being unset: a draw of 0 fires at
+        // once, or gives up a handshake after one retry.
         for (name, value) in [
             ("rekey_after_time", self.rekey_after_time),
             ("rekey_timeout", self.rekey_timeout),
@@ -351,17 +311,15 @@ impl Obfuscation {
             }
         }
 
-        // The module stops using a key at its own constant, whatever reject_after_time says; a
-        // renewal drawn at that age or later comes after the key is gone, and an end that only
-        // sends then waits for a handshake at every expiry.
+        // The key ends at the module's constant whatever reject_after_time says: a renewal drawn at
+        // that age or later comes after it.
         if let Some(range) = self.rekey_after_time
             && range.hi() >= REJECT_AFTER_TIME
         {
             return Err(ObfuscationError::RekeyAfterKeyIsGone(range));
         }
 
-        // The module takes a key for due once it is older than reject_after_time less the low
-        // ends of the other two, and a result of zero or less renews it right after every
+        // Due at reject_after_time less the other two's low ends: zero or less renews after every
         // handshake.
         let (reject, keepalive, rekey) = (
             least(self.reject_after_time, REJECT_AFTER_TIME),
@@ -376,8 +334,8 @@ impl Obfuscation {
             });
         }
 
-        // When jc and jmax are non-zero, the module draws each junk packet's size from
-        // jmin..=jmax, into a buffer of jmax bytes, without checking the order.
+        // With jc and jmax non-zero, each junk size is drawn from jmin..=jmax into a jmax buffer,
+        // order unchecked.
         let (jc, jmin, jmax) = (
             self.jc.unwrap_or(0),
             self.jmin.unwrap_or(0),

@@ -1,6 +1,5 @@
-//! `slipmesh.yaml` of format version 2 read as a whole: every block, the network with what is in
-//! force for each node and each link, the groups as their nodes, and the documents of a platform
-//! with the nodes each reaches.
+//! The files read as a whole: the blocks, the network in force, the groups as nodes, and each
+//! platform document with its aim.
 
 use super::block::{Aimed, Block, Rank};
 use super::check::Invalid;
@@ -11,10 +10,10 @@ use serde::de::DeserializeOwned;
 use sliplib_yaml::{Document, Mapping, MultiDoc, Value, merge};
 use std::fmt;
 
-/// The syntax of the format this module reads.
+/// Of the syntax.
 pub const VERSION: u64 = 2;
 
-/// The generation of the rules that turn the files into configs, for which this code is built.
+/// Of the rules that turn the files into configs.
 pub const REVISION: u64 = 1;
 
 const NETWORK: &str = "network";
@@ -23,12 +22,12 @@ const PLATFORM: &str = "platform";
 const TEMPLATE: &str = "template";
 const PATCH: &str = "patch";
 
-/// The top-level block of every document: what the document is for and which nodes it reaches.
+/// The key of every document's block.
 pub const META_KEY: &str = "slipmesh";
 
 type Source = Box<dyn std::error::Error + Send + Sync>;
 
-/// Where a document stands in the files: its kind and the line it starts at.
+/// A document's kind and the line it starts at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Place {
     kind: &'static str,
@@ -51,7 +50,6 @@ impl fmt::Display for Place {
     }
 }
 
-/// What is wrong with a document's `slipmesh:` block.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum BlockError {
@@ -61,11 +59,9 @@ pub enum BlockError {
     Malformed(#[source] Source),
 }
 
-/// Why the files do not read.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The text is not a stream of YAML documents.
     #[error(transparent)]
     Yaml(Source),
     #[error(
@@ -90,7 +86,6 @@ pub enum Error {
         #[source]
         source: BlockError,
     },
-    /// The body of the document at `place` does not read as the type asked for.
     #[error("{place}")]
     Body {
         place: Place,
@@ -135,10 +130,9 @@ pub enum Error {
     },
 }
 
-/// One document with its `slipmesh:` block read out of it.
 struct Read {
     block: Block,
-    /// The document without the block, its lines kept so that an error names the line of the file.
+    /// Without the block, its lines kept for an error to name.
     body: Document,
 }
 
@@ -164,9 +158,8 @@ fn body<T: DeserializeOwned>(document: &Document, kind: &'static str) -> Result<
     })
 }
 
-/// Refuses files of another version or revision before anything else of them is read, so that a
-/// file of a newer format is not refused for a key this code does not know: the version of every
-/// `network` document first, then the revision of each.
+/// Before anything else, so a newer format is not refused for a key unknown here: every version,
+/// then every revision.
 fn generation(yaml: &MultiDoc) -> Result<(), Error> {
     let networks: Vec<(Place, &Value)> = yaml
         .documents()
@@ -219,7 +212,6 @@ fn generation(yaml: &MultiDoc) -> Result<(), Error> {
     Ok(())
 }
 
-/// The one document of `kind` among `documents`, or none.
 fn at_most_one(
     mut documents: Vec<Document>,
     kind: &'static str,
@@ -239,11 +231,10 @@ fn at_most_one(
     }
 }
 
-/// The lists of `routing` that a node may hold its own value of.
+/// Those a node may hold its own of.
 const NODE_LISTS: [&str; 3] = ["direct_interfaces", "learn", "announce"];
 
-/// `own` laid over `network`, which holds no `null`. Without a mapping of its own, a node or a
-/// link has the network's values.
+/// `network` holds no `null`. Without a mapping of its own, the network's.
 fn lay(network: &Value, own: Option<&Value>) -> Value {
     match own {
         Some(own) if own.is_mapping() => merge(network.clone(), own),
@@ -251,11 +242,9 @@ fn lay(network: &Value, own: Option<&Value>) -> Value {
     }
 }
 
-/// The network document laid over the empty tree, so that no `null` is left in it, with what is in
-/// force written where each node and each link holds its own values: `nodes.<name>.routing` over
-/// the same keys of `routing`, and `mesh.links.<name>.<type>` over `mesh.<type>`. Those own values
-/// are taken as written: a `null` among them takes the network's away there, which reading the two
-/// apart could not tell from a key left out.
+/// Laid over the empty tree, so no `null` is left, with `routing` laid under each node's and
+/// `mesh.<type>` under each link's block. The own values are taken as written: a `null` there takes
+/// the network's away, which reading the two apart could not tell from a key left out.
 fn in_force(written: &Value) -> Value {
     let mut tree = merge(Value::Null, written);
     let routing = tree.get("routing");
@@ -306,8 +295,7 @@ fn in_force(written: &Value) -> Value {
     tree
 }
 
-/// The nodes a document of a platform reaches, and where it stands among the others that reach
-/// one of them. It reads as where the document stands in the files, for a refusal to name.
+/// The nodes a document reaches, and its rank. It displays as its place, for a refusal.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Aim {
     place: Place,
@@ -316,8 +304,6 @@ pub struct Aim {
 }
 
 impl Aim {
-    /// Of two documents of one kind that reach one node, the greater is laid over the lesser or
-    /// chosen, and of two equal ones the later read.
     pub fn rank(&self) -> Rank {
         self.rank
     }
@@ -367,7 +353,7 @@ impl Aimed {
     }
 }
 
-/// A `template` or `patch` document. The body is its platform's tool's to read.
+/// A `template` or `patch`, whose body is its platform's tool's.
 pub struct AimedDocument {
     aim: Aim,
     body: Document,
@@ -392,13 +378,13 @@ impl AimedDocument {
         &self.body.value
     }
 
-    /// The body as `T`, refused naming the document and the line.
+    /// A refusal names the document and the line.
     pub fn read<T: DeserializeOwned>(&self) -> Result<T, Error> {
         body(&self.body, self.aim.place.kind)
     }
 }
 
-/// A `platform` document. The body is its platform's tool's to read.
+/// Whose body is its platform's tool's.
 pub struct PlatformDocument {
     place: Place,
     body: Document,
@@ -418,13 +404,13 @@ impl PlatformDocument {
         &self.place
     }
 
-    /// The body as `T`, refused naming the document and the line.
+    /// A refusal names the document and the line.
     pub fn read<T: DeserializeOwned>(&self) -> Result<T, Error> {
         body(&self.body, PLATFORM)
     }
 }
 
-/// Those of `documents` that reach `node`, the last by rank last.
+/// The last by rank last.
 fn reaching<'a>(documents: &'a [AimedDocument], node: &str) -> Vec<&'a AimedDocument> {
     let mut reaching: Vec<&AimedDocument> = documents
         .iter()
@@ -533,19 +519,16 @@ impl File {
         })
     }
 
-    /// The network, with what is in force for each node under its `routing` and for each link in
-    /// the block of its type.
+    /// What is in force under each node's `routing` and in each link's block.
     pub fn network(&self) -> &Network {
         &self.network
     }
 
-    /// The position of the `network` document in the file, where a value of the network is
-    /// written.
+    /// Its position in the file, for a write.
     pub fn network_document(&self) -> usize {
         self.network_document
     }
 
-    /// The `platform` document of `platform`, if the files hold one.
     pub fn platform(&self, platform: Platform) -> Option<&PlatformDocument> {
         self.platforms
             .iter()
@@ -553,18 +536,17 @@ impl File {
             .map(|(_, document)| document)
     }
 
-    /// Every `template` document, in the order of the documents.
+    /// In the order of the documents.
     pub fn templates(&self) -> &[AimedDocument] {
         &self.templates
     }
 
-    /// The `template` documents that reach `node`, the last by rank last: of those for one
-    /// daemon the node gets the last.
+    /// The last by rank last: of one daemon's, the node gets the last.
     pub fn templates_for(&self, node: &str) -> Vec<&AimedDocument> {
         reaching(&self.templates, node)
     }
 
-    /// Every `patch` document, in the order of the documents.
+    /// In the order of the documents.
     pub fn patches(&self) -> &[AimedDocument] {
         &self.patches
     }

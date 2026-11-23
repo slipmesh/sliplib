@@ -1,6 +1,5 @@
-//! WireGuard keys in the form configs and RouterOS carry them: the base64 text of 32 bytes.
-//! AmneziaWG's header protection key takes the same form but is a key both peers share, not an
-//! X25519 one: it is a [`Secret`].
+//! WireGuard keys as configs and RouterOS carry them: base64 of 32 bytes. AmneziaWG's header
+//! protection key has that form but is shared, not X25519: a [`Secret`].
 
 use crate::Secret;
 use base64::Engine as _;
@@ -14,7 +13,7 @@ use zeroize::ZeroizeOnDrop;
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyError {
     Base64(base64::DecodeError),
-    /// How many bytes the text decoded to instead of 32.
+    /// The bytes decoded, not 32.
     Length(usize),
 }
 
@@ -36,7 +35,7 @@ impl std::error::Error for KeyError {
     }
 }
 
-/// Surrounding whitespace is ignored: a key read from a file usually ends in a newline.
+/// Surrounding whitespace is ignored: a key from a file ends in a newline.
 pub fn decode_key(b64: &str) -> Result<[u8; 32], KeyError> {
     let bytes = STANDARD.decode(b64.trim()).map_err(KeyError::Base64)?;
     let len = bytes.len();
@@ -47,16 +46,11 @@ pub fn encode_key(bytes: &[u8; 32]) -> String {
     STANDARD.encode(bytes)
 }
 
-/// A WireGuard private key, kept as the text it was given so that it is written back unchanged.
+/// Kept as given, so it is written back unchanged; printed and wiped as a [`Secret`], but for the
+/// copies decoded from it.
 ///
-/// It stays out of printed output and leaves only where it is meant to go, as a [`Secret`] does. The
-/// copies decoded from it on the way to [`Self::public_key`] or a comparison are not wiped.
-///
-/// Two keys are equal when they are the same key, whatever form each is in. WireGuard clamps a
-/// private key when it loads one and RouterOS hands back the clamped form, while a generated key is
-/// stored unclamped: as text the two never match, although X25519 makes them the same key. Text
-/// that is not a key is compared as written: a spurious difference is safer than mangling a value
-/// this does not understand.
+/// Equal as X25519 uses it: RouterOS hands back the clamped form of a key generated unclamped.
+/// Text that is not a key compares as written.
 #[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
 #[serde(transparent)]
 pub struct PrivateKey(Secret);

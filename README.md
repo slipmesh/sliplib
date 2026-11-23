@@ -141,137 +141,107 @@ sliplib-secrets = { git = "https://github.com/slipmesh/sliplib", tag = "v0.1.0" 
 
 ### `sliplib-net`
 
-CIDR for every component, on the types of [`ipnet`](https://crates.io/crates/ipnet), which this
-crate re-exports: a component takes `IpNet`, `Ipv4Net` and `Ipv6Net` from here rather than from
-`ipnet` itself, so one change of the version reaches all of them. Containment, masks and
-aggregation are `ipnet`'s own methods. On top of them:
+CIDR on [`ipnet`](https://crates.io/crates/ipnet)'s types, re-exported so one version of `ipnet`
+reaches every component. On top of its methods:
 
-- `parse`, `parse_ipv4` and `parse_ipv6` read `"<address>/<prefix length>"` as a config writes it, keeping the
-  host bits, with errors that name the input;
-- `exclude(net, excluded)` is what `ipnet` lacks: the rest of `net` without `excluded`, as the fewest
-  networks, in address order;
+- `parse`, `parse_ipv4` and `parse_ipv6` read `"<address>/<prefix length>"`, host bits kept, with
+  errors that name the input;
+- `exclude(net, excluded)`: the rest of `net`, as the fewest networks, in address order.
 
 ### `sliplib-yaml`
 
-Every read, edit and write of a YAML file goes through here, so a component deals in its own types
-and values and never in YAML text or files. The crate knows YAML and files, not what the documents
-mean.
+Every read, edit and write of a YAML file, so a component deals in its own types. What the
+documents mean is the caller's.
 
-- `MultiDoc` is a multi-document file: `read` from disk or `parse` from text, then `documents()`,
-  each with its position in the file, the line its content starts on and its value. A document of
-  only comments is skipped but keeps its position. `Document::take` removes a top-level key, and
-  `Document::deserialize` reads the rest into a type, with errors naming the line of the file.
-- `MultiDoc::document_mut` edits a document's value, and `MultiDoc::text` writes the file back. The
-  values are what is written: comments, and documents of only comments, are not kept.
-- `read` reads a file of one document into a type.
-- `merge` is JSON Merge Patch (RFC 7386) with key order kept; `join` puts documents together.
+- `MultiDoc`: `read` or `parse` a multi-document file, then `documents()`, each with its position,
+  the line it starts on and its value. `Document::take` removes a top-level key;
+  `Document::deserialize` reads the rest, an error naming the line. `document_mut` edits a value
+  and `text` writes the file back, without its comments or documents of only comments.
+- `read`: a file of one document, into a type.
+- `merge`: JSON Merge Patch (RFC 7386), key order kept; `join` puts documents together.
 - `replace_file` replaces a file atomically, keeping its permissions and following a symlink;
-  `write_if_changed` writes only what differs, creating the directory; `read_or_empty` reads a file
-  that may not exist yet.
-- `Value`, `Mapping`, `from_str`, `from_value`, `to_string` and `to_value` are `yaml_serde`'s,
-  re-exported so that a component needs no YAML crate of its own.
+  `write_if_changed` writes only what differs; `read_or_empty` reads a file that may not exist.
+- `Value`, `Mapping`, `from_str`, `from_value`, `to_string` and `to_value`, re-exported from
+  `yaml_serde`.
 
 ### `sliplib-config`
 
-`slipmesh.yaml`, which every tool reads, and what every platform's daemons share of their configs:
-what a config generator writes for a node from it, and what its readers take - the daemons on the
-node, and the RouterOS tool. A key of one daemon alone, such as where it serves its metrics, is its
-platform's tool's. Types and their checks only; reading and writing the files is `sliplib-yaml`'s.
+`slipmesh.yaml`, and what every platform's daemons share of their configs. A key of one daemon
+alone, such as its metrics listener, is its platform's tool's.
 
-Every check and the loader return an error type of their own, one variant for each refusal:
-`v2::Error`, `v2::Invalid`, `v2::NameError` and those of `v2::groups` and `v2::network`,
-`awg::Invalid`, `router::Invalid` and `LoopbackAddressError`, `ObfuscationError`. A variant's text
-is one line of the refusal. Where that line names its cause itself - an address that does not parse,
-with why - the variant holds the cause as a field and has no `source`; where the cause is a line of
-its own, it is the variant's `source`. A variant never does both, so printing the whole chain gives
-the whole message, each part once.
+Each check and the loader returns an error of its own, one variant per refusal: `v2::Error`,
+`v2::Invalid`, `v2::NameError`, those of `v2::groups` and `v2::network`, `awg::Invalid`,
+`router::Invalid`, `LoopbackAddressError` and `ObfuscationError`. A variant's text is one line.
+A cause it names itself is a field, and one of its own line is its `source`, never both: the whole
+chain prints the whole message, each part once.
 
-- `v2`: `slipmesh.yaml` of [format version 2](docs/slipmesh-yaml.md). `v2::File` reads the files as
-  a whole (`parse`, `read`) and refuses whatever its specification has the loader refuse, as
-  `v2::Error`. Among them are a text that is not YAML, and a `network` document whose `version` is
-  missing, below 2 or `null`: such files are of version 1, refused as `VersionOne`, naming the
-  document that converts them. `InterfacePrefix::REFERENCE` is what `slipmesh mint` writes where the
-  files set no `mesh.interface_prefix`, and `network_document` says where the network stands in the
-  file, for a write. It gives the `network` with what is in force for each node and each link
-  written where they hold their own: a node's `routing`, a link's block of its type. A node gives
-  its `underlay` and `private_key`, a `LinkKind` its `port`, `obfuscation` (empty on `wireguard`)
-  and `persistent_keepalive`. The `template` and `patch` documents come with their `Aim`: the nodes
-  each reaches, and its rank among those that reach one node (`templates_for`), as an
-  `AimedDocument`; a `platform` document as a `PlatformDocument` (`platform`). The body is its
-  platform's tool's: `read` gives it as the tool's type, a refusal naming the document and the line,
-  and a template or patch also gives its `value`. This release reads one `network` and one `groups`
-  document, and refuses a second, which the format lays over the first, until the tools read several
-  files.
-- `awg`: `AwgConfig` with its interfaces and peers, and `validate`. A peer's `persistent_keepalive`
-  is a number of seconds or a range of them. `InterfaceEntry::keepalive_of` gives what a peer ends
-  up with: none for a peer without an `endpoint`, which is only waited for; for a dialed one its
-  own, or 25 on an interface that sets nothing of the obfuscation and 20 to 30 on one that sets
-  any. Whoever writes a config leaves out a keepalive that does not change what that gives;
-  `validate` takes one written all the same.
-- `router`: `RouterConfig` with its identity, iBGP peers, BFD settings, announcements and bypass
-  sources, and `validate`.
-- `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would
-  otherwise fail on. `Obfuscation::trailer_loss` says how a tunnel with `random_trailers` on loses
-  data packets, as `TrailerLoss`: a share of them where one of `h1` to `h3` is a range, or by their
-  own header where an offset reads it. `Obfuscation::bytes_into_clear_header` says whether an offset
-  does, for the warning and for whatever creates an offset.
-- `Range`, the type of the magic headers and the timing and padding values of `Obfuscation`. The
-  kernel module draws each of them from a range, written as one number or as `lo-hi`. A number
-  is rendered into a node's config as a number and a range as a string, which a daemon built
-  before ranges refuses: write a range only for nodes that run a release that reads it. No tool
-  here checks that.
+- `v2`: [format version 2](docs/slipmesh-yaml.md).
+  - `File` (`parse`, `read`) refuses what its specification has the loader refuse, as `v2::Error`;
+    a file of version 1 as `VersionOne`, naming the conversion document.
+  - `network()` gives what is in force under each node's `routing` and in each link's block.
+  - A node gives its `underlay` and `private_key`; a `LinkKind` its `port`, `obfuscation` (empty
+    on `wireguard`) and `persistent_keepalive`.
+  - `network_document` is where the network stands, for a write. `InterfacePrefix::REFERENCE` is
+    what `slipmesh mint` writes where `mesh.interface_prefix` is unset.
+  - `templates`, `templates_for` and `patches` give `AimedDocument`s with their `Aim`: what each
+    reaches and its rank. `platform` gives a `PlatformDocument`.
+  - A body is its platform's tool's: `read` gives it as the tool's type, a refusal naming the
+    document and the line. A template or patch also gives its `value`.
+  - This release refuses a second `network` or `groups` document, which the format lays over the
+    first, until the tools read several files.
+- `awg`: `AwgConfig` and `validate`. `InterfaceEntry::keepalive_of` is a peer's keepalive: none
+  for one without an `endpoint`; else its own, or 25 on a plain interface and 20 to 30 on an
+  obfuscated one.
+- `router`: `RouterConfig` and `validate`.
+- `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would fail
+  on. `trailer_loss` says how a tunnel with `random_trailers` on loses data packets, as
+  `TrailerLoss`. `bytes_into_clear_header` says whether an offset reads a data packet's clear
+  header.
+- `Range`: a number or `lo-hi` the module draws from. A range is written as a string, which a
+  daemon built before ranges refuses; nothing here checks a node's release.
 
 ### `sliplib-mesh`
 
-What a node's daemons are configured with, computed from the file `sliplib-config` reads, for
-every tool that configures a node of any platform.
+A node's `awg` and `router` configs, computed from the file `sliplib-config` reads, for every tool
+of every platform.
 
-A refusal is a `render::Error`, which names the node and which of its configs it is about, with its
-cause as its `source`, or an `mtu::MtuError`. Files that read but give no mesh are refused as
-`network::Error`; `sliplib-config`'s refuses those that do not read. `Mesh::node` refuses an unknown
-name as `network::UnknownNode`.
+A refusal is a `render::Error`, naming the node and the config, with its cause as its `source`, or
+an `mtu::MtuError`. Files that read but give no mesh are refused as `network::Error`; `Mesh::node`
+refuses an unknown name as `network::UnknownNode`.
 
-- `Mesh`, what the configs are computed from: the loader's network (`network()`) and its interface
-  prefix. `Mesh::of` refuses a `v2::File` without `mesh.interface_prefix`. `addresses` gives what a
-  node's `node_id` gives it: loopbacks, link-local, tunnel IPv4. `direct_interfaces` appends the
-  links' pattern unless listed, where the links carry IPv4. `network::node_key` and
-  `network::link_obfuscation` name where the files hold a key and an obfuscation.
-- `render::node_configs` gives a node's `AwgConfig` and `RouterConfig` from the network, each
-  checked as the node checks it. It refuses a missing key of the node, unless it is on no link, or
-  of a peer, and a link of type `amneziawg` whose obfuscation lacks one of `jc`, `jmin`, `jmax`,
-  `s1`, `s2` and `h1` to `h4`, naming what lacks what; nothing of nodes and links the node is not
-  on. Such a refusal's `secrets::MissingSecret` names `slipmesh mint`, which creates the secret. A
-  dialed peer gets its link's keepalive where that differs from what `InterfaceEntry::keepalive_of`
-  gives without it. No metrics listener: the Talos generator adds it to its daemons' own configs.
-- The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
-  each by the entry it belongs to, and no key for a node on no link, or `NoHeaderLeft`
-  when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a
-  tool that only reads the file leaves it off, and that function is not in its build.
-- `mtu::mesh_mtu`, the MTU of every mesh interface: the largest at which a full-size packet crosses
-  every link's underlay unfragmented, or `mesh.mtu` where it fits. It counts every link's `s4`, 0
-  where unset. It refuses a link whose limit is below 1280, the least IPv6 allows a link, and a
-  `mesh.mtu` above a link's limit, each naming the link; and a `mesh.mtu` below 1280 or set on a
-  mesh without links.
-- `addressing` gives the address a `node_id` gives in a network, the link-local of a loopback, and
-  an endpoint to dial.
-- `warnings::warnings` lists what the tools accept and tell about: for every link, in order, each
-  `TrailerLoss` of its obfuscation. A `Warning` reads as the line a tool prints and says whether it
-  `concerns` a node, so a tool run for some nodes can tell about their links alone.
+- `Mesh`: the loader's network (`network()`) and its interface prefix. `Mesh::of` refuses a
+  `v2::File` without `mesh.interface_prefix`. `addresses` gives what a node's `node_id` gives it:
+  loopbacks, link-local, tunnel IPv4. `direct_interfaces` appends the links' pattern unless listed,
+  where the links carry IPv4. `network::node_key` and `network::link_obfuscation` name where the
+  files hold a key and an obfuscation.
+- `render::node_configs`: a node's `AwgConfig` and `RouterConfig`, each checked as the node checks
+  it. It refuses a missing key of the node, unless it is on no link, or of a peer, and an
+  `amneziawg` obfuscation that lacks one of `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`; the
+  refusal's `secrets::MissingSecret` names `slipmesh mint`. Nothing of links the node is not on is
+  refused. A dialed peer gets its link's keepalive where it differs from `keepalive_of`'s. No
+  metrics listener: the Talos generator adds it.
+- `mint::create`, behind the `mint` feature, off by default: the secrets the file lacks, by entry,
+  no key for a node on no link, or `NoHeaderLeft` where an entry's headers leave no room. Only
+  `slipmesh` builds with it.
+- `mtu::mesh_mtu`: the largest MTU a full-size packet crosses every link's underlay at
+  unfragmented, or `mesh.mtu` where it fits, counting every link's `s4`. It refuses a link limit
+  below 1280, a `mesh.mtu` above a link's limit, each naming the link, a `mesh.mtu` below 1280, and
+  one set on a mesh without links.
+- `addressing`: the address a `node_id` gives, the link-local of a loopback, an endpoint to dial.
+- `warnings::warnings`: each link's `TrailerLoss`, in order. A `Warning` displays as the line a
+  tool prints, and `concerns` tells whether it is about a node.
 
 ### `sliplib-runtime`
 
-`init_tracing()` logs to stdout through `tracing`, filtered by `RUST_LOG`, with no timestamp and no
-colour: Talos's service log and the container runtime stamp every line themselves and store it as text.
-Without `RUST_LOG`, or with it empty, it logs INFO and above: Talos starts an extension service with
-no environment of its own.
-Call it once, first thing in `main`.
+`init_tracing()` logs to stdout by `RUST_LOG`, INFO where it is unset or empty, with no timestamp
+or colour: Talos's service log and the container runtime stamp each line and store it as text, and
+Talos starts an extension service with no environment. Call it first in `main`.
 
-`serve(name, shutdown_timeout, work)` runs a daemon's work under
-[`tokio-graceful-shutdown`](https://crates.io/crates/tokio-graceful-shutdown). It installs the SIGTERM
-and SIGINT handlers before the work starts, and the work gets a `Shutdown` whose `requested()`
-completes on either signal. Work that has not returned `shutdown_timeout` after that is dropped and
-`serve` fails, so the timeout is set below what the sender of the signal waits before SIGKILL. A
-failed work is logged with its whole `anyhow` chain:
+`serve(name, shutdown_timeout, work)` runs a daemon under
+[`tokio-graceful-shutdown`](https://crates.io/crates/tokio-graceful-shutdown). Its handlers are in
+before `work` starts, and `work`'s `Shutdown::requested()` completes on SIGTERM or SIGINT. Work
+still running `shutdown_timeout` later is dropped and `serve` fails: keep it below the sender's wait
+before SIGKILL. A failure is logged with its whole `anyhow` chain:
 
 ```rust,no_run
 use std::time::Duration;
@@ -293,18 +263,16 @@ async fn run() -> anyhow::Result<()> {
 }
 ```
 
-`serve` is the default `serve` feature. A tool that only logs takes the crate with
-`default-features = false`, and none of the shutdown dependencies come with it.
+`serve` is the default `serve` feature; a tool that only logs takes `default-features = false`.
 
 ### `sliplib-secrets`
 
-`Secret` holds a secret as the text it was given, a password or AmneziaWG's header protection key,
-so it is written back unchanged, and prints as `<redacted>` through `Debug`: a structure that holds
-one can be logged or shown in a diff without leaking it. The text leaves through `expose()`, and
-through serde into the config it is written to.
+`Secret` holds a secret, such as AmneziaWG's header protection key, as the text it was given, so it
+is written back unchanged. `Debug` prints `<redacted>`; the text leaves through `expose()` and
+serde.
 
-A WireGuard key is the base64 text of 32 bytes, the form configs and RouterOS carry it in.
-`wireguard::PrivateKey` is a private key kept the way a `Secret` is:
+A WireGuard key is base64 of 32 bytes, as configs and RouterOS carry it. `wireguard::PrivateKey`
+is kept as a `Secret` is:
 
 ```rust
 use sliplib_secrets::wireguard::{PrivateKey, decode_key};
@@ -319,8 +287,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`==` compares two private keys as WireGuard uses them: RouterOS returns a key in the clamped form
-X25519 reduces it to, which differs as text from the key as generated, and the two are equal.
+`==` compares keys as X25519 uses them: RouterOS returns the clamped form of a key generated
+unclamped, and the two are equal.
 
 ## Development
 

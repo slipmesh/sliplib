@@ -1,5 +1,4 @@
-//! A value AmneziaWG draws from a range, the way `slipmesh.yaml` and a client's config write it:
-//! one number, or `lo-hi` with both ends included.
+//! A value AmneziaWG draws from a range: one number, or `lo-hi`, both ends included.
 
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -13,16 +12,14 @@ mod sealed {
     impl Sealed for u32 {}
 }
 
-/// What an end of a range can be, and nothing else: the module packs two `u16` into a `u32` and
-/// two `u32` into a `u64`.
+/// The module packs two `u16` into a `u32` and two `u32` into a `u64`.
 pub trait End: sealed::Sealed + Copy + Ord + fmt::Display + TryFrom<u64> + Into<u64> {}
 
 impl End for u16 {}
 impl End for u32 {}
 
-/// `lo..=hi`, never with `lo` above `hi`: the module checks no order. Out of a reversed range
-/// it draws an arbitrary value, which may fall anywhere, another header's range included, and
-/// it matches no received packet against one.
+/// `lo..=hi`, never reversed: the module checks no order, draws anything from a reversed range and
+/// matches nothing against it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Range<T> {
     lo: T,
@@ -32,9 +29,9 @@ pub struct Range<T> {
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RangeError {
-    /// The text that is neither a number nor two numbers around one dash.
+    /// Neither a number nor two around one dash.
     Malformed(String),
-    /// The end that does not fit, and the width it has to fit.
+    /// The end, and the width it has to fit.
     TooLarge {
         end: String,
         bits: usize,
@@ -84,25 +81,23 @@ impl<T: End> Range<T> {
         self.hi
     }
 
-    /// Whether the two share a value.
     pub fn overlaps(self, other: Self) -> bool {
         self.lo <= other.hi && other.lo <= self.hi
     }
 
-    /// The range the module takes for "not set".
+    /// The module's "not set".
     pub fn is_zero(self) -> bool {
         self.hi.into() == 0
     }
 
-    /// Whether the module could draw 0 from it: a range that starts at 0 and is not 0 alone.
-    /// Where 0 alone means "not set", a draw of 0 means something else.
+    /// Whether the module could draw 0, which alone means "not set".
     pub fn starts_at_zero(self) -> bool {
         self.lo.into() == 0 && !self.is_zero()
     }
 }
 
 impl Range<u16> {
-    /// `lo..=hi` written in the code: a reversed one does not compile as a constant.
+    /// A reversed one does not compile.
     pub(crate) const fn constant(lo: u16, hi: u16) -> Self {
         assert!(lo <= hi);
         Self { lo, hi }
@@ -157,8 +152,8 @@ impl<T: End> fmt::Display for Range<T> {
     }
 }
 
-// A number when the ends are equal, so that a file written before ranges existed is read and
-// written back unchanged, and a reader that knows only numbers still takes it.
+// A number where the ends are equal: a file from before ranges reads back unchanged, and a reader
+// of numbers alone takes it.
 impl<T: End> Serialize for Range<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         if self.lo == self.hi {
