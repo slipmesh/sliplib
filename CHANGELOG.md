@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.21.0] - 2026-11-23
+
+### Breaking changes 💥
+
+- Take any loopback network a node_id fits, and refuse a node_id that does not fit (#77)
+- Take an endpoint name as written and drop the MTU refusals that only changed a message (#79)
+- Read the secrets from the model, not from a copy of them (#80)
+- Leave the Talos settings, templates, metrics and the daemons' own keys to their platform's tools (#82)
+- Compute the configs from the loader's network, not from a copy of it (#83)
+- Name the mint hint once and drop what sliplib no longer needs (#84)
+
+### Documentation 📚
+
+- Close the follow-ups of the format documents (#75)
+- Say where the generated nftables document stands in a patch file (#76)
+- Cut the comments of the secrets change (#81)
+- Cut sliplib's comments to what the names do not say (#85)
+
+### Miscellaneous 🧹
+
+- Remove the fuzz target of the config reader (#78)
+
 ## [0.20.0] - 2026-11-21
 
 ### Breaking changes 💥
