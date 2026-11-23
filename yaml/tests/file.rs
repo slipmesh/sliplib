@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use serde::Deserialize;
-use sliplib_yaml::{read, read_or_empty, replace_file, write_if_changed};
+use sliplib_yaml::{read, read_or_empty, read_two, replace_file, write_if_changed};
 
 #[test]
 fn a_missing_file_reads_as_empty_and_an_existing_one_as_its_text() {
@@ -119,4 +119,78 @@ fn a_wrong_value_is_an_error_naming_the_file_once_and_the_line() {
     let err = format!("{:#}", read::<Config>(&path).unwrap_err());
     assert_eq!(err.matches(&path.display().to_string()).count(), 1, "{err}");
     assert!(err.contains("line 2"), "{err}");
+}
+
+/// The keys of the file both daemons read.
+#[derive(Debug, PartialEq, Deserialize)]
+struct Shared {
+    interfaces: Vec<Interface>,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+struct Interface {
+    name: String,
+    listen_port: u16,
+}
+
+/// The keys of one daemon alone.
+#[derive(Debug, PartialEq, Deserialize)]
+struct Own {
+    metrics: Metrics,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+struct Metrics {
+    port: u16,
+}
+
+fn both(listen_port: &str, metrics_port: &str) -> String {
+    format!(
+        "interfaces:\n  - name: mesh-a\n    listen_port: {listen_port}\nmetrics:\n  port: {metrics_port}\n"
+    )
+}
+
+fn read_both(text: &str) -> (std::path::PathBuf, anyhow::Result<(Shared, Own)>) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("awg.yaml");
+    std::fs::write(&path, text).unwrap();
+    let read = read_two::<Shared, Own>(&path);
+    (path, read)
+}
+
+#[test]
+fn a_file_of_two_types_reads_as_both() {
+    let (_, read) = read_both(&both("51820", "9586"));
+    assert_eq!(
+        read.unwrap(),
+        (
+            Shared {
+                interfaces: vec![Interface {
+                    name: "mesh-a".into(),
+                    listen_port: 51820
+                }]
+            },
+            Own {
+                metrics: Metrics { port: 9586 }
+            }
+        )
+    );
+}
+
+#[test]
+fn a_wrong_value_in_the_first_types_keys_names_the_file_its_key_and_line() {
+    let (path, read) = read_both(&both("abc", "9586"));
+    let err = format!("{:#}", read.unwrap_err());
+    assert_eq!(err.matches(&path.display().to_string()).count(), 1, "{err}");
+    assert!(err.contains("interfaces[0].listen_port: "), "{err}");
+    assert!(err.contains("at line 3 column 18"), "{err}");
+}
+
+#[test]
+fn a_wrong_value_in_the_second_types_keys_names_the_file_its_key_and_line() {
+    let (path, read) = read_both(&both("51820", "abc"));
+    let err = format!("{:#}", read.unwrap_err());
+    assert_eq!(err.matches(&path.display().to_string()).count(), 1, "{err}");
+    assert!(err.contains("metrics.port: "), "{err}");
+    assert!(err.contains("at line 5 column 9"), "{err}");
 }
