@@ -1,6 +1,6 @@
 //! `mint`: writes whatever secrets the network lacks into the fields of `slipmesh.yaml` they
-//! belong to, and the reference values of the keys it leaves out - once every node's config passes
-//! with them. A run with nothing to write leaves the file as it is.
+//! belong to, and `mesh.interface_prefix`'s reference value where it leaves that out - once every
+//! node's config passes with them. A run with nothing to write leaves the file as it is.
 
 use crate::file::{read_slipmesh, write_edits};
 use crate::{check, edit};
@@ -10,16 +10,16 @@ use std::path::Path;
 
 pub fn run(config_path: &Path) -> Result<()> {
     let (mut yaml, mut file) = read_slipmesh(config_path)?;
-    // Before anything is minted: the files give no network without the reference values.
-    let unset = file.missing_reference_values();
-    edit::write_unset(&mut yaml, &file, &unset)?;
-    if !unset.is_empty() {
+    // Before anything is minted: the files give no network without it.
+    let unset = file.network().mesh.interface_prefix.is_none();
+    if unset {
+        edit::write_interface_prefix(&mut yaml, &file)?;
         file = File::read(&yaml)
             .context("slipmesh.yaml with what it lacked does not read back - not written")?;
     }
     let minted = sliplib_mesh::mint::create(&sliplib_mesh::Mesh::of(&file)?)?;
     edit::record(&mut yaml, &file, &minted)?;
-    if minted.is_empty() && unset.is_empty() {
+    if minted.is_empty() && !unset {
         return Ok(());
     }
     let path = config_path.display();
@@ -46,12 +46,8 @@ pub fn run(config_path: &Path) -> Result<()> {
     if !minted.is_empty() {
         println!("minted {} into {path}", minted.routes().join(", "));
     }
-    if !unset.is_empty() {
-        let keys: Vec<&str> = unset.iter().map(|(key, _)| *key).collect();
-        println!(
-            "wrote the reference value of {} into {path}",
-            keys.join(", ")
-        );
+    if unset {
+        println!("wrote the reference value of mesh.interface_prefix into {path}");
     }
     Ok(())
 }

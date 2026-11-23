@@ -14,19 +14,6 @@ fn read(config_path: &Path) -> Result<File> {
         .with_context(|| format!("reading {}", config_path.display()))
 }
 
-fn node(network: &Mesh<'_>, host: &str) -> Result<()> {
-    let Err(refusal) = node_configs(network, host) else {
-        return Ok(());
-    };
-    let cured_by_minting = refusal.missing_secret().is_some();
-    let refusal = anyhow::Error::new(refusal);
-    Err(if cured_by_minting {
-        anyhow::anyhow!("{refusal:#} - `slipmesh mint` creates it")
-    } else {
-        refusal
-    })
-}
-
 /// Every node of `network` in its order, each with what refuses its configs: one refusal says
 /// nothing about the next node, so all of them are checked.
 pub fn nodes<'a>(network: &Mesh<'a>) -> Vec<(&'a str, Result<()>)> {
@@ -34,7 +21,10 @@ pub fn nodes<'a>(network: &Mesh<'a>) -> Vec<(&'a str, Result<()>)> {
         .network()
         .nodes
         .keys()
-        .map(|host| (host.as_str(), node(network, host.as_str())))
+        .map(|host| {
+            let checked = node_configs(network, host.as_str()).map(drop);
+            (host.as_str(), checked.map_err(anyhow::Error::new))
+        })
         .collect()
 }
 

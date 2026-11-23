@@ -2,7 +2,7 @@
 //! force for each node and each link, the groups as their nodes, and the documents of a platform
 //! with the nodes each reaches.
 
-use super::block::{Block, Exclude, Include, Order, Rank};
+use super::block::{Aimed, Block, Rank};
 use super::check::Invalid;
 use super::groups::{Groups, GroupsError, Resolved, Selection};
 use super::network::{AMNEZIAWG, Network, WIREGUARD};
@@ -16,9 +16,6 @@ pub const VERSION: u64 = 2;
 
 /// The generation of the rules that turn the files into configs, for which this code is built.
 pub const REVISION: u64 = 1;
-
-/// The reference value of `mesh.interface_prefix`.
-const REFERENCE_INTERFACE_PREFIX: &str = "mesh-";
 
 const NETWORK: &str = "network";
 const GROUPS: &str = "groups";
@@ -314,25 +311,15 @@ fn in_force(written: &Value) -> Value {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Aim {
     place: Place,
-    platform: Platform,
     rank: Rank,
     reach: Vec<Name>,
 }
 
 impl Aim {
-    pub fn platform(&self) -> Platform {
-        self.platform
-    }
-
     /// Of two documents of one kind that reach one node, the greater is laid over the lesser or
     /// chosen, and of two equal ones the later read.
     pub fn rank(&self) -> Rank {
         self.rank
-    }
-
-    /// The nodes the document reaches, in the order of the network.
-    pub fn nodes(&self) -> &[Name] {
-        &self.reach
     }
 
     pub fn reaches(&self, node: &str) -> bool {
@@ -344,14 +331,6 @@ impl fmt::Display for Aim {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.place.fmt(f)
     }
-}
-
-/// What the block of a `template` or a `patch` says of where it goes.
-struct Aimed {
-    platform: Platform,
-    include: Include,
-    exclude: Exclude,
-    order: Order,
 }
 
 impl Aimed {
@@ -384,12 +363,7 @@ impl Aimed {
                 other,
             });
         }
-        Ok(Aim {
-            place,
-            platform,
-            rank,
-            reach,
-        })
+        Ok(Aim { place, rank, reach })
     }
 }
 
@@ -499,7 +473,7 @@ impl File {
         let mut networks = Vec::new();
         let mut groups = Vec::new();
         let mut platforms: Vec<(Platform, PlatformDocument)> = Vec::new();
-        let mut aimed = Vec::new();
+        let mut aimed_documents = Vec::new();
         for Read { block, body } in documents {
             match block {
                 Block::Network { .. } => networks.push(body),
@@ -516,36 +490,8 @@ impl File {
                     let place = Place::new(PLATFORM, body.line);
                     platforms.push((platform, PlatformDocument { place, body }));
                 }
-                Block::Template {
-                    platform,
-                    include,
-                    exclude,
-                    order,
-                } => aimed.push((
-                    TEMPLATE,
-                    Aimed {
-                        platform,
-                        include,
-                        exclude,
-                        order,
-                    },
-                    body,
-                )),
-                Block::Patch {
-                    platform,
-                    include,
-                    exclude,
-                    order,
-                } => aimed.push((
-                    PATCH,
-                    Aimed {
-                        platform,
-                        include,
-                        exclude,
-                        order,
-                    },
-                    body,
-                )),
+                Block::Template(aimed) => aimed_documents.push((TEMPLATE, aimed, body)),
+                Block::Patch(aimed) => aimed_documents.push((PATCH, aimed, body)),
             }
         }
 
@@ -569,7 +515,7 @@ impl File {
 
         let mut templates = Vec::new();
         let mut patches = Vec::new();
-        for (kind, aimed, body) in aimed {
+        for (kind, aimed, body) in aimed_documents {
             let aim = aimed.aim(Place::new(kind, body.line), &network, &groups)?;
             let document = AimedDocument { aim, body };
             if kind == TEMPLATE {
@@ -599,15 +545,6 @@ impl File {
         self.network_document
     }
 
-    /// The required keys the files lack that have a reference value, each with that value:
-    /// what `slipmesh mint` writes, and no tool falls back to.
-    pub fn missing_reference_values(&self) -> Vec<(&'static str, Value)> {
-        match self.network.mesh.interface_prefix {
-            Some(_) => Vec::new(),
-            None => vec![("mesh.interface_prefix", REFERENCE_INTERFACE_PREFIX.into())],
-        }
-    }
-
     /// The `platform` document of `platform`, if the files hold one.
     pub fn platform(&self, platform: Platform) -> Option<&PlatformDocument> {
         self.platforms
@@ -630,12 +567,6 @@ impl File {
     /// Every `patch` document, in the order of the documents.
     pub fn patches(&self) -> &[AimedDocument] {
         &self.patches
-    }
-
-    /// The `patch` documents that reach `node`, in the order their platform's tool lays them
-    /// over each other.
-    pub fn patches_for(&self, node: &str) -> Vec<&AimedDocument> {
-        reaching(&self.patches, node)
     }
 }
 
@@ -705,14 +636,24 @@ mod tests {
         format!("slipmesh: {{kind: patch, {block}}}\nkind: Example\nname: {name}\n")
     }
 
+    /// The nodes `aim` reaches, in the order of the network.
+    fn reached<'a>(file: &'a File, aim: &Aim) -> Vec<&'a str> {
+        file.network()
+            .nodes
+            .keys()
+            .map(Name::as_str)
+            .filter(|node| aim.reaches(node))
+            .collect()
+    }
+
     fn names(names: &[Name]) -> Vec<&str> {
         names.iter().map(Name::as_str).collect()
     }
 
-    fn patch_names(patches: &[&AimedDocument]) -> Vec<String> {
-        patches
+    fn body_names(documents: &[&AimedDocument]) -> Vec<String> {
+        documents
             .iter()
-            .map(|patch| patch.value()["name"].as_str().unwrap().to_owned())
+            .map(|document| document.value()["name"].as_str().unwrap().to_owned())
             .collect()
     }
 
@@ -886,7 +827,10 @@ mod tests {
             &patch("platform: talos, include: [core]", "one"),
         ])
         .unwrap();
-        assert_eq!(names(file.patches()[0].aim().nodes()), ["node-a", "node-b"]);
+        assert_eq!(
+            reached(&file, file.patches()[0].aim()),
+            ["node-a", "node-b"]
+        );
     }
 
     fn amneziawg<'a>(file: &'a File, link: &str) -> &'a super::super::network::AmneziawgLink {
@@ -994,17 +938,6 @@ mod tests {
     }
 
     #[test]
-    fn the_interface_prefix_is_the_one_key_with_a_reference_value() {
-        let with_it = file(&[&network("{}")]).unwrap();
-        assert!(with_it.missing_reference_values().is_empty());
-        let without = file(&[&network("{mesh: {interface_prefix: null}}")]).unwrap();
-        assert_eq!(
-            without.missing_reference_values(),
-            [("mesh.interface_prefix", Value::from("mesh-"))]
-        );
-    }
-
-    #[test]
     fn the_network_document_is_known_by_its_position_in_the_file() {
         let settings = "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n";
         // An empty document counts: the position is that of the file, which an edit goes by.
@@ -1091,22 +1024,20 @@ mod tests {
         assert_eq!(daemons, ["router", "firewall"]);
         for template in file.templates() {
             assert_eq!(
-                names(template.aim().nodes()),
+                reached(&file, template.aim()),
                 ["node-a", "node-b", "node-c"]
             );
         }
-        let reached: Vec<Vec<&str>> = file
+        let reach: Vec<Vec<&str>> = file
             .patches()
             .iter()
-            .map(|patch| names(patch.aim().nodes()))
+            .map(|patch| reached(&file, patch.aim()))
             .collect();
-        assert_eq!(
-            reached,
-            [vec!["node-a", "node-b", "node-c"], vec!["node-b"]]
-        );
+        assert_eq!(reach, [vec!["node-a", "node-b", "node-c"], vec!["node-b"]]);
         let levels = |node: &str| -> Vec<String> {
-            file.patches_for(node)
+            file.patches()
                 .iter()
+                .filter(|patch| patch.aim().reaches(node))
                 .map(|patch| patch.value()["environment"][0].as_str().unwrap().to_owned())
                 .collect()
         };
@@ -1115,7 +1046,7 @@ mod tests {
             ["EXAMPLE_LEVEL=info", "EXAMPLE_LEVEL=debug"]
         );
         assert_eq!(levels("node-c"), ["EXAMPLE_LEVEL=info"]);
-        assert!(file.patches_for("router1").is_empty());
+        assert!(levels("router1").is_empty());
     }
 
     #[test]
@@ -1267,13 +1198,10 @@ mod tests {
     fn a_document_reaches_the_nodes_of_its_platform_when_it_names_none() {
         let file = file(&[&network("{}"), &patch("platform: talos", "one")]).unwrap();
         assert_eq!(
-            names(file.patches()[0].aim().nodes()),
+            reached(&file, file.patches()[0].aim()),
             ["node-a", "node-b", "node-c"]
         );
-        assert_eq!(file.patches()[0].aim().platform(), Platform::Talos);
-        assert_eq!(patch_names(&file.patches_for("node-b")), ["one"]);
-        assert!(file.patches_for("router1").is_empty());
-        assert!(file.patches_for("node-x").is_empty());
+        assert!(!file.patches()[0].aim().reaches("node-x"));
     }
 
     #[test]
@@ -1288,7 +1216,10 @@ mod tests {
             ),
         ])
         .unwrap();
-        assert_eq!(names(file.patches()[0].aim().nodes()), ["node-b", "node-c"]);
+        assert_eq!(
+            reached(&file, file.patches()[0].aim()),
+            ["node-b", "node-c"]
+        );
     }
 
     #[test]
@@ -1361,7 +1292,7 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(
-            names(file.patches()[0].aim().nodes()),
+            reached(&file, file.patches()[0].aim()),
             ["node-a", "node-b", "node-c"]
         );
     }
@@ -1412,23 +1343,27 @@ mod tests {
     }
 
     #[test]
-    fn patches_come_by_order_then_those_for_all_then_as_read() {
+    fn templates_come_by_order_then_those_for_all_then_as_read() {
+        // A template's body is its tool's: `name` tells them apart here.
+        let named = |block: &str, name: &str| {
+            format!("slipmesh: {{kind: template, {block}}}\nname: {name}\n")
+        };
         let file = file(&[
             &network("{}"),
-            &patch("platform: talos, include: [node-a]", "narrow"),
-            &patch("platform: talos", "for-all"),
-            &patch("platform: talos, include: all", "for-all-later"),
-            &patch(
+            &named("platform: talos, include: [node-a]", "narrow"),
+            &named("platform: talos", "for-all"),
+            &named("platform: talos, include: all", "for-all-later"),
+            &named(
                 "platform: talos, include: [node-a], order: 2000",
                 "narrow-last",
             ),
-            &patch("platform: talos, order: 2000", "for-all-last"),
-            &patch("platform: talos, order: 10", "first"),
-            &patch("platform: talos, include: [node-b]", "another-node"),
+            &named("platform: talos, order: 2000", "for-all-last"),
+            &named("platform: talos, order: 10", "first"),
+            &named("platform: talos, include: [node-b]", "another-node"),
         ])
         .unwrap();
         assert_eq!(
-            patch_names(&file.patches_for("node-a")),
+            body_names(&file.templates_for("node-a")),
             [
                 "first",
                 "for-all",
@@ -1449,7 +1384,7 @@ mod tests {
         ])
         .unwrap();
         let all: Vec<&AimedDocument> = file.patches().iter().collect();
-        assert_eq!(patch_names(&all), ["first", "second"]);
+        assert_eq!(body_names(&all), ["first", "second"]);
     }
 
     #[test]
@@ -1472,7 +1407,7 @@ mod tests {
         let for_a = file.templates_for("node-a");
         assert_eq!(for_a.len(), 2);
         assert!(for_a[0].aim().rank() < for_a[1].aim().rank());
-        assert_eq!(names(for_a[1].aim().nodes()), ["node-a"]);
+        assert_eq!(reached(&file, for_a[1].aim()), ["node-a"]);
         assert_eq!(file.templates_for("node-b").len(), 1);
         assert_eq!(file.templates().len(), 2);
         assert_eq!(for_a[1].value()["content"], yaml("text"));

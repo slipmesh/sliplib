@@ -44,20 +44,6 @@ pub enum Error {
     },
 }
 
-impl Error {
-    /// The key or obfuscation the node's configs lack, when that is what refused them: creating
-    /// it cures the refusal. Only the `awg` config is computed from secrets.
-    pub fn missing_secret(&self) -> Option<&MissingSecret> {
-        match self {
-            Self::RenderingAwg {
-                source: RenderError::MissingSecret(missing),
-                ..
-            } => Some(missing),
-            _ => None,
-        }
-    }
-}
-
 /// What a node's config cannot be computed from.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -140,8 +126,11 @@ fn key_of(node: &str) -> impl Fn(KeyError) -> RenderError {
 /// The node's mesh interfaces: one full-tunnel interface per link it is on, named after the peer
 /// (`mesh-<peer>`). The name stays local - peers know each other by key - and must fit `IFNAMSIZ`,
 /// which the awg check enforces.
-fn mesh_interfaces_for(mesh: &Mesh<'_>, node_name: &str) -> Result<Vec<InterfaceEntry>> {
-    let node = mesh.node(node_name)?;
+fn mesh_interfaces_for(
+    mesh: &Mesh<'_>,
+    node_name: &str,
+    node: &Node,
+) -> Result<Vec<InterfaceEntry>> {
     let own_private_key = node.private_key();
     if own_private_key.is_none() && mesh.needs_a_key(node_name) {
         return Err(MissingSecret(format!("node {node_name:?}: {PRIVATE_KEY} is not set")).into());
@@ -214,9 +203,13 @@ fn mesh_interfaces_for(mesh: &Mesh<'_>, node_name: &str) -> Result<Vec<Interface
     Ok(out)
 }
 
-pub(crate) fn render_awg_config(mesh: &Mesh<'_>, node_name: &str) -> Result<AwgConfig> {
+pub(crate) fn render_awg_config(
+    mesh: &Mesh<'_>,
+    node_name: &str,
+    node: &Node,
+) -> Result<AwgConfig> {
     Ok(AwgConfig {
-        interfaces: mesh_interfaces_for(mesh, node_name)?,
+        interfaces: mesh_interfaces_for(mesh, node_name, node)?,
     })
 }
 
@@ -235,7 +228,7 @@ pub fn node_configs(mesh: &Mesh<'_>, host: &str) -> std::result::Result<NodeConf
         node: node(),
         source: source.into(),
     })?;
-    let awg_cfg = render_awg_config(mesh, host).map_err(|source| Error::RenderingAwg {
+    let awg_cfg = render_awg_config(mesh, host, found).map_err(|source| Error::RenderingAwg {
         node: node(),
         source,
     })?;
@@ -292,6 +285,16 @@ mod tests {
     use sliplib_config::Range;
 
     use crate::test_support::{NODE_D, example};
+
+    fn missing_secret(refusal: &Error) -> Option<&MissingSecret> {
+        match refusal {
+            Error::RenderingAwg {
+                source: RenderError::MissingSecret(missing),
+                ..
+            } => Some(missing),
+            _ => None,
+        }
+    }
 
     fn configs_of(network: &Mesh<'_>, node: &str) -> std::result::Result<NodeConfigs, Error> {
         super::node_configs(network, node)
@@ -364,7 +367,7 @@ mod tests {
         let configs = super::node_configs(&network, "node-a").unwrap();
         assert_eq!(
             configs.awg,
-            super::render_awg_config(&network, "node-a").unwrap()
+            super::render_awg_config(&network, "node-a", network.node("node-a").unwrap()).unwrap()
         );
         assert_eq!(
             configs.router,
@@ -381,7 +384,7 @@ mod tests {
                 matches!(&refusal, Error::RenderingAwg { node: refused, .. } if refused == node),
                 "{node}: {refusal:?}"
             );
-            let missing = refusal.missing_secret().map(ToString::to_string);
+            let missing = missing_secret(&refusal).map(ToString::to_string);
             assert!(
                 missing.is_some_and(|missing| missing.contains("node-b")
                     && missing.contains("wireguard.private_key")),
@@ -407,7 +410,7 @@ mod tests {
                 if node == owner),
             "{refusal:?}"
         );
-        assert!(refusal.missing_secret().is_none(), "{refusal:?}");
+        assert!(missing_secret(&refusal).is_none(), "{refusal:?}");
         let cause = sliplib_secrets::wireguard::decode_key("not a key").unwrap_err();
         let chain = format!("{:#}", anyhow::Error::new(refusal));
         assert!(chain.contains(&cause.to_string()), "{chain}");
@@ -432,7 +435,7 @@ mod tests {
         );
         for node in ["node-a", "node-b"] {
             let refusal = configs_of(&network, node).unwrap_err();
-            let missing = refusal.missing_secret().map(ToString::to_string);
+            let missing = missing_secret(&refusal).map(ToString::to_string);
             assert!(
                 missing.is_some_and(|missing| missing.contains("a-b")),
                 "{node}: {refusal:?}"
@@ -450,7 +453,7 @@ mod tests {
                     if refused == node && on == interface),
                 "{node}: {refusal:?}"
             );
-            assert!(refusal.missing_secret().is_none(), "{node}");
+            assert!(missing_secret(&refusal).is_none(), "{node}");
         }
     }
 
@@ -465,7 +468,7 @@ mod tests {
         // The two ends of `a-c` need what the overlay took.
         for node in ["node-a", "node-c"] {
             let refusal = configs_of(&network, node).unwrap_err();
-            assert!(refusal.missing_secret().is_some(), "{node}: {refusal:?}");
+            assert!(missing_secret(&refusal).is_some(), "{node}: {refusal:?}");
         }
     }
 
@@ -611,7 +614,7 @@ mod tests {
     fn a_link_that_lacks_a_field_mint_writes_is_refused_when_its_nodes_are_computed() {
         let unminted = example("{mesh: {links: {a-b: {amneziawg: {obfuscation: {jc: null}}}}}}");
         let refusal = refused(&unminted, "node-b");
-        let missing = refusal.missing_secret().map(ToString::to_string);
+        let missing = missing_secret(&refusal).map(ToString::to_string);
         assert!(
             missing.is_some_and(|missing| missing.contains("a-b") && missing.contains("jc")),
             "{refusal:?}"

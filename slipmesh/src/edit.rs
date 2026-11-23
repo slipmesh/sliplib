@@ -1,5 +1,6 @@
 //! Every edit made to `slipmesh.yaml`: minted secrets and a node's new key written into the
-//! fields they belong to, and the reference values `mint` writes where the files leave a key out.
+//! fields they belong to, and `mesh.interface_prefix`'s reference value where the files leave it
+//! out.
 //!
 //! Written, a minted value is the operator's like any other: the next run mints nothing, and
 //! deleting it mints a new identity for that node or link, and for every peer that refers to it.
@@ -11,6 +12,7 @@
 
 use anyhow::{Context, Result};
 use sliplib_config::Obfuscation;
+use sliplib_config::v2::network::InterfacePrefix;
 use sliplib_config::v2::{File, Name};
 use sliplib_mesh::mint::Minted;
 use sliplib_secrets::wireguard::PrivateKey;
@@ -67,15 +69,12 @@ pub fn set_node_key(yaml: &mut MultiDoc, files: &File, node: &str, key: &Private
     set(&mut entry["wireguard"], "private_key", key.expose().into())
 }
 
-/// Writes each of `unset`, a key and its value, in the network document of `yaml`, the
-/// `slipmesh.yaml` `files` was read from. Indexing inserts each missing step, and panics on none:
-/// every step that is there is a mapping, or the file would not have parsed.
-pub fn write_unset(yaml: &mut MultiDoc, files: &File, unset: &[(&str, Value)]) -> Result<()> {
+/// Writes `mesh.interface_prefix`'s reference value in the network document of `yaml`, the
+/// `slipmesh.yaml` `files` was read from. Indexing inserts `mesh` where it is missing, and panics
+/// on none: a `mesh` that is there is a mapping, or the file would not have parsed.
+pub fn write_interface_prefix(yaml: &mut MultiDoc, files: &File) -> Result<()> {
     let network = document(yaml, files.network_document())?;
-    for (key, value) in unset {
-        *key.split('.')
-            .fold(&mut *network, |value, step| &mut value[step]) = value.clone();
-    }
+    network["mesh"]["interface_prefix"] = InterfacePrefix::REFERENCE.into();
     Ok(())
 }
 

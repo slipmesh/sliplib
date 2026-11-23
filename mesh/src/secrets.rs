@@ -2,14 +2,13 @@
 
 use sliplib_config::Obfuscation;
 
-/// A key or an obfuscation the rendered node needs and the file does not set. A refusal that
-/// carries one is cured by creating the secret, which a caller can tell its user how to do.
+/// A key or an obfuscation the rendered node needs and the file does not set.
 #[derive(Debug)]
 pub struct MissingSecret(pub(crate) String);
 
 impl std::fmt::Display for MissingSecret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        write!(f, "{} - `slipmesh mint` creates it", self.0)
     }
 }
 

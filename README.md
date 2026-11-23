@@ -190,13 +190,13 @@ the whole message, each part once.
   a whole (`parse`, `read`) and refuses whatever its specification has the loader refuse, as
   `v2::Error`. Among them are a text that is not YAML, and a `network` document whose `version` is
   missing, below 2 or `null`: such files are of version 1, refused as `VersionOne`, naming the
-  document that converts them. `missing_reference_values` lists the required keys the files lack
-  that `slipmesh mint` writes, and `network_document` says where the network stands in the file, for
-  a write. It gives the `network` with what is in force for each node and each link written where
-  they hold their own: a node's `routing`, a link's block of its type. A node gives its `underlay`
-  and `private_key`, a `LinkKind` its `port`, `obfuscation` (empty on `wireguard`) and
-  `persistent_keepalive`. The `template` and `patch` documents come with their `Aim`: the nodes each
-  reaches, and its rank among those that reach one node (`templates_for`, `patches_for`), as an
+  document that converts them. `InterfacePrefix::REFERENCE` is what `slipmesh mint` writes where the
+  files set no `mesh.interface_prefix`, and `network_document` says where the network stands in the
+  file, for a write. It gives the `network` with what is in force for each node and each link
+  written where they hold their own: a node's `routing`, a link's block of its type. A node gives
+  its `underlay` and `private_key`, a `LinkKind` its `port`, `obfuscation` (empty on `wireguard`)
+  and `persistent_keepalive`. The `template` and `patch` documents come with their `Aim`: the nodes
+  each reaches, and its rank among those that reach one node (`templates_for`), as an
   `AimedDocument`; a `platform` document as a `PlatformDocument` (`platform`). The body is its
   platform's tool's: `read` gives it as the tool's type, a refusal naming the document and the line,
   and a template or patch also gives its `value`. This release reads one `network` and one `groups`
@@ -240,10 +240,9 @@ name as `network::UnknownNode`.
   checked as the node checks it. It refuses a missing key of the node, unless it is on no link, or
   of a peer, and a link of type `amneziawg` whose obfuscation lacks one of `jc`, `jmin`, `jmax`,
   `s1`, `s2` and `h1` to `h4`, naming what lacks what; nothing of nodes and links the node is not
-  on. Such a refusal gives its `secrets::MissingSecret` through `render::Error::missing_secret`, for
-  a tool to say how to create it. A dialed peer gets its link's keepalive where that differs from
-  what `InterfaceEntry::keepalive_of` gives without it. No metrics listener: the Talos generator
-  adds it to its daemons' own configs.
+  on. Such a refusal's `secrets::MissingSecret` names `slipmesh mint`, which creates the secret. A
+  dialed peer gets its link's keepalive where that differs from what `InterfaceEntry::keepalive_of`
+  gives without it. No metrics listener: the Talos generator adds it to its daemons' own configs.
 - The `mint` feature, off by default, adds `mint::create`: whatever secrets the file lacks, created,
   each by the entry it belongs to, and no key for a node on no link, or `NoHeaderLeft`
   when an entry's magic headers leave no room for the ones it lacks. `slipmesh` builds with it; a

@@ -296,6 +296,9 @@ pub enum InterfacePrefixError {
 }
 
 impl InterfacePrefix {
+    /// What `slipmesh mint` writes where the files set none; no tool falls back to it.
+    pub const REFERENCE: &str = "mesh-";
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
