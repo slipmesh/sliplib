@@ -203,7 +203,7 @@ chain prints the whole message, each part once.
     first, until the tools read several files.
 - `awg`: `AwgConfig` and `validate`. `InterfaceEntry::keepalive_of` is a peer's keepalive: none
   for one without an `endpoint`; else its own, or 25 on a plain interface and 20 to 30 on an
-  obfuscated one.
+  obfuscated one. `PeerEntry::allowed_ips_or_all` is a peer's own, or `0.0.0.0/0` and `::/0`.
 - `router`: `RouterConfig` and `validate`. `Loopbacks` is the node's pair, written as a list of
   the two. `InterfacePattern` is an entry of `ospf_interfaces` or
   `direct_interfaces`, an interface name or a prefix and `*`: `matches` a name, `name` gives an

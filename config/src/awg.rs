@@ -2,6 +2,7 @@
 
 use crate::{Obfuscation, Prefix, Range};
 use serde::{Deserialize, Serialize};
+use sliplib_net::{Ipv4Net, Ipv6Net};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::collections::HashSet;
 
@@ -37,13 +38,25 @@ pub struct PeerEntry {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
-    /// `None`: `0.0.0.0/0` and `::/0`.
+    /// What counts is [`PeerEntry::allowed_ips_or_all`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_ips: Option<Vec<Prefix>>,
     /// Seconds, or a range the module draws from at every timer; `0` sends none. What counts is
     /// [`InterfaceEntry::keepalive_of`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persistent_keepalive: Option<Range<u16>>,
+}
+
+impl PeerEntry {
+    /// Its own, or `0.0.0.0/0` and `::/0`.
+    pub fn allowed_ips_or_all(&self) -> Vec<Prefix> {
+        self.allowed_ips.clone().unwrap_or_else(|| {
+            vec![
+                Prefix(Ipv4Net::default().into()),
+                Prefix(Ipv6Net::default().into()),
+            ]
+        })
+    }
 }
 
 /// Of a dialed peer that sets none, on a plain interface: what WireGuard's tools suggest behind
@@ -305,6 +318,21 @@ interfaces:
                 .to_string();
             assert!(err.starts_with(&format!("{key}: ")), "{field}: {err}");
         }
+    }
+
+    #[test]
+    fn a_peer_without_allowed_ips_takes_every_address_and_one_with_them_its_own() {
+        let mut peer = PeerEntry {
+            public_key: "k".to_owned(),
+            name: None,
+            endpoint: None,
+            allowed_ips: None,
+            persistent_keepalive: None,
+        };
+        let text = |list: Vec<Prefix>| list.iter().map(|p| p.0.to_string()).collect::<Vec<_>>();
+        assert_eq!(text(peer.allowed_ips_or_all()), ["0.0.0.0/0", "::/0"]);
+        peer.allowed_ips = Some(vec![Prefix::try_from("203.0.113.1/32".to_owned()).unwrap()]);
+        assert_eq!(text(peer.allowed_ips_or_all()), ["203.0.113.1/32"]);
     }
 
     #[test]
