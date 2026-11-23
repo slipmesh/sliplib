@@ -9,12 +9,6 @@ pub fn read<T: DeserializeOwned>(path: &Path) -> Result<T> {
     parse(path, &text(path)?)
 }
 
-/// In place of `serde(flatten)`, which loses the key and line of an error.
-pub fn read_two<A: DeserializeOwned, B: DeserializeOwned>(path: &Path) -> Result<(A, B)> {
-    let text = text(path)?;
-    Ok((parse(path, &text)?, parse(path, &text)?))
-}
-
 fn text(path: &Path) -> Result<String> {
     std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
 }
