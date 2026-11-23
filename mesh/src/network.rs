@@ -1,7 +1,7 @@
 use crate::addressing;
 use sliplib_config::router::InterfacePattern;
-use sliplib_config::v2::File;
 use sliplib_config::v2::network::{InterfacePrefix, Network, Node};
+use sliplib_config::v2::{File, Platform};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Why files that read give no mesh.
@@ -15,6 +15,19 @@ pub enum Error {
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error("unknown node {0:?}")]
 pub struct UnknownNode(pub String);
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum NodeError {
+    #[error(transparent)]
+    Unknown(#[from] UnknownNode),
+    #[error("node {node:?} is a `{platform}` node, and this tool configures `{wanted}` ones")]
+    OtherPlatform {
+        node: String,
+        platform: Platform,
+        wanted: Platform,
+    },
+}
 
 /// Under the node.
 pub const PRIVATE_KEY: &str = "wireguard.private_key";
@@ -78,6 +91,19 @@ impl<'a> Mesh<'a> {
             .nodes
             .get(name)
             .ok_or_else(|| UnknownNode(name.to_owned()))
+    }
+
+    /// Unless it is of another platform than `platform`.
+    pub fn node_on(&self, name: &str, platform: Platform) -> Result<&'a Node, NodeError> {
+        let node = self.node(name)?;
+        if node.platform != platform {
+            return Err(NodeError::OtherPlatform {
+                node: name.to_owned(),
+                platform: node.platform,
+                wanted: platform,
+            });
+        }
+        Ok(node)
     }
 
     /// Whether the node is on a link.
@@ -229,6 +255,24 @@ mod tests {
         assert_eq!(direct_interfaces(&mesh, "node-a"), ["lan0", "wg-*"]);
         assert_eq!(mesh.interface_prefix(), "wg-");
         assert_eq!(mesh.links_pattern().as_str(), "wg-*");
+    }
+
+    #[test]
+    fn a_node_of_another_platform_is_refused_naming_both_and_an_unknown_one_as_unknown() {
+        let mesh = example("{}");
+        assert!(mesh.node_on("node-a", Platform::Talos).is_ok());
+        assert_eq!(
+            mesh.node_on("router1", Platform::Talos).unwrap_err(),
+            NodeError::OtherPlatform {
+                node: "router1".to_owned(),
+                platform: Platform::Routeros,
+                wanted: Platform::Talos,
+            }
+        );
+        assert_eq!(
+            mesh.node_on("node-x", Platform::Talos).unwrap_err(),
+            NodeError::Unknown(UnknownNode("node-x".to_owned()))
+        );
     }
 
     #[test]

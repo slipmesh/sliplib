@@ -224,7 +224,8 @@ of every platform.
 
 A refusal is a `render::Error`, naming the node and the config, with its cause as its `source`, or
 an `mtu::MtuError`. Files that read but give no mesh are refused as `network::Error`; `Mesh::node`
-refuses an unknown name as `network::UnknownNode`.
+refuses an unknown name as `network::UnknownNode`, and `Mesh::node_on` a node of another platform
+too, as `network::NodeError`.
 
 - `Mesh`: the loader's network (`network()`), its interface prefix and `links_pattern`. `Mesh::of` refuses a
   `v2::File` without `mesh.interface_prefix`. `addresses` gives what a node's `node_id` gives it:
