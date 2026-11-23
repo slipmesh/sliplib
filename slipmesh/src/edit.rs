@@ -136,12 +136,7 @@ mod tests {
     }
 
     fn values(raw: &str) -> Vec<Value> {
-        MultiDoc::parse(raw)
-            .unwrap()
-            .documents()
-            .iter()
-            .map(|d| d.value.clone())
-            .collect()
+        MultiDoc::parse(raw).unwrap().values()
     }
 
     /// Its keys with their values, its items in their places.

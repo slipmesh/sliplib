@@ -6,8 +6,9 @@ the command-line tool for `slipmesh.yaml` itself.
 
 | crate | what it gives |
 | --- | --- |
-| [`sliplib-net`](net) | CIDR parsing and arithmetic on `ipnet`'s types |
-| [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and written back |
+| [`sliplib-net`](net) | CIDR parsing and arithmetic on `ipnet`'s types, and the mesh MTU's floor and annotation |
+| [`sliplib-fs`](fs) | Files written whole, and only when their text changes |
+| [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and turned back into text |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 | [`sliplib-config`](config) | `slipmesh.yaml`, its schema and its loader, and what every platform's daemons share of their configs, with its checks |
@@ -147,20 +148,31 @@ reaches every component. On top of its methods:
 - `parse`, `parse_ipv4` and `parse_ipv6` read `"<address>/<prefix length>"`, host bits kept, with
   errors that name the input;
 - `exclude(net, excluded)`: the rest of `net`, as the fewest networks, in address order.
+- `mtu::MIN_IPV6_MTU`, 1280, the least MTU of a link that carries IPv6, and
+  `mtu::MESH_MTU_ANNOTATION`, the annotation of a node's `Node` object that carries the mesh MTU.
+
+### `sliplib-fs`
+
+A file written through a temporary one beside it, so a reader sees the old text or the new one.
+
+- `write_if_changed` writes a file unless it already holds the text, creating its directory, and
+  says whether it wrote. A file it cannot read, such as one that is not UTF-8, is written over.
+- `replace_file` replaces a file that exists, keeping its permissions and following a symlink.
+- `read_or_empty` reads a file that may not exist.
+- `Error`: the step that failed, naming its path.
 
 ### `sliplib-yaml`
 
-Every read, edit and write of a YAML file, so a component deals in its own types. What the
-documents mean is the caller's.
+Every read and edit of a YAML file, and the text to write back, so a component deals in its own
+types; `sliplib-fs` writes it. What the documents mean is the caller's.
 
 - `MultiDoc`: `read` or `parse` a multi-document file, a YAML tag refused, then `documents()`,
-  each with its position, the line it starts on and its value. `Document::take` removes a top-level
-  key; `Document::deserialize` reads the rest, an error naming the line. `document_mut` edits a
-  value and `text` writes the file back, without its comments or documents of only comments.
+  each with its position, the line it starts on and its value, or their `values()`.
+  `Document::take` removes a top-level key; `Document::deserialize` reads the rest, an error naming
+  the line. `document_mut` edits a value and `text` gives the file's text back, without its
+  comments or documents of only comments.
 - `read`: a file of one document, into a type, a YAML tag refused.
 - `merge`: JSON Merge Patch (RFC 7386), key order kept; `join` puts documents together.
-- `replace_file` replaces a file atomically, keeping its permissions and following a symlink;
-  `write_if_changed` writes only what differs; `read_or_empty` reads a file that may not exist.
 - `Error`: what each of them refuses, naming the file or the document's line.
 - `Without`: a mapping as a type with some keys passed over, an unknown key's error naming its line.
 - `Value`, `Mapping`, `from_str`, `from_value`, `to_string` and `to_value`, re-exported from
@@ -173,15 +185,17 @@ alone, such as its metrics listener, is its platform's tool's.
 
 Each check and the loader returns an error of its own, one variant per refusal: `v2::Error`,
 `v2::Invalid`, `v2::NameError`, those of `v2::groups` and `v2::network`, `awg::Invalid`,
-`router::Invalid`, `LoopbackAddressError` and `ObfuscationError`. A variant's text is one line.
+`router::Invalid`, `router::InterfacePatternError` and `ObfuscationError`. A variant's text is one line.
 A cause it names itself is a field, and one of its own line is its `source`, never both: the whole
 chain prints the whole message, each part once.
 
 - `v2`: [format version 2](docs/slipmesh-yaml.md).
-  - `File` (`parse`, `read`) refuses what its specification has the loader refuse, as `v2::Error`;
-    a file of version 1 as `VersionOne`, naming the conversion document.
+  - `File` (`open`, `parse`, `read`) refuses what its specification has the loader refuse, as
+    `v2::Error`; a file of version 1 as `VersionOne`, naming the conversion document. A refusal of
+    `open` names the file.
   - `network()` gives what is in force under each node's `routing` and in each link's block.
-  - A node gives its `underlay` and `private_key`; a `LinkKind` its `port`, `obfuscation` (empty
+  - A node gives its `underlay` and `private_key`; a `Link` whether a node is an end (`has_end`)
+    and the `other_end`; a `LinkKind` its `port`, `obfuscation` (empty
     on `wireguard`) and `persistent_keepalive`.
   - `network_document` is where the network stands, for a write. `InterfacePrefix::REFERENCE` is
     what `slipmesh mint` writes where `mesh.interface_prefix` is unset.
@@ -193,12 +207,17 @@ chain prints the whole message, each part once.
     first, until the tools read several files.
 - `awg`: `AwgConfig` and `validate`. `InterfaceEntry::keepalive_of` is a peer's keepalive: none
   for one without an `endpoint`; else its own, or 25 on a plain interface and 20 to 30 on an
-  obfuscated one.
-- `router`: `RouterConfig` and `validate`.
+  obfuscated one. `PeerEntry::allowed_ips_or_all` is a peer's own, or `0.0.0.0/0` and `::/0`.
+- `router`: `RouterConfig` and `validate`. `Loopbacks` is the node's pair, written as a list of
+  the two. `InterfacePattern` is an entry of `ospf_interfaces` or
+  `direct_interfaces`, an interface name or a prefix and `*`: `matches` a name, `name` gives an
+  exact one, `is_router_loopback` tells the entry of `ROUTER_LOOPBACK`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would fail
   on. `trailer_loss` says how a tunnel with `random_trailers` on loses data packets, as
   `TrailerLoss`. `bytes_into_clear_header` says whether an offset reads a data packet's clear
   header.
+- `Prefix`, `Prefix4` and `Prefix6`: an address and its prefix length, host bits kept, read and
+  written as `"<address>/<prefix length>"`.
 - `Range`: a number or `lo-hi` the module draws from. A range is written as a string, which a
   daemon built before ranges refuses; nothing here checks a node's release.
 
@@ -209,9 +228,10 @@ of every platform.
 
 A refusal is a `render::Error`, naming the node and the config, with its cause as its `source`, or
 an `mtu::MtuError`. Files that read but give no mesh are refused as `network::Error`; `Mesh::node`
-refuses an unknown name as `network::UnknownNode`.
+refuses an unknown name as `network::UnknownNode`, and `Mesh::node_on` a node of another platform
+too, as `network::NodeError`.
 
-- `Mesh`: the loader's network (`network()`) and its interface prefix. `Mesh::of` refuses a
+- `Mesh`: the loader's network (`network()`), its interface prefix and `links_pattern`. `Mesh::of` refuses a
   `v2::File` without `mesh.interface_prefix`. `addresses` gives what a node's `node_id` gives it:
   loopbacks, link-local, tunnel IPv4. `direct_interfaces` appends the links' pattern unless listed,
   where the links carry IPv4. `network::node_key` and `network::link_obfuscation` name where the

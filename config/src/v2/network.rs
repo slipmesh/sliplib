@@ -3,10 +3,11 @@
 
 use super::name::is_name_character;
 use super::{ClassName, Map, Name, Platform, UniqueKeys, absent_when_null, unique_keys};
-use crate::router::{BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER};
-use crate::{Obfuscation, Range};
+use crate::router::{
+    BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER, InterfacePattern,
+};
+use crate::{Obfuscation, Prefix4, Prefix6, Range};
 use serde::{Deserialize, Deserializer, de};
-use sliplib_net::{Ipv4Net, Ipv6Net};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32};
@@ -31,32 +32,6 @@ pub struct Network {
     pub mesh: Mesh,
     #[serde(deserialize_with = "unique_keys")]
     pub nodes: Map<Name, Node>,
-}
-
-/// Host bits kept.
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(try_from = "String")]
-pub struct Prefix4(pub Ipv4Net);
-
-/// Host bits kept.
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(try_from = "String")]
-pub struct Prefix6(pub Ipv6Net);
-
-impl TryFrom<String> for Prefix4 {
-    type Error = sliplib_net::ParseError;
-
-    fn try_from(text: String) -> Result<Self, Self::Error> {
-        sliplib_net::parse_ipv4(&text).map(Self)
-    }
-}
-
-impl TryFrom<String> for Prefix6 {
-    type Error = sliplib_net::ParseError;
-
-    fn try_from(text: String) -> Result<Self, Self::Error> {
-        sliplib_net::parse_ipv6(&text).map(Self)
-    }
 }
 
 /// What a node's `node_id` is added to.
@@ -92,7 +67,7 @@ pub struct Routing {
     #[serde(default)]
     pub bfd: Option<Bfd>,
     #[serde(default, deserialize_with = "absent_when_null")]
-    pub direct_interfaces: Vec<String>,
+    pub direct_interfaces: Vec<InterfacePattern>,
     #[serde(default, deserialize_with = "absent_when_null")]
     pub learn: Vec<Prefix4>,
     #[serde(default, deserialize_with = "absent_when_null")]
@@ -258,7 +233,7 @@ pub struct NodeWireguard {
 #[serde(deny_unknown_fields)]
 pub struct NodeRouting {
     #[serde(default, deserialize_with = "absent_when_null")]
-    pub direct_interfaces: Vec<String>,
+    pub direct_interfaces: Vec<InterfacePattern>,
     #[serde(default, deserialize_with = "absent_when_null")]
     pub learn: Vec<Prefix4>,
     #[serde(default, deserialize_with = "absent_when_null")]
@@ -297,7 +272,7 @@ impl TryFrom<String> for InterfacePrefix {
         if prefix.is_empty() {
             return Err(InterfacePrefixError::Empty);
         }
-        // The kernel refuses `/`, `:` and whitespace; in a routing pattern `*`, `?` and `[` would match
+        // The kernel refuses `/`, `:` and whitespace; in a routing pattern `*` and `?` would match
         // other interfaces.
         if !prefix.chars().all(is_name_character) {
             return Err(InterfacePrefixError::Character(prefix));
@@ -447,6 +422,24 @@ pub enum LinkError {
         link: &'static str,
         block: &'static str,
     },
+}
+
+impl Link {
+    pub fn has_end(&self, node: &str) -> bool {
+        self.ends.iter().any(|end| end.as_str() == node)
+    }
+
+    /// None where `node` is not an end.
+    pub fn other_end(&self, node: &str) -> Option<&Name> {
+        let [a, b] = &self.ends;
+        if a.as_str() == node {
+            Some(b)
+        } else if b.as_str() == node {
+            Some(a)
+        } else {
+            None
+        }
+    }
 }
 
 impl TryFrom<LinkKeys> for Link {
@@ -627,6 +620,8 @@ mod tests {
             "{routing: {bfd: {multiplier: 256}}}",
             "{routing: {classes: {egress: {protocol: 256}}}}",
             "{routing: {classes: {-egress: {protocol: 7}}}}",
+            "{routing: {direct_interfaces: [\"lan?\"]}}",
+            "{nodes: {node-a: {routing: {direct_interfaces: [198.51.100.0/25]}}}}",
             "{routing: {learn: [\"3fff::/64\"]}}",
             "{routing: {announce: [203.0.113.64]}}",
             "{addressing: {loopback: {ipv4: \"3fff::/64\"}}}",
@@ -731,6 +726,15 @@ mod tests {
 
     fn link(yaml: &str) -> Result<Link, String> {
         sliplib_yaml::from_str(yaml).map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn a_link_tells_its_ends_and_each_ends_other_end() {
+        let link = link("{type: wireguard, ends: {a: {}, b: {}}, wireguard: {port: 1}}").unwrap();
+        assert!(link.has_end("a") && link.has_end("b") && !link.has_end("c"));
+        assert_eq!(link.other_end("a").map(Name::as_str), Some("b"));
+        assert_eq!(link.other_end("b").map(Name::as_str), Some("a"));
+        assert_eq!(link.other_end("c"), None);
     }
 
     #[test]

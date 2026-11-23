@@ -9,6 +9,7 @@ use super::{Name, Platform};
 use serde::de::DeserializeOwned;
 use sliplib_yaml::{Document, Mapping, MultiDoc, Value, merge};
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 /// Of the syntax.
 pub const VERSION: u64 = 2;
@@ -91,6 +92,12 @@ pub enum Error {
         place: Place,
         #[source]
         source: Source,
+    },
+    #[error("reading {}", path.display())]
+    Reading {
+        path: PathBuf,
+        #[source]
+        source: Box<Error>,
     },
     #[error("there is no `kind: network` document, and without one there is no network")]
     NoNetwork,
@@ -443,6 +450,15 @@ impl File {
         Self::read(&MultiDoc::parse(raw).map_err(|source| Error::Yaml(source.into()))?)
     }
 
+    /// The file at `path`; an error names it.
+    pub fn open(path: &Path) -> Result<Self, Error> {
+        let yaml = MultiDoc::read(path).map_err(|source| Error::Yaml(source.into()))?;
+        Self::read(&yaml).map_err(|source| Error::Reading {
+            path: path.to_owned(),
+            source: Box::new(source),
+        })
+    }
+
     pub fn read(yaml: &MultiDoc) -> Result<Self, Error> {
         generation(yaml)?;
         let mut documents = yaml
@@ -556,6 +572,7 @@ mod tests {
     use super::super::testing::example;
     use super::*;
     use crate::Range;
+    use crate::router::InterfacePattern;
 
     const BLOCK: &str = "{kind: network, version: 2, revision: 1}";
 
@@ -630,11 +647,48 @@ mod tests {
         names.iter().map(Name::as_str).collect()
     }
 
+    fn patterns(list: &[InterfacePattern]) -> Vec<&str> {
+        list.iter().map(InterfacePattern::as_str).collect()
+    }
+
     fn body_names(documents: &[&AimedDocument]) -> Vec<String> {
         documents
             .iter()
             .map(|document| document.value()["name"].as_str().unwrap().to_owned())
             .collect()
+    }
+
+    #[test]
+    fn a_file_opens_as_it_parses_and_a_refusal_names_it_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("slipmesh.yaml");
+        std::fs::write(&path, network("{}")).unwrap();
+        assert_eq!(
+            File::open(&path).unwrap().network(),
+            file(&[&network("{}")]).unwrap().network()
+        );
+        let named_once = |err: Error| {
+            let mut text = err.to_string();
+            let mut source = std::error::Error::source(&err);
+            while let Some(cause) = source {
+                text += &format!(": {cause}");
+                source = cause.source();
+            }
+            assert_eq!(
+                text.matches(&path.display().to_string()).count(),
+                1,
+                "{text}"
+            );
+            err
+        };
+        std::fs::write(&path, "slipmesh: {kind: patch, platform: talos}\n").unwrap();
+        let err = named_once(File::open(&path).unwrap_err());
+        assert!(
+            matches!(&err, Error::Reading { source, .. } if matches!(**source, Error::NoNetwork)),
+            "{err:?}"
+        );
+        std::fs::remove_file(&path).unwrap();
+        named_once(File::open(&path).unwrap_err());
     }
 
     #[test]
@@ -654,7 +708,7 @@ mod tests {
     fn a_node_without_lists_of_its_own_has_the_networks() {
         let file = file(&[&network("{}")]).unwrap();
         let node = &file.network().nodes["node-a"].routing;
-        assert_eq!(node.direct_interfaces, ["lan0"]);
+        assert_eq!(patterns(&node.direct_interfaces), ["lan0"]);
         assert_eq!(node.learn, file.network().routing.learn);
         assert_eq!(node.announce, file.network().routing.announce);
         assert!(!node.learn.is_empty() && !node.announce.is_empty());
@@ -667,11 +721,11 @@ mod tests {
         )])
         .unwrap();
         let node = &file.network().nodes["node-b"].routing;
-        assert_eq!(node.direct_interfaces, ["lan1", "lan2"]);
+        assert_eq!(patterns(&node.direct_interfaces), ["lan1", "lan2"]);
         assert_eq!(node.learn, file.network().routing.learn);
         // The example's own: a node that takes neither range.
         let router = &file.network().nodes["router1"].routing;
-        assert_eq!(router.direct_interfaces, ["bridge-lan"]);
+        assert_eq!(patterns(&router.direct_interfaces), ["bridge-lan"]);
         assert!(router.learn.is_empty() && router.announce.is_empty());
     }
 
@@ -694,7 +748,7 @@ mod tests {
         });
         let file = file(&[&text]).unwrap();
         let node = &file.network().nodes["node-b"].routing;
-        assert_eq!(node.direct_interfaces, ["lan0"]);
+        assert_eq!(patterns(&node.direct_interfaces), ["lan0"]);
     }
 
     #[test]

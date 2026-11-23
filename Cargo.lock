@@ -612,6 +612,16 @@ dependencies = [
  "sliplib-net",
  "sliplib-secrets",
  "sliplib-yaml",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "sliplib-fs"
+version = "0.21.0"
+dependencies = [
+ "atomic-write-file",
+ "tempfile",
  "thiserror",
 ]
 
@@ -623,6 +633,7 @@ dependencies = [
  "rand",
  "serde",
  "sliplib-config",
+ "sliplib-net",
  "sliplib-secrets",
  "sliplib-yaml",
  "thiserror",
@@ -664,7 +675,6 @@ name = "sliplib-yaml"
 version = "0.21.0"
 dependencies = [
  "anyhow",
- "atomic-write-file",
  "serde",
  "tempfile",
  "thiserror",
@@ -678,6 +688,7 @@ dependencies = [
  "anyhow",
  "clap",
  "sliplib-config",
+ "sliplib-fs",
  "sliplib-mesh",
  "sliplib-secrets",
  "sliplib-yaml",

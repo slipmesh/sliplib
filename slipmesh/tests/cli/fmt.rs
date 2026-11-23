@@ -5,12 +5,7 @@ use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{MultiDoc, Value};
 
 fn values(text: &str) -> Vec<Value> {
-    MultiDoc::parse(text)
-        .unwrap()
-        .documents()
-        .iter()
-        .map(|document| document.value.clone())
-        .collect()
+    MultiDoc::parse(text).unwrap().values()
 }
 
 /// What tells a file that was replaced from one that was left alone.

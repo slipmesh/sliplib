@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "CIDR parsing and arithmetic for the slipmesh components, on ipnet's types"
+description = "CIDR parsing and arithmetic for the slipmesh components, on ipnet's types, and the mesh MTU's floor and annotation"
 
 [dependencies]
 ipnet.workspace = true

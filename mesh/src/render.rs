@@ -6,11 +6,15 @@ use crate::network::{Mesh, PRIVATE_KEY, UnknownNode};
 use crate::secrets::{MissingSecret, unminted};
 use sliplib_config::awg::{AwgConfig, InterfaceEntry, PeerEntry};
 use sliplib_config::router::{
-    AnnounceEntry, BfdSettings, BgpPeerEntry, NodeIdentity, RouterConfig,
+    AnnounceEntry, BfdSettings, BgpPeerEntry, InterfacePattern, Loopbacks, NodeIdentity,
+    RouterConfig,
 };
-use sliplib_config::v2::network::{LinkKind, Node, Prefix4};
-use sliplib_config::{Obfuscation, ObfuscationError};
+use sliplib_config::v2::Name;
+use sliplib_config::v2::network::{LinkKind, Node};
+use sliplib_config::{Obfuscation, ObfuscationError, Prefix, Prefix4, Prefix6};
+use sliplib_net::Ipv6Net;
 use sliplib_secrets::wireguard::KeyError;
+use std::net::IpAddr;
 
 /// Each names the node and which config; the cause is its source.
 #[derive(Debug, thiserror::Error)]
@@ -70,23 +74,13 @@ pub(crate) fn bgp_peers_for(mesh: &Mesh<'_>, node_name: &str) -> Vec<BgpPeerEntr
         .filter(|(name, _)| name.as_str() != node_name)
         .map(|(name, node)| BgpPeerEntry {
             name: name.to_string(),
-            address: mesh.addresses(node).loopback.1.to_string(),
+            address: mesh.addresses(node).loopback.1,
         })
         .collect()
 }
 
-/// The mesh's and `router-lo`.
-fn ospf_interfaces(mesh: &Mesh<'_>) -> Vec<String> {
-    vec![mesh_glob(mesh), "router-lo".to_owned()]
-}
-
-/// As BIRD's `interface` clause and `direct_interfaces` match it.
-fn mesh_glob(mesh: &Mesh<'_>) -> String {
-    format!("{}*", mesh.interface_prefix())
-}
-
-fn prefixes(list: &[Prefix4]) -> Vec<String> {
-    list.iter().map(|prefix| prefix.0.to_string()).collect()
+fn ospf_interfaces(mesh: &Mesh<'_>) -> Vec<InterfacePattern> {
+    vec![mesh.links_pattern(), InterfacePattern::router_loopback()]
 }
 
 pub(crate) fn render_router_config(mesh: &Mesh<'_>, name: &str, node: &Node) -> RouterConfig {
@@ -94,7 +88,10 @@ pub(crate) fn render_router_config(mesh: &Mesh<'_>, name: &str, node: &Node) -> 
     let routing = &mesh.network().routing;
     RouterConfig {
         node: NodeIdentity {
-            loopback_addresses: vec![format!("{v4}/32"), format!("{v6}/128")],
+            loopback_addresses: Loopbacks {
+                ipv4: Prefix4(v4.into()),
+                ipv6: Prefix6(v6.into()),
+            },
         },
         bgp_as: routing.bgp.number.get(),
         bgp_peers: bgp_peers_for(mesh, name),
@@ -105,10 +102,12 @@ pub(crate) fn render_router_config(mesh: &Mesh<'_>, name: &str, node: &Node) -> 
         }),
         ospf_interfaces: ospf_interfaces(mesh),
         direct_interfaces: mesh.direct_interfaces(node),
-        learn: prefixes(&node.routing.learn),
-        announce: prefixes(&node.routing.announce)
-            .into_iter()
-            .map(|net| AnnounceEntry { net, label: None })
+        learn: node.routing.learn.clone(),
+        announce: node
+            .routing
+            .announce
+            .iter()
+            .map(|&net| AnnounceEntry { net, label: None })
             .collect(),
         bypass: None,
     }
@@ -145,11 +144,7 @@ fn mesh_interfaces_for(
     let own = mesh.addresses(node);
     let mut out = Vec::new();
     for (link_name, link) in &mesh.network().mesh.links {
-        let peer_name = if link.ends[0].as_str() == node_name {
-            link.ends[1].as_str()
-        } else if link.ends[1].as_str() == node_name {
-            link.ends[0].as_str()
-        } else {
+        let Some(peer_name) = link.other_end(node_name).map(Name::as_str) else {
             continue;
         };
         let peer_node = mesh.node(peer_name)?;
@@ -163,9 +158,11 @@ fn mesh_interfaces_for(
         )?;
         let port = link.kind.port().get();
 
-        let mut addresses = vec![format!("{}/64", own.link_local)];
+        // 64 is a prefix length an IPv6 address takes, so the host's is never the one used.
+        let link_local = Ipv6Net::new(own.link_local, 64).unwrap_or(own.link_local.into());
+        let mut addresses = vec![Prefix(link_local.into())];
         if let Some(tunnel_v4) = own.tunnel_ipv4 {
-            addresses.push(format!("{tunnel_v4}/32"));
+            addresses.push(Prefix(IpAddr::V4(tunnel_v4).into()));
         }
 
         let mut interface = InterfaceEntry {
@@ -306,16 +303,16 @@ mod tests {
     fn a_node_peers_over_bgp_with_every_other_node_at_its_ipv6_loopback() {
         let network = example("{}");
         let peers = super::bgp_peers_for(&network, "node-b");
-        let peers: Vec<(&str, &str)> = peers
+        let peers: Vec<(&str, String)> = peers
             .iter()
-            .map(|peer| (peer.name.as_str(), peer.address.as_str()))
+            .map(|peer| (peer.name.as_str(), peer.address.to_string()))
             .collect();
         assert_eq!(
             peers,
             [
-                ("node-a", "3fff:0:0:1::1"),
-                ("node-c", "3fff:0:0:1::3"),
-                ("router1", "3fff:0:0:1::4"),
+                ("node-a", "3fff:0:0:1::1".to_owned()),
+                ("node-c", "3fff:0:0:1::3".to_owned()),
+                ("router1", "3fff:0:0:1::4".to_owned()),
             ]
         );
     }
@@ -351,7 +348,13 @@ mod tests {
             .map(|interface| interface.name.as_str())
             .collect();
         assert_eq!(names, ["wg-node-b", "wg-node-c", "wg-router1"]);
-        assert_eq!(configs.router.ospf_interfaces, ["wg-*", "router-lo"]);
+        let ospf: Vec<&str> = configs
+            .router
+            .ospf_interfaces
+            .iter()
+            .map(InterfacePattern::as_str)
+            .collect();
+        assert_eq!(ospf, ["wg-*", "router-lo"]);
     }
 
     #[test]

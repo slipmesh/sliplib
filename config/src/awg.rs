@@ -1,8 +1,9 @@
 //! What every platform's `awg` daemon shares of its config.
 
-use crate::{Obfuscation, Range};
+use crate::{Obfuscation, Prefix, Range};
 use serde::{Deserialize, Serialize};
-use sliplib_net::parse as parse_cidr;
+use sliplib_net::mtu::MIN_IPV6_MTU;
+use sliplib_net::{Ipv4Net, Ipv6Net};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::collections::HashSet;
 
@@ -17,9 +18,8 @@ pub struct InterfaceEntry {
     /// At most 15 bytes: `IFNAMSIZ` is 16 with the NUL.
     pub name: String,
     pub listen_port: u16,
-    /// CIDRs of either family.
     #[serde(default)]
-    pub addresses: Vec<String>,
+    pub addresses: Vec<Prefix>,
     /// The daemon generates and keeps none.
     pub private_key: PrivateKey,
     #[serde(default)]
@@ -39,13 +39,26 @@ pub struct PeerEntry {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
-    /// `None`: `0.0.0.0/0` and `::/0`.
+    /// Set, the daemon tracks the peer's handshake; what it is sent is
+    /// [`PeerEntry::allowed_ips_or_all`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed_ips: Option<Vec<String>>,
+    pub allowed_ips: Option<Vec<Prefix>>,
     /// Seconds, or a range the module draws from at every timer; `0` sends none. What counts is
     /// [`InterfaceEntry::keepalive_of`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persistent_keepalive: Option<Range<u16>>,
+}
+
+impl PeerEntry {
+    /// Its own, or `0.0.0.0/0` and `::/0`.
+    pub fn allowed_ips_or_all(&self) -> Vec<Prefix> {
+        self.allowed_ips.clone().unwrap_or_else(|| {
+            vec![
+                Prefix(Ipv4Net::default().into()),
+                Prefix(Ipv6Net::default().into()),
+            ]
+        })
+    }
 }
 
 /// Of a dialed peer that sets none, on a plain interface: what WireGuard's tools suggest behind
@@ -87,12 +100,6 @@ pub enum Invalid {
     InterfaceNameTooLong(String),
     #[error("duplicate interface name {0:?}")]
     DuplicateInterface(String),
-    #[error("interface {interface:?}: invalid address {cidr:?}: {error}")]
-    Address {
-        interface: String,
-        cidr: String,
-        error: sliplib_net::ParseError,
-    },
     #[error("interface {interface:?}: mtu {mtu} is below {floor}, the least its addresses allow")]
     MtuTooSmall {
         interface: String,
@@ -113,14 +120,6 @@ pub enum Invalid {
         peer: String,
         range: Range<u16>,
     },
-    #[error("interface {interface:?}, peer {peer:?}: invalid allowed_ips entry {cidr:?}: {error}")]
-    AllowedIp {
-        interface: String,
-        /// The peer's public key.
-        peer: String,
-        cidr: String,
-        error: sliplib_net::ParseError,
-    },
 }
 
 pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
@@ -135,18 +134,13 @@ pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
         if !seen_names.insert(iface.name.as_str()) {
             return Err(Invalid::DuplicateInterface(iface.name.clone()));
         }
-        let mut carries_ipv6 = false;
-        for cidr in &iface.addresses {
-            let net = parse_cidr(cidr).map_err(|error| Invalid::Address {
-                interface: iface.name.clone(),
-                cidr: cidr.clone(),
-                error,
-            })?;
-            carries_ipv6 |= net.addr().is_ipv6();
-        }
+        let carries_ipv6 = iface
+            .addresses
+            .iter()
+            .any(|prefix| prefix.0.addr().is_ipv6());
         if let Some(mtu) = iface.mtu {
             // RFC 8200, RFC 791: the kernel refuses less, once the daemon is converging.
-            let floor = if carries_ipv6 { 1280 } else { 68 };
+            let floor = if carries_ipv6 { MIN_IPV6_MTU } else { 68 };
             if mtu < floor {
                 return Err(Invalid::MtuTooSmall {
                     interface: iface.name.clone(),
@@ -173,14 +167,6 @@ pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
                     range,
                 });
             }
-            for cidr in peer.allowed_ips.iter().flatten() {
-                parse_cidr(cidr).map_err(|error| Invalid::AllowedIp {
-                    interface: iface.name.clone(),
-                    peer: peer.public_key.clone(),
-                    cidr: cidr.clone(),
-                    error,
-                })?;
-            }
         }
     }
     Ok(())
@@ -204,7 +190,10 @@ mod tests {
 
     fn with_mtu(addresses: &[&str], mtu: u32) -> AwgConfig {
         let mut iface = iface("mesh-a");
-        iface.addresses = addresses.iter().map(|a| a.to_string()).collect();
+        iface.addresses = addresses
+            .iter()
+            .map(|a| Prefix::try_from(a.to_string()).unwrap())
+            .collect();
         iface.mtu = Some(mtu);
         AwgConfig {
             interfaces: vec![iface],
@@ -293,7 +282,7 @@ interfaces:
         assert_eq!(cfg.interfaces[0].peers[0].allowed_ips, None);
         assert_eq!(
             cfg.interfaces[1].peers[0].allowed_ips,
-            Some(vec!["203.0.113.5/32".to_string()])
+            Some(vec![Prefix::try_from("203.0.113.5/32".to_owned()).unwrap()])
         );
         assert_eq!(cfg.interfaces[1].obfuscation.s3, Some(60));
         assert_eq!(cfg.interfaces[1].obfuscation.i1, Some("5-10".to_string()));
@@ -310,6 +299,42 @@ interfaces:
             Some(90.into())
         );
         validate(&cfg).unwrap();
+    }
+
+    #[test]
+    fn an_address_or_allowed_ips_entry_that_is_not_a_cidr_is_refused_at_its_key() {
+        for (field, key) in [
+            ("addresses: [not-a-cidr]", "interfaces[0].addresses"),
+            ("addresses: [198.51.100.1]", "interfaces[0].addresses"),
+            (
+                "peers: [{public_key: k, allowed_ips: [not-a-cidr]}]",
+                "interfaces[0].peers[0].allowed_ips",
+            ),
+        ] {
+            let yaml = format!(
+                "interfaces:\n  - name: mesh-a\n    listen_port: 51820\n    private_key: \
+                 \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"\n    {field}\n"
+            );
+            let err = sliplib_yaml::from_str::<AwgConfig>(&yaml)
+                .unwrap_err()
+                .to_string();
+            assert!(err.starts_with(&format!("{key}: ")), "{field}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_peer_without_allowed_ips_takes_every_address_and_one_with_them_its_own() {
+        let mut peer = PeerEntry {
+            public_key: "k".to_owned(),
+            name: None,
+            endpoint: None,
+            allowed_ips: None,
+            persistent_keepalive: None,
+        };
+        let text = |list: Vec<Prefix>| list.iter().map(|p| p.0.to_string()).collect::<Vec<_>>();
+        assert_eq!(text(peer.allowed_ips_or_all()), ["0.0.0.0/0", "::/0"]);
+        peer.allowed_ips = Some(vec![Prefix::try_from("203.0.113.1/32".to_owned()).unwrap()]);
+        assert_eq!(text(peer.allowed_ips_or_all()), ["203.0.113.1/32"]);
     }
 
     #[test]
@@ -337,46 +362,20 @@ interfaces:
     }
 
     #[test]
-    fn rejects_a_malformed_address_cidr() {
-        let mut a = iface("a");
-        a.addresses.push("not-a-cidr".to_string());
-        let cfg = AwgConfig {
-            interfaces: vec![a],
-        };
-        assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
-    fn rejects_a_malformed_allowed_ips_entry() {
-        let mut a = iface("a");
-        a.peers.push(PeerEntry {
-            public_key: "k".to_string(),
-            name: None,
-            endpoint: None,
-            allowed_ips: Some(vec!["not-a-cidr".to_string()]),
-            persistent_keepalive: None,
-        });
-        let cfg = AwgConfig {
-            interfaces: vec![a],
-        };
-        assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
     fn rejects_duplicate_peer_public_key_within_one_interface() {
         let mut a = iface("a");
         a.peers.push(PeerEntry {
             public_key: "k".to_string(),
             name: None,
             endpoint: None,
-            allowed_ips: Some(vec!["203.0.113.1/32".to_string()]),
+            allowed_ips: Some(vec![Prefix::try_from("203.0.113.1/32".to_owned()).unwrap()]),
             persistent_keepalive: None,
         });
         a.peers.push(PeerEntry {
             public_key: "k".to_string(),
             name: None,
             endpoint: None,
-            allowed_ips: Some(vec!["203.0.113.2/32".to_string()]),
+            allowed_ips: Some(vec![Prefix::try_from("203.0.113.2/32".to_owned()).unwrap()]),
             persistent_keepalive: None,
         });
         let cfg = AwgConfig {

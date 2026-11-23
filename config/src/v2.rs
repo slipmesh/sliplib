@@ -18,6 +18,7 @@ pub use file::{
     Aim, AimedDocument, BlockError, Error, File, META_KEY, Place, PlatformDocument, REVISION,
     VERSION,
 };
+pub(crate) use name::is_name_character;
 pub use name::{ClassName, Name, NameError};
 
 use serde::de::{self, MapAccess, Visitor};

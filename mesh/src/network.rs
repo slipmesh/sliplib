@@ -1,6 +1,7 @@
 use crate::addressing;
-use sliplib_config::v2::File;
-use sliplib_config::v2::network::{Network, Node};
+use sliplib_config::router::InterfacePattern;
+use sliplib_config::v2::network::{InterfacePrefix, Network, Node};
+use sliplib_config::v2::{File, Platform};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Why files that read give no mesh.
@@ -14,6 +15,19 @@ pub enum Error {
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error("unknown node {0:?}")]
 pub struct UnknownNode(pub String);
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum NodeError {
+    #[error(transparent)]
+    Unknown(#[from] UnknownNode),
+    #[error("node {node:?} is a `{platform}` node, and this tool configures `{wanted}` ones")]
+    OtherPlatform {
+        node: String,
+        platform: Platform,
+        wanted: Platform,
+    },
+}
 
 /// Under the node.
 pub const PRIVATE_KEY: &str = "wireguard.private_key";
@@ -32,7 +46,7 @@ pub fn link_obfuscation(link: &str) -> String {
 #[derive(Debug, Clone, Copy)]
 pub struct Mesh<'a> {
     network: &'a Network,
-    interface_prefix: &'a str,
+    interface_prefix: &'a InterfacePrefix,
 }
 
 /// What a node's `node_id` gives it.
@@ -52,8 +66,7 @@ impl<'a> Mesh<'a> {
             .mesh
             .interface_prefix
             .as_ref()
-            .ok_or(Error::NoInterfacePrefix)?
-            .as_str();
+            .ok_or(Error::NoInterfacePrefix)?;
         Ok(Self {
             network,
             interface_prefix,
@@ -65,7 +78,12 @@ impl<'a> Mesh<'a> {
     }
 
     pub fn interface_prefix(&self) -> &'a str {
-        self.interface_prefix
+        self.interface_prefix.as_str()
+    }
+
+    /// Every link's interface.
+    pub fn links_pattern(&self) -> InterfacePattern {
+        InterfacePattern::every_name_from(self.interface_prefix)
     }
 
     pub fn node(&self, name: &str) -> Result<&'a Node, UnknownNode> {
@@ -75,13 +93,26 @@ impl<'a> Mesh<'a> {
             .ok_or_else(|| UnknownNode(name.to_owned()))
     }
 
+    /// Unless it is of another platform than `platform`.
+    pub fn node_on(&self, name: &str, platform: Platform) -> Result<&'a Node, NodeError> {
+        let node = self.node(name)?;
+        if node.platform != platform {
+            return Err(NodeError::OtherPlatform {
+                node: name.to_owned(),
+                platform: node.platform,
+                wanted: platform,
+            });
+        }
+        Ok(node)
+    }
+
     /// Whether the node is on a link.
     pub fn needs_a_key(&self, node: &str) -> bool {
         self.network
             .mesh
             .links
             .values()
-            .any(|link| link.ends.iter().any(|end| end.as_str() == node))
+            .any(|link| link.has_end(node))
     }
 
     /// Distinct, none with a host part of zeros: the loader refuses a `node_id` that does not fit.
@@ -108,11 +139,11 @@ impl<'a> Mesh<'a> {
 
     /// With the links' pattern appended unless listed, where the links carry IPv4: that announces
     /// them.
-    pub fn direct_interfaces(&self, node: &Node) -> Vec<String> {
+    pub fn direct_interfaces(&self, node: &Node) -> Vec<InterfacePattern> {
         let mut list = node.routing.direct_interfaces.clone();
         let tunnel = self.network.addressing.tunnel.as_ref();
         if tunnel.and_then(|tunnel| tunnel.ipv4).is_some() {
-            let pattern = format!("{}*", self.interface_prefix);
+            let pattern = self.links_pattern();
             if !list.contains(&pattern) {
                 list.push(pattern);
             }
@@ -132,6 +163,9 @@ mod tests {
 
     fn direct_interfaces(mesh: &Mesh<'_>, node: &str) -> Vec<String> {
         mesh.direct_interfaces(mesh.node(node).unwrap())
+            .into_iter()
+            .map(String::from)
+            .collect()
     }
 
     #[test]
@@ -220,6 +254,25 @@ mod tests {
         let mesh = example("{mesh: {interface_prefix: wg-}}");
         assert_eq!(direct_interfaces(&mesh, "node-a"), ["lan0", "wg-*"]);
         assert_eq!(mesh.interface_prefix(), "wg-");
+        assert_eq!(mesh.links_pattern().as_str(), "wg-*");
+    }
+
+    #[test]
+    fn a_node_of_another_platform_is_refused_naming_both_and_an_unknown_one_as_unknown() {
+        let mesh = example("{}");
+        assert!(mesh.node_on("node-a", Platform::Talos).is_ok());
+        assert_eq!(
+            mesh.node_on("router1", Platform::Talos).unwrap_err(),
+            NodeError::OtherPlatform {
+                node: "router1".to_owned(),
+                platform: Platform::Routeros,
+                wanted: Platform::Talos,
+            }
+        );
+        assert_eq!(
+            mesh.node_on("node-x", Platform::Talos).unwrap_err(),
+            NodeError::Unknown(UnknownNode("node-x".to_owned()))
+        );
     }
 
     #[test]

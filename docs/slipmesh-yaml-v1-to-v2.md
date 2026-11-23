@@ -158,7 +158,10 @@ comes from the conversion.
       name; `learn` holds `pod_subnet` and `announce` holds `service_subnet`, each in a list. The
       label `k8s-services` has no place in version 2. `bfd` moves here without `enable`: where
       `enable` was `false` or absent, delete the block. `classes.egress.protocol` is
-      `cluster.route_proto_id.egress`, which a file that passes step 1 always has.
+      `cluster.route_proto_id.egress`, which a file that passes step 1 always has. An entry of a
+      `direct_interfaces`, here or a node's, that is a CIDR or holds a character other than ASCII
+      letters, digits, `-`, `_` and `.` before a trailing `*`, as `?` is, does not load: rewrite it
+      as interface names, or prefixes and `*`.
    4. Write `mesh`: `interface_prefix` is `cluster.interface_prefix.mesh`, `mtu` is
       `cluster.mesh_mtu`, and `amneziawg.obfuscation` is the network's `obfuscation`.
    5. Move `awg_metrics_port` and `router_metrics_port` into a new `platform` document for `talos`,

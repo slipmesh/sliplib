@@ -5,12 +5,10 @@
 
 use crate::network::{Mesh, UnknownNode};
 use sliplib_config::v2::network::{Family, Link, Node};
+use sliplib_net::mtu::MIN_IPV6_MTU;
 
 /// Ethernet's.
 pub(crate) const DEFAULT_UPLINK_MTU: u32 = 1500;
-
-/// RFC 8200: the mesh carries OSPFv3 over IPv6 link-locals.
-pub(crate) const MIN_MESH_MTU: u32 = 1280;
 
 /// Every node takes the one MTU, so this stops them all.
 #[derive(Debug, thiserror::Error)]
@@ -26,10 +24,10 @@ pub enum MtuError {
     NoLink,
     #[error("mesh.mtu {mtu} is above {limit}, the limit of mesh link {link}")]
     AboveLimit { mtu: u32, limit: u32, link: String },
-    #[error("mesh.mtu {mtu} is below {MIN_MESH_MTU}, the least IPv6 allows a link")]
+    #[error("mesh.mtu {mtu} is below {MIN_IPV6_MTU}, the least IPv6 allows a link")]
     BelowMinimum { mtu: u32 },
     #[error(
-        "mesh link {link} limits the mesh MTU to {limit}, below {MIN_MESH_MTU}, the least IPv6 allows a link - raise the underlay `mtu` of its narrower end, or lower its `s4`"
+        "mesh link {link} limits the mesh MTU to {limit}, below {MIN_IPV6_MTU}, the least IPv6 allows a link - raise the underlay `mtu` of its narrower end, or lower its `s4`"
     )]
     LimitBelowMinimum { link: String, limit: u32 },
 }
@@ -66,7 +64,7 @@ pub fn mesh_mtu(mesh: &Mesh<'_>) -> Result<Option<u32>, MtuError> {
         }
         return Ok(None);
     };
-    if limit < MIN_MESH_MTU {
+    if limit < MIN_IPV6_MTU {
         return Err(MtuError::LimitBelowMinimum {
             link: link.to_owned(),
             limit,
@@ -82,7 +80,7 @@ pub fn mesh_mtu(mesh: &Mesh<'_>) -> Result<Option<u32>, MtuError> {
             link: link.to_owned(),
         });
     }
-    if mtu < MIN_MESH_MTU {
+    if mtu < MIN_IPV6_MTU {
         return Err(MtuError::BelowMinimum { mtu });
     }
     Ok(Some(mtu))
@@ -318,7 +316,7 @@ mod tests {
                     let b = format!("{{mtu: {underlay}}}");
                     let link = amneziawg(&format!("{{s4: {s4}}}"));
                     let Ok(Some(mtu)) = of(&network(&a, &b, &link, "")) else {
-                        assert!(underlay - 32 - 8 - ip - s4 < MIN_MESH_MTU);
+                        assert!(underlay - 32 - 8 - ip - s4 < MIN_IPV6_MTU);
                         continue;
                     };
                     assert!(outer(mtu, mtu, s4, ip) <= underlay, "{s4} {underlay} {ip}");

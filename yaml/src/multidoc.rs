@@ -52,6 +52,11 @@ impl MultiDoc {
         &self.documents
     }
 
+    /// Of [`MultiDoc::documents`].
+    pub fn values(&self) -> Vec<Value> {
+        self.documents.iter().map(|d| d.value.clone()).collect()
+    }
+
     /// None for a document of only comments.
     pub fn document_mut(&mut self, index: usize) -> Option<&mut Value> {
         let document = self.documents.iter_mut().find(|d| d.index == index)?;

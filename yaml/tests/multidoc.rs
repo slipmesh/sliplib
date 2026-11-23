@@ -9,6 +9,16 @@ fn documents_keep_their_position_and_line_and_comment_only_ones_are_skipped() {
     assert_eq!(file.documents()[1].value["b"], 2);
 }
 
+#[test]
+fn the_values_of_a_file_are_its_documents_in_order() {
+    let file = MultiDoc::parse("a: 1\n---\n# nothing here yet\n---\nb: 2\n").unwrap();
+    let expected: Vec<Value> = ["a: 1", "b: 2"]
+        .iter()
+        .map(|text| sliplib_yaml::from_str(text).unwrap())
+        .collect();
+    assert_eq!(file.values(), expected);
+}
+
 #[derive(Deserialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct Strict {
