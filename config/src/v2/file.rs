@@ -1011,24 +1011,28 @@ mod tests {
     }
 
     #[test]
-    fn a_tagged_kind_or_platform_is_refused() {
+    fn a_tagged_kind_or_platform_is_refused_by_the_rule_on_tags() {
         let newer = network_edited("{kind: !network, version: 3, revision: 1}", |_| ());
         let network = network("{}");
-        for documents in [
-            vec![newer.as_str()],
-            vec![
-                network.as_str(),
-                "slipmesh:\n  kind: platform\n  platform: !talos\n",
-            ],
+        for (documents, tagged) in [
+            (vec![newer.as_str()], "slipmesh.kind"),
+            (
+                vec![
+                    network.as_str(),
+                    "slipmesh:\n  kind: platform\n  platform: !talos\n",
+                ],
+                "slipmesh.platform",
+            ),
         ] {
             let refusal = refusal(&documents);
+            let Error::Yaml(source) = &refusal else {
+                panic!("{refusal:?}");
+            };
             assert!(
                 matches!(
-                    refusal,
-                    Error::Block {
-                        source: BlockError::Malformed(_),
-                        ..
-                    }
+                    source.downcast_ref::<sliplib_yaml::Error>(),
+                    Some(sliplib_yaml::Error::InDocument { source, .. })
+                        if matches!(&**source, sliplib_yaml::Error::Tagged { key, .. } if key == tagged)
                 ),
                 "{refusal:?}"
             );

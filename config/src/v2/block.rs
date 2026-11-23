@@ -9,8 +9,7 @@ use std::marker::PhantomData;
 
 /// Whose tool configures a node, and whose terms a document is in.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-// Not a YAML tag read as the variant.
-#[serde(rename_all = "lowercase", variant_identifier)]
+#[serde(rename_all = "lowercase")]
 pub enum Platform {
     Talos,
     Routeros,
@@ -166,8 +165,7 @@ pub struct PlatformBlock {
 }
 
 #[derive(Deserialize, Clone, Copy)]
-// Not a YAML tag read as the variant: the version gate finds a network document by its plain `kind`.
-#[serde(rename_all = "lowercase", variant_identifier)]
+#[serde(rename_all = "lowercase")]
 enum Kind {
     Network,
     Groups,

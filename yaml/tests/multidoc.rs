@@ -132,3 +132,33 @@ fn a_mapping_less_some_keys_refuses_another_by_its_key_and_line_and_a_list() {
         .to_string();
     assert!(list.contains("expected a mapping"), "{list}");
 }
+
+#[test]
+fn a_tag_is_refused_naming_its_document_and_key_path() {
+    for (text, line, key, tag) in [
+        (
+            "a: 1\n---\nslipmesh:\n  kind: !network\n",
+            3,
+            "slipmesh.kind",
+            "!network",
+        ),
+        ("a: 1\n---\nb:\n  c: !x 1\n", 3, "b.c", "!x"),
+        ("a: [1, !x 2]\n", 1, "a[1]", "!x"),
+    ] {
+        let err = MultiDoc::parse(text).err().unwrap();
+        let Error::InDocument { line: at, source } = &err else {
+            panic!("{text}: {err:?}");
+        };
+        assert_eq!(*at, line, "{text}");
+        assert!(
+            matches!(&**source, Error::Tagged { key: k, tag: t } if k == key && t == tag),
+            "{text}: {err:?}"
+        );
+    }
+}
+
+#[test]
+fn a_core_tag_reads_as_the_plain_value() {
+    let file = MultiDoc::parse("a: !!str 5\n").unwrap();
+    assert_eq!(file.documents()[0].value["a"], "5");
+}

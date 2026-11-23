@@ -49,6 +49,14 @@ pub enum Error {
         #[source]
         source: yaml_serde::Error,
     },
+    #[error("`{key}` holds a YAML tag, `{tag}`, which is not read - write the value without it")]
+    Tagged { key: String, tag: String },
+    #[error("the document starting at line {line}")]
+    InDocument {
+        line: usize,
+        #[source]
+        source: Box<Error>,
+    },
     #[error("the written YAML is not UTF-8")]
     NotUtf8(#[source] std::string::FromUtf8Error),
 }

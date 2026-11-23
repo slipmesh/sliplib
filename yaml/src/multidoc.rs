@@ -27,9 +27,14 @@ impl MultiDoc {
             if value.is_null() {
                 continue;
             }
+            let line = line_of(&source, index)?;
+            crate::tag::refuse(&value).map_err(|source| Error::InDocument {
+                line,
+                source: Box::new(source),
+            })?;
             documents.push(Document {
                 index,
-                line: line_of(&source, index)?,
+                line,
                 value,
                 source: Some(Arc::clone(&source)),
                 taken: Vec::new(),

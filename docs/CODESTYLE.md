@@ -40,6 +40,7 @@
   `Document::deserialize` for a document. A value put together in memory, such as merged patches,
   has no text, so each part is read from its own text before the parts are put together. Writing
   through `flatten` loses nothing and stays allowed.
+- `sliplib-yaml` refuses a YAML tag in what it reads, so no type takes one.
 
 ## Tests
 

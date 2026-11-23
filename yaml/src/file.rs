@@ -7,7 +7,10 @@ use crate::error::{Error, Result};
 
 /// The one document. An error names the file, and the line of a value that does not fit.
 pub fn read<T: DeserializeOwned>(path: &Path) -> Result<T> {
-    reading(path, |text| Ok(yaml_serde::from_str(text)?))
+    reading(path, |text| {
+        crate::tag::refuse(&yaml_serde::from_str(text)?)?;
+        Ok(yaml_serde::from_str(text)?)
+    })
 }
 
 /// The file's text as `parse` takes it; either failure names the file.

@@ -242,6 +242,9 @@ depends on whose the document is:
   body of a `platform`, `template` or `patch` it leaves to the platform's tool. With that tool's own
   check, such as the Talos generator's `--check`, it is the one to run after an edit by hand.
 
+A YAML tag such as `!name` is refused anywhere in a file, by every tool; the core tags such as
+`!!str` read as the plain value.
+
 The tools are built with the format they read, so a key a tool does not know is a mistake: passed
 over, it would silently stop configuring what it was written for. A body written in a platform's
 own language - the document in a `patch`, the text of a `template` - is checked as far as the tool

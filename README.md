@@ -153,11 +153,11 @@ reaches every component. On top of its methods:
 Every read, edit and write of a YAML file, so a component deals in its own types. What the
 documents mean is the caller's.
 
-- `MultiDoc`: `read` or `parse` a multi-document file, then `documents()`, each with its position,
-  the line it starts on and its value. `Document::take` removes a top-level key;
-  `Document::deserialize` reads the rest, an error naming the line. `document_mut` edits a value
-  and `text` writes the file back, without its comments or documents of only comments.
-- `read`: a file of one document, into a type.
+- `MultiDoc`: `read` or `parse` a multi-document file, a YAML tag refused, then `documents()`,
+  each with its position, the line it starts on and its value. `Document::take` removes a top-level
+  key; `Document::deserialize` reads the rest, an error naming the line. `document_mut` edits a
+  value and `text` writes the file back, without its comments or documents of only comments.
+- `read`: a file of one document, into a type, a YAML tag refused.
 - `merge`: JSON Merge Patch (RFC 7386), key order kept; `join` puts documents together.
 - `replace_file` replaces a file atomically, keeping its permissions and following a symlink;
   `write_if_changed` writes only what differs; `read_or_empty` reads a file that may not exist.

@@ -202,3 +202,15 @@ fn a_directory_that_cannot_be_created_is_refused_naming_it() {
         "{err:?}"
     );
 }
+
+#[test]
+fn a_tag_in_a_file_is_refused_naming_its_key_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("node-a.yaml");
+    std::fs::write(&path, "name: node-a\nport: !port 179\n").unwrap();
+    let err = read::<Config>(&path).unwrap_err();
+    assert!(
+        matches!(&err, Error::Reading { source, .. } if matches!(&**source, Error::Tagged { key, tag } if key == "port" && tag == "!port")),
+        "{err:?}"
+    );
+}

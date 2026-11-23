@@ -4,6 +4,7 @@ mod error;
 mod file;
 mod merge;
 mod multidoc;
+mod tag;
 
 pub use error::Error;
 pub use file::{read, read_or_empty, replace_file, write_if_changed};
