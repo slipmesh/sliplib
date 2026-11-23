@@ -139,16 +139,23 @@ struct Read {
 impl Read {
     fn block(mut body: Document) -> Result<Self, Error> {
         let line = body.line;
-        let block = body
-            .take(META_KEY)
-            .ok_or(BlockError::Missing)
-            .and_then(|block| {
-                sliplib_yaml::from_value::<Block>(block)
-                    .map_err(|source| BlockError::Malformed(source.into()))
-            })
-            .map_err(|source| Error::Block { line, source })?;
+        let block = match body.value.get(META_KEY) {
+            None => Err(BlockError::Missing),
+            Some(_) => body
+                .deserialize::<Header>()
+                .map(|header| header.slipmesh)
+                .map_err(|source| BlockError::Malformed(source.into())),
+        }
+        .map_err(|source| Error::Block { line, source })?;
+        body.take(META_KEY);
         Ok(Self { block, body })
     }
+}
+
+/// A document read for its block alone, from the text, so a refusal names the key and line.
+#[derive(serde::Deserialize)]
+struct Header {
+    slipmesh: Block,
 }
 
 fn body<T: DeserializeOwned>(document: &Document, kind: &'static str) -> Result<T, Error> {
@@ -989,6 +996,56 @@ mod tests {
                 "{block}: {refusal:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_value_of_a_block_that_does_not_fit_is_refused_by_its_key_and_line() {
+        let wrong_version = network_edited("{kind: network, version: abc, revision: 1}", |_| ());
+        let network = network("{}");
+        for (documents, key, written) in [
+            ([wrong_version.as_str(), ""], "version", "version: abc"),
+            (
+                [
+                    network.as_str(),
+                    "slipmesh:\n  kind: platform\n  platform: nope\n",
+                ],
+                "platform",
+                "platform: nope",
+            ),
+            (
+                [
+                    network.as_str(),
+                    "slipmesh:\n  kind: template\n  platform: talos\n  include: 5\n",
+                ],
+                "include",
+                "include: 5",
+            ),
+        ] {
+            let line = file_line(&documents, written);
+            let refusal = refusal(&documents);
+            let Error::Block {
+                source: BlockError::Malformed(source),
+                ..
+            } = &refusal
+            else {
+                panic!("{refusal:?}");
+            };
+            let source = source.to_string();
+            assert!(
+                source.starts_with(&format!("{META_KEY}.{key}: "))
+                    && source.contains(&format!(" at line {line} ")),
+                "{source}"
+            );
+        }
+    }
+
+    /// The line of `documents` joined that holds `written`.
+    fn file_line(documents: &[&str], written: &str) -> usize {
+        let text = documents.join("\n---\n");
+        text.lines()
+            .position(|line| line.trim_start() == written)
+            .unwrap()
+            + 1
     }
 
     #[test]

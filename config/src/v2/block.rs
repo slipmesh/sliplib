@@ -1,7 +1,7 @@
 //! The `slipmesh:` block of every document: its kind, aim and order.
 
 use super::Name;
-use serde::de::{self, SeqAccess, Visitor};
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 
@@ -128,35 +128,137 @@ impl<'de> Deserialize<'de> for Exclude {
 
 /// One variant per kind, with its keys: a misspelled `include` is unknown, not a document aimed at
 /// every node.
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(
-    remote = "Self",
-    tag = "kind",
-    rename_all = "lowercase",
-    deny_unknown_fields
-)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
     /// The loader checks `version` and `revision` against its own.
     Network {
         version: u32,
         revision: u32,
-        #[serde(default)]
         order: Order,
     },
     Groups {
-        #[serde(default)]
         order: Order,
     },
     Platform {
         platform: Platform,
-        #[serde(default)]
         order: Order,
     },
     Template(Aimed),
     Patch(Aimed),
 }
 
-from_a_mapping!(Block);
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+enum Kind {
+    Network,
+    Groups,
+    Platform,
+    Template,
+    Patch,
+}
+
+impl Kind {
+    /// Besides `kind`.
+    fn keys(self) -> &'static [&'static str] {
+        match self {
+            Self::Network => &["version", "revision", "order"],
+            Self::Groups => &["order"],
+            Self::Platform => &["platform", "order"],
+            Self::Template | Self::Patch => &["platform", "include", "exclude", "order"],
+        }
+    }
+}
+
+/// Every key of every kind, each value read as its own type, so its refusal keeps the key and
+/// line that serde's buffer for an internal tag loses.
+#[derive(Default)]
+struct Keys {
+    written: Vec<String>,
+    kind: Option<Kind>,
+    version: Option<u32>,
+    revision: Option<u32>,
+    order: Option<Order>,
+    platform: Option<Platform>,
+    include: Option<Include>,
+    exclude: Option<Exclude>,
+}
+
+impl Keys {
+    fn block<E: de::Error>(self) -> Result<Block, E> {
+        let kind = self.kind.ok_or_else(|| E::missing_field("kind"))?;
+        let taken = kind.keys();
+        if let Some(key) = self
+            .written
+            .iter()
+            .find(|key| *key != "kind" && !taken.contains(&key.as_str()))
+        {
+            return Err(E::unknown_field(key, taken));
+        }
+        let order = self.order.unwrap_or_default();
+        Ok(match kind {
+            Kind::Network => Block::Network {
+                version: required(self.version, "version")?,
+                revision: required(self.revision, "revision")?,
+                order,
+            },
+            Kind::Groups => Block::Groups { order },
+            Kind::Platform => Block::Platform {
+                platform: required(self.platform, "platform")?,
+                order,
+            },
+            Kind::Template | Kind::Patch => {
+                let aimed = Aimed {
+                    platform: required(self.platform, "platform")?,
+                    include: self.include.unwrap_or_default(),
+                    exclude: self.exclude.unwrap_or_default(),
+                    order,
+                };
+                match kind {
+                    Kind::Template => Block::Template(aimed),
+                    _ => Block::Patch(aimed),
+                }
+            }
+        })
+    }
+}
+
+fn required<T, E: de::Error>(value: Option<T>, key: &'static str) -> Result<T, E> {
+    value.ok_or_else(|| E::missing_field(key))
+}
+
+impl<'de> Visitor<'de> for Keys {
+    type Value = Block;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a mapping")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<Block, A::Error> {
+        while let Some(key) = map.next_key::<String>()? {
+            if self.written.contains(&key) {
+                return Err(de::Error::custom(format_args!("duplicate field `{key}`")));
+            }
+            match key.as_str() {
+                "kind" => self.kind = Some(map.next_value()?),
+                "version" => self.version = Some(map.next_value()?),
+                "revision" => self.revision = Some(map.next_value()?),
+                "order" => self.order = Some(map.next_value()?),
+                "platform" => self.platform = Some(map.next_value()?),
+                "include" => self.include = Some(map.next_value()?),
+                "exclude" => self.exclude = Some(map.next_value()?),
+                _ => map.next_value::<de::IgnoredAny>().map(drop)?,
+            }
+            self.written.push(key);
+        }
+        self.block()
+    }
+}
+
+impl<'de> Deserialize<'de> for Block {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(Keys::default())
+    }
+}
 
 /// Of a `template` or a `patch`.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -294,6 +396,23 @@ mod tests {
         ] {
             let refused = block(list).unwrap_err();
             assert!(refused.contains("a mapping"), "{list}: {refused}");
+        }
+    }
+
+    #[test]
+    fn a_key_written_twice_is_refused() {
+        for (yaml, key) in [
+            (
+                "{kind: patch, platform: talos, include: [a], include: [b]}",
+                "include",
+            ),
+            ("{kind: groups, kind: groups}", "kind"),
+        ] {
+            let refused = block(yaml).unwrap_err();
+            assert!(
+                refused.contains(&format!("duplicate field `{key}`")),
+                "{yaml}: {refused}"
+            );
         }
     }
 
