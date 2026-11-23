@@ -1,9 +1,11 @@
 //! The `slipmesh:` block of every document: its kind, aim and order.
 
-use super::Name;
-use serde::de::{self, MapAccess, SeqAccess, Visitor};
+use super::{META_KEY, Name};
+use serde::de::{self, DeserializeOwned, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
+use sliplib_yaml::{Document, Value, Without};
 use std::fmt;
+use std::marker::PhantomData;
 
 /// Whose tool configures a node, and whose terms a document is in.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -130,21 +132,36 @@ impl<'de> Deserialize<'de> for Exclude {
 /// every node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
-    /// The loader checks `version` and `revision` against its own.
-    Network {
-        version: u32,
-        revision: u32,
-        order: Order,
-    },
-    Groups {
-        order: Order,
-    },
-    Platform {
-        platform: Platform,
-        order: Order,
-    },
+    Network(NetworkBlock),
+    Groups(GroupsBlock),
+    Platform(PlatformBlock),
     Template(Aimed),
     Patch(Aimed),
+}
+
+/// The loader checks `version` and `revision` against its own.
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkBlock {
+    pub version: u32,
+    pub revision: u32,
+    #[serde(default)]
+    pub order: Order,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GroupsBlock {
+    #[serde(default)]
+    pub order: Order,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PlatformBlock {
+    pub platform: Platform,
+    #[serde(default)]
+    pub order: Order,
 }
 
 #[derive(Deserialize, Clone, Copy)]
@@ -157,106 +174,79 @@ enum Kind {
     Patch,
 }
 
-impl Kind {
-    /// Besides `kind`.
-    fn keys(self) -> &'static [&'static str] {
-        match self {
-            Self::Network => &["version", "revision", "order"],
-            Self::Groups => &["order"],
-            Self::Platform => &["platform", "order"],
-            Self::Template | Self::Patch => &["platform", "include", "exclude", "order"],
-        }
-    }
-}
-
-/// Every key of every kind, each value read as its own type, so its refusal keeps the key and
-/// line that serde's buffer for an internal tag loses.
-#[derive(Default)]
-struct Keys {
-    written: Vec<String>,
-    kind: Option<Kind>,
-    version: Option<u32>,
-    revision: Option<u32>,
-    order: Option<Order>,
-    platform: Option<Platform>,
-    include: Option<Include>,
-    exclude: Option<Exclude>,
-}
-
-impl Keys {
-    fn block<E: de::Error>(self) -> Result<Block, E> {
-        let kind = self.kind.ok_or_else(|| E::missing_field("kind"))?;
-        let taken = kind.keys();
-        if let Some(key) = self
-            .written
-            .iter()
-            .find(|key| *key != "kind" && !taken.contains(&key.as_str()))
-        {
-            return Err(E::unknown_field(key, taken));
-        }
-        let order = self.order.unwrap_or_default();
+impl Block {
+    /// `kind` first, then that kind's keys: a key the kind does not take is refused as that,
+    /// whatever it holds.
+    pub(super) fn read(document: &Document) -> Result<Self, sliplib_yaml::Error> {
+        let Header(KindOf(kind)) = document.deserialize()?;
         Ok(match kind {
-            Kind::Network => Block::Network {
-                version: required(self.version, "version")?,
-                revision: required(self.revision, "revision")?,
-                order,
-            },
-            Kind::Groups => Block::Groups { order },
-            Kind::Platform => Block::Platform {
-                platform: required(self.platform, "platform")?,
-                order,
-            },
-            Kind::Template | Kind::Patch => {
-                let aimed = Aimed {
-                    platform: required(self.platform, "platform")?,
-                    include: self.include.unwrap_or_default(),
-                    exclude: self.exclude.unwrap_or_default(),
-                    order,
-                };
-                match kind {
-                    Kind::Template => Block::Template(aimed),
-                    _ => Block::Patch(aimed),
-                }
-            }
+            Kind::Network => Self::Network(keys(document)?),
+            Kind::Groups => Self::Groups(keys(document)?),
+            Kind::Platform => Self::Platform(keys(document)?),
+            Kind::Template => Self::Template(keys(document)?),
+            Kind::Patch => Self::Patch(keys(document)?),
         })
     }
 }
 
-fn required<T, E: de::Error>(value: Option<T>, key: &'static str) -> Result<T, E> {
-    value.ok_or_else(|| E::missing_field(key))
+fn keys<T: DeserializeOwned>(document: &Document) -> Result<T, sliplib_yaml::Error> {
+    document.deserialize().map(|Header(Keys(keys))| keys)
 }
 
-impl<'de> Visitor<'de> for Keys {
-    type Value = Block;
+/// The block, every other key passed over whatever its type.
+struct Header<T>(T);
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Header<T> {
+    fn deserialize<D: Deserializer<'de>>(document: D) -> Result<Self, D::Error> {
+        document.deserialize_map(HeaderKeys(PhantomData))
+    }
+}
+
+struct HeaderKeys<T>(PhantomData<T>);
+
+impl<'de, T: Deserialize<'de>> Visitor<'de> for HeaderKeys<T> {
+    type Value = Header<T>;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a mapping")
     }
 
-    fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<Block, A::Error> {
-        while let Some(key) = map.next_key::<String>()? {
-            if self.written.contains(&key) {
-                return Err(de::Error::custom(format_args!("duplicate field `{key}`")));
+    fn visit_map<A: MapAccess<'de>>(self, mut keys: A) -> Result<Header<T>, A::Error> {
+        let mut block = None;
+        while let Some(key) = keys.next_key::<Value>()? {
+            if key.as_str() == Some(META_KEY) {
+                block = Some(keys.next_value()?);
+            } else {
+                keys.next_value::<de::IgnoredAny>()?;
             }
-            match key.as_str() {
-                "kind" => self.kind = Some(map.next_value()?),
-                "version" => self.version = Some(map.next_value()?),
-                "revision" => self.revision = Some(map.next_value()?),
-                "order" => self.order = Some(map.next_value()?),
-                "platform" => self.platform = Some(map.next_value()?),
-                "include" => self.include = Some(map.next_value()?),
-                "exclude" => self.exclude = Some(map.next_value()?),
-                _ => map.next_value::<de::IgnoredAny>().map(drop)?,
-            }
-            self.written.push(key);
         }
-        self.block()
+        block
+            .map(Header)
+            .ok_or_else(|| de::Error::missing_field(META_KEY))
     }
 }
 
-impl<'de> Deserialize<'de> for Block {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_map(Keys::default())
+/// From a mapping alone: serde's derive reads a struct from a list too.
+struct KindOf(Kind);
+
+impl<'de> Deserialize<'de> for KindOf {
+    fn deserialize<D: Deserializer<'de>>(block: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Of {
+            kind: Kind,
+        }
+        block
+            .deserialize_map(Without::<Of>::new(&[]))
+            .map(|of| Self(of.kind))
+    }
+}
+
+/// `kind` passed over: no kind's type holds it.
+struct Keys<T>(T);
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Keys<T> {
+    fn deserialize<D: Deserializer<'de>>(block: D) -> Result<Self, D::Error> {
+        block.deserialize_map(Without::new(&["kind"])).map(Self)
     }
 }
 
@@ -276,9 +266,9 @@ pub struct Aimed {
 impl Block {
     pub fn order(&self) -> Order {
         match self {
-            Self::Network { order, .. }
-            | Self::Groups { order }
-            | Self::Platform { order, .. }
+            Self::Network(NetworkBlock { order, .. })
+            | Self::Groups(GroupsBlock { order })
+            | Self::Platform(PlatformBlock { order, .. })
             | Self::Template(Aimed { order, .. })
             | Self::Patch(Aimed { order, .. }) => *order,
         }
@@ -305,9 +295,11 @@ impl Rank {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sliplib_yaml::MultiDoc;
 
     fn block(yaml: &str) -> Result<Block, String> {
-        sliplib_yaml::from_str(yaml).map_err(|e| e.to_string())
+        let file = MultiDoc::parse(&format!("{META_KEY}: {yaml}\n")).unwrap();
+        Block::read(&file.documents()[0]).map_err(|e| e.to_string())
     }
 
     fn names(names: &[Name]) -> Vec<&str> {
@@ -318,22 +310,22 @@ mod tests {
     fn every_kind_reads_with_the_keys_it_takes() {
         assert_eq!(
             block("{kind: network, version: 2, revision: 1}").unwrap(),
-            Block::Network {
+            Block::Network(NetworkBlock {
                 version: 2,
                 revision: 1,
                 order: Order(1000)
-            }
+            })
         );
         assert_eq!(
             block("{kind: groups, order: 5}").unwrap(),
-            Block::Groups { order: Order(5) }
+            Block::Groups(GroupsBlock { order: Order(5) })
         );
         assert_eq!(
             block("{kind: platform, platform: talos}").unwrap(),
-            Block::Platform {
+            Block::Platform(PlatformBlock {
                 platform: Platform::Talos,
                 order: Order(1000)
-            }
+            })
         );
         for kind in ["template", "patch"] {
             let read = block(&format!(
@@ -400,26 +392,38 @@ mod tests {
     }
 
     #[test]
-    fn a_key_written_twice_is_refused() {
-        for (yaml, key) in [
-            (
-                "{kind: patch, platform: talos, include: [a], include: [b]}",
-                "include",
-            ),
-            ("{kind: groups, kind: groups}", "kind"),
-        ] {
+    fn a_block_without_a_kind_is_refused_whatever_its_other_keys_hold() {
+        for yaml in ["{platform: talos}", "{include: []}"] {
             let refused = block(yaml).unwrap_err();
             assert!(
-                refused.contains(&format!("duplicate field `{key}`")),
+                refused.contains("missing field `kind`"),
                 "{yaml}: {refused}"
             );
         }
     }
 
     #[test]
-    fn a_block_without_a_kind_is_refused() {
-        let refused = block("{platform: talos}").unwrap_err();
-        assert!(refused.contains("missing field `kind`"), "{refused}");
+    fn a_key_its_kind_does_not_take_is_refused_whatever_it_holds() {
+        for (yaml, key) in [
+            ("{kind: groups, include: []}", "include"),
+            (
+                "{kind: network, version: 2, revision: 1, platform: mikrotik}",
+                "platform",
+            ),
+            ("{kind: platform, platform: talos, version: abc}", "version"),
+            (
+                "{kind: template, platform: talos, revision: -1}",
+                "revision",
+            ),
+            ("{kind: patch, platform: talos, version: []}", "version"),
+            ("{kind: groups, 0: 5}", "0"),
+        ] {
+            let refused = block(yaml).unwrap_err();
+            assert!(
+                refused.contains(&format!("unknown field `{key}`")),
+                "{yaml}: {refused}"
+            );
+        }
     }
 
     #[test]
@@ -480,10 +484,11 @@ mod tests {
         }
     }
 
-    /// As the loader takes it, from a value.
+    /// As the loader takes a document an edit has left without its text.
     fn block_from_value(yaml: &str) -> Block {
-        let value: sliplib_yaml::Value = sliplib_yaml::from_str(yaml).unwrap();
-        sliplib_yaml::from_value(value).unwrap()
+        let mut file = MultiDoc::parse(&format!("{META_KEY}: {yaml}\n")).unwrap();
+        file.document_mut(0).unwrap();
+        Block::read(&file.documents()[0]).unwrap()
     }
 
     #[test]

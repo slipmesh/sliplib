@@ -1,7 +1,7 @@
 //! The files read as a whole: the blocks, the network in force, the groups as nodes, and each
 //! platform document with its aim.
 
-use super::block::{Aimed, Block, Rank};
+use super::block::{Aimed, Block, PlatformBlock, Rank};
 use super::check::Invalid;
 use super::groups::{Groups, GroupsError, Resolved, Selection};
 use super::network::{AMNEZIAWG, Network, WIREGUARD};
@@ -141,21 +141,12 @@ impl Read {
         let line = body.line;
         let block = match body.value.get(META_KEY) {
             None => Err(BlockError::Missing),
-            Some(_) => body
-                .deserialize::<Header>()
-                .map(|header| header.slipmesh)
-                .map_err(|source| BlockError::Malformed(source.into())),
+            Some(_) => Block::read(&body).map_err(|source| BlockError::Malformed(source.into())),
         }
         .map_err(|source| Error::Block { line, source })?;
         body.take(META_KEY);
         Ok(Self { block, body })
     }
-}
-
-/// A document read for its block alone, from the text, so a refusal names the key and line.
-#[derive(serde::Deserialize)]
-struct Header {
-    slipmesh: Block,
 }
 
 fn body<T: DeserializeOwned>(document: &Document, kind: &'static str) -> Result<T, Error> {
@@ -469,9 +460,9 @@ impl File {
         let mut aimed_documents = Vec::new();
         for Read { block, body } in documents {
             match block {
-                Block::Network { .. } => networks.push(body),
-                Block::Groups { .. } => groups.push(body),
-                Block::Platform { platform, .. } => {
+                Block::Network(_) => networks.push(body),
+                Block::Groups(_) => groups.push(body),
+                Block::Platform(PlatformBlock { platform, .. }) => {
                     if let Some((_, first)) = platforms.iter().find(|(of, _)| *of == platform) {
                         let first = first.body.line;
                         return Err(Error::PlatformTwice {
@@ -995,6 +986,15 @@ mod tests {
                 matches!(refusal, Error::Block { line: at, source: BlockError::Malformed(_) } if at == line),
                 "{block}: {refusal:?}"
             );
+        }
+    }
+
+    #[test]
+    fn a_document_reads_beside_top_level_keys_that_are_not_strings() {
+        let network = network("{}");
+        for other in ["5: x\n", "? [a, b]\n: c\n"] {
+            let patch = format!("{META_KEY}: {{kind: patch, platform: talos}}\n{other}");
+            file(&[&network, &patch]).unwrap();
         }
     }
 
