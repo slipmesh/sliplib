@@ -13,12 +13,6 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
-    #[error("creating {}", path.display())]
-    Creating {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
     #[error("resolving {}", path.display())]
     Resolving {
         path: PathBuf,
@@ -51,17 +45,11 @@ pub fn read_or_empty(path: &Path) -> Result<String, Error> {
     }
 }
 
-/// Unless the file already holds it, creating the directory: a file that cannot be read is written
-/// over. Whether it wrote.
+/// Unless the file already holds it: a file that cannot be read is written over. Its directory has
+/// to exist, since one created here would hide a missing mount. Whether it wrote.
 pub fn write_if_changed(path: &Path, content: &str) -> Result<bool, Error> {
     if std::fs::read(path).is_ok_and(|current| current == content.as_bytes()) {
         return Ok(false);
-    }
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|source| Error::Creating {
-            path: dir.to_owned(),
-            source,
-        })?;
     }
     write_atomically(path, content)?;
     Ok(true)
@@ -115,9 +103,9 @@ mod tests {
     }
 
     #[test]
-    fn a_file_is_written_only_when_its_content_changes_and_its_directory_is_created() {
+    fn a_file_is_written_only_when_its_content_changes() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("patches").join("node-a.yaml");
+        let path = dir.path().join("node-a.yaml");
         assert!(write_if_changed(&path, "a: 1\n").unwrap());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "a: 1\n");
         let written = std::fs::metadata(&path).unwrap().modified().unwrap();
@@ -203,16 +191,16 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
-    fn a_directory_that_cannot_be_created_is_refused_naming_it() {
+    fn a_write_under_a_missing_directory_is_refused_naming_it_and_creates_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let dangling = dir.path().join("patches");
-        std::os::unix::fs::symlink(dir.path().join("nowhere").join("patches"), &dangling).unwrap();
-        let err = write_if_changed(&dangling.join("node-a.yaml"), "a: 1\n").unwrap_err();
+        let missing = dir.path().join("net.d");
+        let path = missing.join("10-bridge.conflist");
+        let err = write_if_changed(&path, "a: 1\n").unwrap_err();
         assert!(
-            matches!(&err, Error::Creating { path, .. } if path == &dangling),
+            matches!(&err, Error::Opening { path: opened, .. } if opened == &path),
             "{err:?}"
         );
+        assert!(!missing.exists());
     }
 }
