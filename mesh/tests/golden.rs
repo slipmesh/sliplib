@@ -28,9 +28,12 @@ fn without_daemon_keys(mut config: Value) -> Value {
 
 /// Panics on a key the shared type does not take.
 fn shared<T: DeserializeOwned + Serialize>(text: &str, which: &str) -> T {
-    let config = without_daemon_keys(sliplib_yaml::from_str(text).unwrap());
-    let shared: T = sliplib_yaml::from_value(config.clone()).unwrap();
-    assert_eq!(sliplib_yaml::to_value(&shared).unwrap(), config, "{which}");
+    let shared: T = sliplib_yaml::from_str(text).unwrap();
+    assert_eq!(
+        sliplib_yaml::to_value(&shared).unwrap(),
+        without_daemon_keys(sliplib_yaml::from_str(text).unwrap()),
+        "{which}"
+    );
     shared
 }
 
