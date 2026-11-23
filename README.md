@@ -194,7 +194,9 @@ chain prints the whole message, each part once.
 - `awg`: `AwgConfig` and `validate`. `InterfaceEntry::keepalive_of` is a peer's keepalive: none
   for one without an `endpoint`; else its own, or 25 on a plain interface and 20 to 30 on an
   obfuscated one.
-- `router`: `RouterConfig` and `validate`.
+- `router`: `RouterConfig` and `validate`. `InterfacePattern` is an entry of `ospf_interfaces` or
+  `direct_interfaces`, an interface name or a prefix and `*`: `matches` a name, `name` gives an
+  exact one, `is_router_loopback` tells the entry of `ROUTER_LOOPBACK`.
 - `Obfuscation`, AmneziaWG's device-level parameters, with the checks the kernel module would fail
   on. `trailer_loss` says how a tunnel with `random_trailers` on loses data packets, as
   `TrailerLoss`. `bytes_into_clear_header` says whether an offset reads a data packet's clear
@@ -211,7 +213,7 @@ A refusal is a `render::Error`, naming the node and the config, with its cause a
 an `mtu::MtuError`. Files that read but give no mesh are refused as `network::Error`; `Mesh::node`
 refuses an unknown name as `network::UnknownNode`.
 
-- `Mesh`: the loader's network (`network()`) and its interface prefix. `Mesh::of` refuses a
+- `Mesh`: the loader's network (`network()`), its interface prefix and `links_pattern`. `Mesh::of` refuses a
   `v2::File` without `mesh.interface_prefix`. `addresses` gives what a node's `node_id` gives it:
   loopbacks, link-local, tunnel IPv4. `direct_interfaces` appends the links' pattern unless listed,
   where the links carry IPv4. `network::node_key` and `network::link_obfuscation` name where the

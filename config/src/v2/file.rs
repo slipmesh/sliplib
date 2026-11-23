@@ -556,6 +556,7 @@ mod tests {
     use super::super::testing::example;
     use super::*;
     use crate::Range;
+    use crate::router::InterfacePattern;
 
     const BLOCK: &str = "{kind: network, version: 2, revision: 1}";
 
@@ -630,6 +631,10 @@ mod tests {
         names.iter().map(Name::as_str).collect()
     }
 
+    fn patterns(list: &[InterfacePattern]) -> Vec<&str> {
+        list.iter().map(InterfacePattern::as_str).collect()
+    }
+
     fn body_names(documents: &[&AimedDocument]) -> Vec<String> {
         documents
             .iter()
@@ -654,7 +659,7 @@ mod tests {
     fn a_node_without_lists_of_its_own_has_the_networks() {
         let file = file(&[&network("{}")]).unwrap();
         let node = &file.network().nodes["node-a"].routing;
-        assert_eq!(node.direct_interfaces, ["lan0"]);
+        assert_eq!(patterns(&node.direct_interfaces), ["lan0"]);
         assert_eq!(node.learn, file.network().routing.learn);
         assert_eq!(node.announce, file.network().routing.announce);
         assert!(!node.learn.is_empty() && !node.announce.is_empty());
@@ -667,11 +672,11 @@ mod tests {
         )])
         .unwrap();
         let node = &file.network().nodes["node-b"].routing;
-        assert_eq!(node.direct_interfaces, ["lan1", "lan2"]);
+        assert_eq!(patterns(&node.direct_interfaces), ["lan1", "lan2"]);
         assert_eq!(node.learn, file.network().routing.learn);
         // The example's own: a node that takes neither range.
         let router = &file.network().nodes["router1"].routing;
-        assert_eq!(router.direct_interfaces, ["bridge-lan"]);
+        assert_eq!(patterns(&router.direct_interfaces), ["bridge-lan"]);
         assert!(router.learn.is_empty() && router.announce.is_empty());
     }
 
@@ -694,7 +699,7 @@ mod tests {
         });
         let file = file(&[&text]).unwrap();
         let node = &file.network().nodes["node-b"].routing;
-        assert_eq!(node.direct_interfaces, ["lan0"]);
+        assert_eq!(patterns(&node.direct_interfaces), ["lan0"]);
     }
 
     #[test]

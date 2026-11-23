@@ -401,8 +401,9 @@ The routing over the mesh. A node holds its own value for some of these keys und
 
 Besides its own loopback, a node comes to announce an IPv4 prefix in three ways:
 
-- `direct_interfaces`, for a network connected on a real interface. An entry is an interface name
-  or a pattern with `*`; one that matches no interface of a node announces nothing there.
+- `direct_interfaces`, for a network connected on a real interface. An entry is an interface name,
+  or a prefix and `*`, which matches every name that starts with the prefix; `?`, `/` and a `*`
+  before the end are refused. An entry that matches no interface of a node announces nothing there.
 - `learn`, for a range whose parts the nodes get at run time, each routing its own part without an
   address of it on any interface, as with the pod range of a Kubernetes cluster. A route inside a
   `learn` prefix is announced whoever installed it.

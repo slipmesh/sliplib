@@ -3,7 +3,9 @@
 
 use super::name::is_name_character;
 use super::{ClassName, Map, Name, Platform, UniqueKeys, absent_when_null, unique_keys};
-use crate::router::{BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER};
+use crate::router::{
+    BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER, InterfacePattern,
+};
 use crate::{Obfuscation, Range};
 use serde::{Deserialize, Deserializer, de};
 use sliplib_net::{Ipv4Net, Ipv6Net};
@@ -92,7 +94,7 @@ pub struct Routing {
     #[serde(default)]
     pub bfd: Option<Bfd>,
     #[serde(default, deserialize_with = "absent_when_null")]
-    pub direct_interfaces: Vec<String>,
+    pub direct_interfaces: Vec<InterfacePattern>,
     #[serde(default, deserialize_with = "absent_when_null")]
     pub learn: Vec<Prefix4>,
     #[serde(default, deserialize_with = "absent_when_null")]
@@ -258,7 +260,7 @@ pub struct NodeWireguard {
 #[serde(deny_unknown_fields)]
 pub struct NodeRouting {
     #[serde(default, deserialize_with = "absent_when_null")]
-    pub direct_interfaces: Vec<String>,
+    pub direct_interfaces: Vec<InterfacePattern>,
     #[serde(default, deserialize_with = "absent_when_null")]
     pub learn: Vec<Prefix4>,
     #[serde(default, deserialize_with = "absent_when_null")]
@@ -627,6 +629,8 @@ mod tests {
             "{routing: {bfd: {multiplier: 256}}}",
             "{routing: {classes: {egress: {protocol: 256}}}}",
             "{routing: {classes: {-egress: {protocol: 7}}}}",
+            "{routing: {direct_interfaces: [\"lan?\"]}}",
+            "{nodes: {node-a: {routing: {direct_interfaces: [198.51.100.0/25]}}}}",
             "{routing: {learn: [\"3fff::/64\"]}}",
             "{routing: {announce: [203.0.113.64]}}",
             "{addressing: {loopback: {ipv4: \"3fff::/64\"}}}",

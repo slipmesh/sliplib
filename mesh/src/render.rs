@@ -6,7 +6,7 @@ use crate::network::{Mesh, PRIVATE_KEY, UnknownNode};
 use crate::secrets::{MissingSecret, unminted};
 use sliplib_config::awg::{AwgConfig, InterfaceEntry, PeerEntry};
 use sliplib_config::router::{
-    AnnounceEntry, BfdSettings, BgpPeerEntry, NodeIdentity, RouterConfig,
+    AnnounceEntry, BfdSettings, BgpPeerEntry, InterfacePattern, NodeIdentity, RouterConfig,
 };
 use sliplib_config::v2::network::{LinkKind, Node, Prefix4};
 use sliplib_config::{Obfuscation, ObfuscationError};
@@ -75,14 +75,8 @@ pub(crate) fn bgp_peers_for(mesh: &Mesh<'_>, node_name: &str) -> Vec<BgpPeerEntr
         .collect()
 }
 
-/// The mesh's and `router-lo`.
-fn ospf_interfaces(mesh: &Mesh<'_>) -> Vec<String> {
-    vec![mesh_glob(mesh), "router-lo".to_owned()]
-}
-
-/// As BIRD's `interface` clause and `direct_interfaces` match it.
-fn mesh_glob(mesh: &Mesh<'_>) -> String {
-    format!("{}*", mesh.interface_prefix())
+fn ospf_interfaces(mesh: &Mesh<'_>) -> Vec<InterfacePattern> {
+    vec![mesh.links_pattern(), InterfacePattern::router_loopback()]
 }
 
 fn prefixes(list: &[Prefix4]) -> Vec<String> {
@@ -351,7 +345,13 @@ mod tests {
             .map(|interface| interface.name.as_str())
             .collect();
         assert_eq!(names, ["wg-node-b", "wg-node-c", "wg-router1"]);
-        assert_eq!(configs.router.ospf_interfaces, ["wg-*", "router-lo"]);
+        let ospf: Vec<&str> = configs
+            .router
+            .ospf_interfaces
+            .iter()
+            .map(InterfacePattern::as_str)
+            .collect();
+        assert_eq!(ospf, ["wg-*", "router-lo"]);
     }
 
     #[test]

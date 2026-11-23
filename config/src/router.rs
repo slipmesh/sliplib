@@ -1,5 +1,6 @@
 //! The `router` daemon's config, which the RouterOS tool reads too. Nothing is discovered.
 
+use crate::v2::network::InterfacePrefix;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr};
@@ -43,6 +44,78 @@ impl Default for BfdSettings {
     }
 }
 
+/// The interface that carries the node's loopbacks: OSPF runs on it as a stub, with no BFD.
+pub const ROUTER_LOOPBACK: &str = "router-lo";
+
+/// An interface name, or a prefix and `*`: what BIRD's `interface` clause and RouterOS's interface
+/// names both match alike.
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(try_from = "String", into = "String")]
+pub struct InterfacePattern(String);
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum InterfacePatternError {
+    #[error("an interface pattern must not be empty")]
+    Empty,
+    #[error(
+        "{0:?} is not an interface pattern: write an interface name, or a prefix and `*` - `?`, `/` and a `*` before the end are not taken"
+    )]
+    NotAPattern(String),
+}
+
+impl InterfacePattern {
+    /// Every name that starts with `prefix`.
+    pub fn every_name_from(prefix: &InterfacePrefix) -> Self {
+        Self(format!("{}*", prefix.as_str()))
+    }
+
+    pub fn router_loopback() -> Self {
+        Self(ROUTER_LOOPBACK.to_owned())
+    }
+
+    pub fn is_router_loopback(&self) -> bool {
+        self.0 == ROUTER_LOOPBACK
+    }
+
+    pub fn matches(&self, name: &str) -> bool {
+        match self.0.strip_suffix('*') {
+            Some(prefix) => name.starts_with(prefix),
+            None => self.0 == name,
+        }
+    }
+
+    /// The one name it matches, if it has no `*`.
+    pub fn name(&self) -> Option<&str> {
+        (!self.0.ends_with('*')).then_some(self.0.as_str())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for InterfacePattern {
+    type Error = InterfacePatternError;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        if text.is_empty() {
+            return Err(InterfacePatternError::Empty);
+        }
+        let body = text.strip_suffix('*').unwrap_or(&text);
+        if body.contains(['*', '?', '/']) {
+            return Err(InterfacePatternError::NotAPattern(text));
+        }
+        Ok(Self(text))
+    }
+}
+
+impl From<InterfacePattern> for String {
+    fn from(pattern: InterfacePattern) -> Self {
+        pattern.0
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct RouterConfig {
     pub node: NodeIdentity,
@@ -52,13 +125,11 @@ pub struct RouterConfig {
     /// BFD on the OSPF links; the RouterOS tool reads it too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bfd: Option<BfdSettings>,
-    /// BIRD's `interface` clause: a name, a glob (`"mesh-*"`) or a CIDR of an interface's address.
     #[serde(default)]
-    pub ospf_interfaces: Vec<String>,
-    /// As `ospf_interfaces`: `protocol direct` sources, whose connected routes go out over iBGP as
-    /// `router-lo`'s do.
+    pub ospf_interfaces: Vec<InterfacePattern>,
+    /// `protocol direct` sources, whose connected routes go out over iBGP as `router-lo`'s do.
     #[serde(default)]
-    pub direct_interfaces: Vec<String>,
+    pub direct_interfaces: Vec<InterfacePattern>,
     /// IPv4 CIDRs: a kernel route at or inside one is announced over iBGP.
     #[serde(default)]
     pub learn: Vec<String>,
@@ -184,8 +255,6 @@ pub enum Invalid {
         address: String,
         error: std::net::AddrParseError,
     },
-    #[error("ospf_interfaces: entry must not be empty")]
-    EmptyOspfInterface,
     #[error("learn: invalid IPv4 CIDR {cidr:?}: {error}")]
     Learn {
         cidr: String,
@@ -261,10 +330,6 @@ pub fn validate(cfg: &RouterConfig) -> Result<(), Invalid> {
                 address: peer.address.clone(),
                 error,
             })?;
-    }
-
-    if cfg.ospf_interfaces.iter().any(String::is_empty) {
-        return Err(Invalid::EmptyOspfInterface);
     }
 
     for cidr in &cfg.learn {
@@ -542,6 +607,57 @@ bypass:
         assert!(cfg.ospf_interfaces.is_empty());
         assert!(cfg.learn.is_empty());
         validate(&cfg).unwrap();
+    }
+
+    fn pattern(text: &str) -> Result<InterfacePattern, InterfacePatternError> {
+        InterfacePattern::try_from(text.to_owned())
+    }
+
+    #[test]
+    fn a_pattern_with_a_star_matches_every_name_it_starts_and_a_name_only_itself() {
+        let links = pattern("mesh-*").unwrap();
+        assert!(links.matches("mesh-east"));
+        assert!(links.matches("mesh-"));
+        assert!(!links.matches("lan0"));
+        assert_eq!(links.name(), None);
+        let lan = pattern("lan0").unwrap();
+        assert!(lan.matches("lan0"));
+        assert!(!lan.matches("lan01"));
+        assert_eq!(lan.name(), Some("lan0"));
+    }
+
+    #[test]
+    fn a_pattern_takes_no_wildcard_but_a_star_at_the_end_and_no_cidr() {
+        for text in ["mesh-?", "me*sh", "**", "192.0.2.0/24"] {
+            assert_eq!(
+                pattern(text),
+                Err(InterfacePatternError::NotAPattern(text.to_owned())),
+                "{text}"
+            );
+        }
+        assert_eq!(pattern(""), Err(InterfacePatternError::Empty));
+    }
+
+    #[test]
+    fn the_router_loopback_is_known_by_its_entry_not_by_a_name_each_tool_spells() {
+        assert!(InterfacePattern::router_loopback().is_router_loopback());
+        assert_eq!(
+            InterfacePattern::router_loopback().name(),
+            Some(ROUTER_LOOPBACK)
+        );
+        assert!(pattern("router-lo").unwrap().is_router_loopback());
+        assert!(!pattern("router-*").unwrap().is_router_loopback());
+        assert!(!pattern("mesh-a").unwrap().is_router_loopback());
+    }
+
+    #[test]
+    fn a_pattern_is_written_as_read() {
+        let yaml = format!("{}ospf_interfaces: [mesh-*, router-lo]\n", minimal_yaml());
+        let cfg: RouterConfig = sliplib_yaml::from_str(&yaml).unwrap();
+        assert_eq!(
+            sliplib_yaml::to_string(&cfg.ospf_interfaces).unwrap(),
+            "- mesh-*\n- router-lo\n"
+        );
     }
 
     #[test]
