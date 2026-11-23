@@ -5,9 +5,10 @@
 //! The whole network at once, not per node: a link's two ends share one obfuscation, and a node's
 //! config needs its peers' keys.
 
-use crate::model::{self, Network};
+use crate::network::{self, Mesh};
 use crate::secrets;
 use sliplib_config::Obfuscation;
+use sliplib_config::v2::network::LinkKind;
 use sliplib_secrets::wireguard::PrivateKey;
 use std::fmt;
 
@@ -65,23 +66,23 @@ fn mint_obfuscation(
 
 /// Whatever secrets `network` lacks, generated, each by the entry it belongs to. A `plain` link
 /// gets no obfuscation generated: it would turn "no obfuscation" back into an obfuscated one.
-pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
+pub fn create(mesh: &Mesh<'_>) -> Result<Minted, NoHeaderLeft> {
     let mut minted = Minted::default();
 
-    for (index, node) in network.nodes.iter().enumerate() {
-        if node.private_key.is_some() || !network.needs_a_key(&node.name) {
+    for (index, (name, node)) in mesh.network().nodes.iter().enumerate() {
+        if node.private_key().is_some() || !mesh.needs_a_key(name.as_str()) {
             continue;
         }
         minted.node_keys.push((index, PrivateKey::generate()));
-        minted.names.push(model::node_key(&node.name));
+        minted.names.push(network::node_key(name.as_str()));
     }
 
-    for (index, link) in network.links.iter().enumerate() {
-        if link.plain {
+    for (index, (name, link)) in mesh.network().mesh.links.iter().enumerate() {
+        if matches!(link.kind, LinkKind::Wireguard(_)) {
             continue;
         }
-        let mut obfuscation = link.obfuscation.clone();
-        let entry = model::link_obfuscation(link);
+        let mut obfuscation = link.kind.obfuscation();
+        let entry = network::link_obfuscation(name.as_str());
         if let Some(generated) = mint_obfuscation(&mut obfuscation, &entry)? {
             minted.link_obfuscation.push((index, generated));
             minted.names.push(entry);
@@ -94,6 +95,7 @@ pub fn create(network: &Network) -> Result<Minted, NoHeaderLeft> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{NODE_D, example};
 
     /// The 3.1 switches are never invented: they are not among the minted fields, so an
     /// unconfigured mesh stays as it was.
@@ -139,9 +141,11 @@ mod tests {
 
     /// The example of the specification as it is before anything is minted, with `overlay` laid
     /// over it.
-    fn unminted(overlay: &str) -> Network {
-        let files = crate::test_support::laid(&[crate::test_support::EXAMPLE_MESH, overlay]);
-        crate::v2::lower(&files).unwrap()
+    fn unminted(overlay: &str) -> Mesh<'static> {
+        crate::test_support::mesh(crate::test_support::laid(&[
+            crate::test_support::EXAMPLE_MESH,
+            overlay,
+        ]))
     }
 
     #[test]
@@ -189,7 +193,7 @@ mod tests {
         let keyed: Vec<&str> = minted
             .node_keys
             .iter()
-            .map(|(node, _)| network.nodes[*node].name.as_str())
+            .map(|(node, _)| network.network().nodes.get_index(*node).unwrap().0.as_str())
             .collect();
         assert_eq!(keyed, ["node-a", "node-c", "router1"]);
     }
@@ -202,7 +206,8 @@ mod tests {
         assert_eq!(minted.link_obfuscation.len(), 2);
         for (link, generated) in &minted.link_obfuscation {
             // Exactly the minted fields the link lacked: none it writes, none its type sets.
-            let mut lacked = secrets::unminted(&network.links[*link].obfuscation);
+            let (_, written) = network.network().mesh.links.get_index(*link).unwrap();
+            let mut lacked = secrets::unminted(&written.kind.obfuscation());
             let mut generated = sliplib_yaml::to_value(generated)
                 .unwrap()
                 .as_mapping()
@@ -239,5 +244,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn mint_creates_a_key_for_a_node_on_a_link_alone() {
+        let network = example(&format!(
+            "{{nodes: {{node-b: {{wireguard: null}}, node-d: {NODE_D}}}}}"
+        ));
+        let minted = super::create(&network).unwrap();
+        let keyed: Vec<&str> = minted
+            .node_keys
+            .iter()
+            .map(|(index, _)| {
+                network
+                    .network()
+                    .nodes
+                    .get_index(*index)
+                    .unwrap()
+                    .0
+                    .as_str()
+            })
+            .collect();
+        assert_eq!(keyed, ["node-b"]);
     }
 }

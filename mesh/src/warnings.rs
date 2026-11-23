@@ -1,7 +1,7 @@
 //! What the files do that the tools accept and whoever wrote them should still hear of. Nothing
 //! here refuses a file or changes what a node gets.
 
-use crate::model::Network;
+use crate::network::Mesh;
 use sliplib_config::TrailerLoss;
 use std::fmt;
 
@@ -27,16 +27,19 @@ impl fmt::Display for Warning {
 }
 
 /// In the order of the links.
-pub fn warnings(mesh: &Network) -> Vec<Warning> {
-    mesh.links
+pub fn warnings(mesh: &Mesh<'_>) -> Vec<Warning> {
+    mesh.network()
+        .mesh
+        .links
         .iter()
-        .flat_map(|link| {
-            link.obfuscation
+        .flat_map(|(name, link)| {
+            link.kind
+                .obfuscation()
                 .trailer_loss()
                 .into_iter()
                 .map(|loss| Warning {
-                    link: link.name.clone(),
-                    ends: link.ends.clone(),
+                    link: name.to_string(),
+                    ends: link.ends.each_ref().map(ToString::to_string),
                     loss,
                 })
         })

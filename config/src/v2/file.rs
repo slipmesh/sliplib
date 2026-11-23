@@ -111,12 +111,6 @@ pub enum Error {
         first: usize,
         second: usize,
     },
-    #[error("{place}, with each node's and each link's own values laid over the network's")]
-    InForce {
-        place: Place,
-        #[source]
-        source: Source,
-    },
     #[error(transparent)]
     Invalid(#[from] Invalid),
     #[error(transparent)]
@@ -560,11 +554,9 @@ impl File {
         // Read as written first: from the text, an error names the line.
         body::<Network>(&written, NETWORK)?;
         let network: Network =
-            sliplib_yaml::from_value(in_force(&written.value)).map_err(|source| {
-                Error::InForce {
-                    place: Place::new(NETWORK, written.line),
-                    source: source.into(),
-                }
+            sliplib_yaml::from_value(in_force(&written.value)).map_err(|source| Error::Body {
+                place: Place::new(NETWORK, written.line),
+                source: source.into(),
             })?;
         network.check()?;
 

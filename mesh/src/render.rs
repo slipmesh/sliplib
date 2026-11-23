@@ -1,11 +1,14 @@
 //! A node's `awg` and `router` configs.
 
 use crate::addressing;
-use crate::model::{Network, Node, PRIVATE_KEY, UnknownNode};
 use crate::mtu::MtuError;
+use crate::network::{Mesh, PRIVATE_KEY, UnknownNode};
 use crate::secrets::{MissingSecret, unminted};
 use sliplib_config::awg::{AwgConfig, InterfaceEntry, PeerEntry};
-use sliplib_config::router::{BgpPeerEntry, NodeIdentity, RouterConfig};
+use sliplib_config::router::{
+    AnnounceEntry, BfdSettings, BgpPeerEntry, NodeIdentity, RouterConfig,
+};
+use sliplib_config::v2::network::{LinkKind, Node, Prefix4};
 use sliplib_config::{Obfuscation, ObfuscationError};
 use sliplib_secrets::wireguard::KeyError;
 
@@ -76,40 +79,53 @@ pub enum RenderError {
 type Result<T> = std::result::Result<T, RenderError>;
 
 /// Full mesh minus self: every other node, addressed by its IPv6 loopback.
-pub(crate) fn bgp_peers_for(mesh: &Network, node_name: &str) -> Vec<BgpPeerEntry> {
-    mesh.nodes
+pub(crate) fn bgp_peers_for(mesh: &Mesh<'_>, node_name: &str) -> Vec<BgpPeerEntry> {
+    mesh.network()
+        .nodes
         .iter()
-        .filter(|n| n.name != node_name)
-        .map(|n| BgpPeerEntry {
-            name: n.name.clone(),
-            address: n.loopback.1.to_string(),
+        .filter(|(name, _)| name.as_str() != node_name)
+        .map(|(name, node)| BgpPeerEntry {
+            name: name.to_string(),
+            address: mesh.addresses(node).loopback.1.to_string(),
         })
         .collect()
 }
 
 /// Every rendered node runs OSPF on the same two interface patterns: the mesh's and `router-lo`.
-fn ospf_interfaces(mesh: &Network) -> Vec<String> {
+fn ospf_interfaces(mesh: &Mesh<'_>) -> Vec<String> {
     vec![mesh_glob(mesh), "router-lo".to_owned()]
 }
 
 /// Every mesh interface, as BIRD's `interface` clause and `direct_interfaces` match it.
-fn mesh_glob(mesh: &Network) -> String {
-    format!("{}*", mesh.interface_prefix)
+fn mesh_glob(mesh: &Mesh<'_>) -> String {
+    format!("{}*", mesh.interface_prefix())
 }
 
-pub(crate) fn render_router_config(mesh: &Network, node: &Node) -> RouterConfig {
-    let (v4, v6) = node.loopback;
+fn prefixes(list: &[Prefix4]) -> Vec<String> {
+    list.iter().map(|prefix| prefix.0.to_string()).collect()
+}
+
+pub(crate) fn render_router_config(mesh: &Mesh<'_>, name: &str, node: &Node) -> RouterConfig {
+    let (v4, v6) = mesh.addresses(node).loopback;
+    let routing = &mesh.network().routing;
     RouterConfig {
         node: NodeIdentity {
             loopback_addresses: vec![format!("{v4}/32"), format!("{v6}/128")],
         },
-        bgp_as: mesh.bgp_as,
-        bgp_peers: bgp_peers_for(mesh, &node.name),
-        bfd: mesh.bfd.clone(),
+        bgp_as: routing.bgp.number.get(),
+        bgp_peers: bgp_peers_for(mesh, name),
+        bfd: routing.bfd.as_ref().map(|bfd| BfdSettings {
+            min_rx_ms: bfd.min_rx_ms.get(),
+            min_tx_ms: bfd.min_tx_ms.get(),
+            multiplier: bfd.multiplier.get(),
+        }),
         ospf_interfaces: ospf_interfaces(mesh),
-        direct_interfaces: node.direct_interfaces.clone(),
-        learn: node.learn.clone(),
-        announce: node.announce.clone(),
+        direct_interfaces: mesh.direct_interfaces(node),
+        learn: prefixes(&node.routing.learn),
+        announce: prefixes(&node.routing.announce)
+            .into_iter()
+            .map(|net| AnnounceEntry { net, label: None })
+            .collect(),
         bypass: None,
     }
 }
@@ -124,9 +140,9 @@ fn key_of(node: &str) -> impl Fn(KeyError) -> RenderError {
 /// The node's mesh interfaces: one full-tunnel interface per link it is on, named after the peer
 /// (`mesh-<peer>`). The name stays local - peers know each other by key - and must fit `IFNAMSIZ`,
 /// which the awg check enforces.
-fn mesh_interfaces_for(mesh: &Network, node_name: &str) -> Result<Vec<InterfaceEntry>> {
+fn mesh_interfaces_for(mesh: &Mesh<'_>, node_name: &str) -> Result<Vec<InterfaceEntry>> {
     let node = mesh.node(node_name)?;
-    let own_private_key = node.private_key.as_ref();
+    let own_private_key = node.private_key();
     if own_private_key.is_none() && mesh.needs_a_key(node_name) {
         return Err(MissingSecret(format!("node {node_name:?}: {PRIVATE_KEY} is not set")).into());
     }
@@ -142,51 +158,53 @@ fn mesh_interfaces_for(mesh: &Network, node_name: &str) -> Result<Vec<InterfaceE
     let Some(own_private_key) = own_private_key else {
         return Ok(Vec::new());
     };
+    let own = mesh.addresses(node);
     let mut out = Vec::new();
-    for link in &mesh.links {
-        let peer_name = if link.ends[0] == node_name {
-            &link.ends[1]
-        } else if link.ends[1] == node_name {
-            &link.ends[0]
+    for (link_name, link) in &mesh.network().mesh.links {
+        let peer_name = if link.ends[0].as_str() == node_name {
+            link.ends[1].as_str()
+        } else if link.ends[1].as_str() == node_name {
+            link.ends[0].as_str()
         } else {
             continue;
         };
         let peer_node = mesh.node(peer_name)?;
-        let peer_private_key = peer_node.private_key.as_ref().ok_or_else(|| {
+        let peer_private_key = peer_node.private_key().ok_or_else(|| {
             MissingSecret(format!("node {peer_name:?}: {PRIVATE_KEY} is not set"))
         })?;
         let obfuscation = minted_obfuscation(
-            &link.obfuscation,
-            link.plain,
-            &format!("mesh link {}", link.name),
+            &link.kind.obfuscation(),
+            matches!(link.kind, LinkKind::Wireguard(_)),
+            &format!("mesh link {link_name}"),
         )?;
+        let port = link.kind.port().get();
 
-        let mut addresses = vec![format!("{}/64", node.link_local)];
-        if let Some(tunnel_v4) = node.tunnel_ipv4 {
+        let mut addresses = vec![format!("{}/64", own.link_local)];
+        if let Some(tunnel_v4) = own.tunnel_ipv4 {
             addresses.push(format!("{tunnel_v4}/32"));
         }
 
         let mut interface = InterfaceEntry {
-            name: format!("{}{peer_name}", mesh.interface_prefix),
-            listen_port: link.port,
+            name: format!("{}{peer_name}", mesh.interface_prefix()),
+            listen_port: port,
             addresses,
             private_key: own_private_key.clone(),
             obfuscation,
             mtu,
             peers: vec![PeerEntry {
                 public_key: peer_private_key.public_key().map_err(key_of(peer_name))?,
-                name: Some(peer_name.clone()),
+                name: Some(peer_name.to_owned()),
                 endpoint: peer_node
-                    .endpoint
-                    .as_ref()
-                    .map(|endpoint| addressing::endpoint(&endpoint.written, link.port)),
+                    .underlay()
+                    .and_then(|underlay| underlay.endpoint.as_ref())
+                    .map(|endpoint| addressing::endpoint(endpoint.host(), port)),
                 allowed_ips: None,
                 persistent_keepalive: None,
             }],
         };
         // The link's keepalive is written only where it changes what the peer is sent.
         let without = interface.keepalive_of(&interface.peers[0]);
-        interface.peers[0].persistent_keepalive = link.persistent_keepalive;
+        interface.peers[0].persistent_keepalive = link.kind.persistent_keepalive();
         let with = interface.keepalive_of(&interface.peers[0]);
         if with == without {
             interface.peers[0].persistent_keepalive = None;
@@ -196,7 +214,7 @@ fn mesh_interfaces_for(mesh: &Network, node_name: &str) -> Result<Vec<InterfaceE
     Ok(out)
 }
 
-pub(crate) fn render_awg_config(mesh: &Network, node_name: &str) -> Result<AwgConfig> {
+pub(crate) fn render_awg_config(mesh: &Mesh<'_>, node_name: &str) -> Result<AwgConfig> {
     Ok(AwgConfig {
         interfaces: mesh_interfaces_for(mesh, node_name)?,
     })
@@ -209,15 +227,15 @@ pub struct NodeConfigs {
     pub router: RouterConfig,
 }
 
-/// `host`'s configs from `model`, each checked the way the node would check it.
-pub fn node_configs(model: &Network, host: &str) -> std::result::Result<NodeConfigs, Error> {
+/// Each checked as its node would.
+pub fn node_configs(mesh: &Mesh<'_>, host: &str) -> std::result::Result<NodeConfigs, Error> {
     let node = || host.to_owned();
     // Refused as the `awg` config, computed first, refuses a node it does not know.
-    let found = model.node(host).map_err(|source| Error::RenderingAwg {
+    let found = mesh.node(host).map_err(|source| Error::RenderingAwg {
         node: node(),
         source: source.into(),
     })?;
-    let awg_cfg = render_awg_config(model, host).map_err(|source| Error::RenderingAwg {
+    let awg_cfg = render_awg_config(mesh, host).map_err(|source| Error::RenderingAwg {
         node: node(),
         source,
     })?;
@@ -237,7 +255,7 @@ pub fn node_configs(model: &Network, host: &str) -> std::result::Result<NodeConf
                 source,
             })?;
     }
-    let router_cfg = render_router_config(model, found);
+    let router_cfg = render_router_config(mesh, host, found);
     sliplib_config::router::validate(&router_cfg).map_err(|source| Error::InvalidRouter {
         node: node(),
         source,
@@ -271,10 +289,11 @@ fn minted_obfuscation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sliplib_config::Range;
 
-    use crate::test_support::example;
+    use crate::test_support::{NODE_D, example};
 
-    fn configs_of(network: &Network, node: &str) -> std::result::Result<NodeConfigs, Error> {
+    fn configs_of(network: &Mesh<'_>, node: &str) -> std::result::Result<NodeConfigs, Error> {
         super::node_configs(network, node)
     }
 
@@ -349,7 +368,7 @@ mod tests {
         );
         assert_eq!(
             configs.router,
-            super::render_router_config(&network, network.node("node-a").unwrap())
+            super::render_router_config(&network, "node-a", network.node("node-a").unwrap())
         );
     }
 
@@ -448,5 +467,169 @@ mod tests {
             let refusal = configs_of(&network, node).unwrap_err();
             assert!(refusal.missing_secret().is_some(), "{node}: {refusal:?}");
         }
+    }
+
+    #[test]
+    fn a_node_on_no_link_is_configured_without_a_key() {
+        let network = example(&format!("{{nodes: {{node-d: {NODE_D}}}}}"));
+        let configs = node_configs(&network, "node-d").unwrap();
+        assert!(configs.awg.interfaces.is_empty());
+        assert_eq!(configs.router.bgp_peers.len(), 4);
+    }
+
+    /// The example with a node of `name`, keyed, on a link to `node-a`.
+    fn with_a_node_named(name: &str) -> Mesh<'static> {
+        let key = sliplib_secrets::wireguard::PrivateKey::generate();
+        example(&format!(
+            "{{nodes: {{{name}: {{platform: talos, node_id: 0.0.0.5, underlay: {{wan: {{}}}}, \
+             wireguard: {{private_key: {}}}}}}}, mesh: {{links: {{a-x: {{type: wireguard, \
+             ends: {{node-a: {{}}, {name}: {{}}}}, wireguard: {{port: 51840}}}}}}}}}}",
+            key.expose()
+        ))
+    }
+
+    #[test]
+    fn a_name_too_long_for_an_interface_is_refused_at_the_other_end_of_its_link() {
+        use sliplib_config::awg::Invalid;
+        let fits = with_a_node_named("node-abcde");
+        node_configs(&fits, "node-a").unwrap();
+        let long = with_a_node_named("node-abcdef");
+        node_configs(&long, "node-abcdef").unwrap();
+        let refusal = node_configs(&long, "node-a").unwrap_err();
+        assert!(
+            matches!(&refusal, crate::render::Error::InvalidAwg { node, source: Invalid::InterfaceNameTooLong(name) }
+                if node == "node-a" && name == "mesh-node-abcdef"),
+            "{refusal:?}"
+        );
+    }
+
+    fn peer_keepalive(network: &Mesh<'_>, node: &str, peer: &str) -> Option<Range<u16>> {
+        let configs = node_configs(network, node).unwrap();
+        let interface = configs
+            .awg
+            .interfaces
+            .into_iter()
+            .find(|interface| interface.name == format!("mesh-{peer}"))
+            .unwrap();
+        interface.peers[0].persistent_keepalive
+    }
+
+    #[test]
+    fn every_node_of_the_example_gets_its_configs() {
+        let network = example("{}");
+        for name in network.network().nodes.keys() {
+            node_configs(&network, name.as_str()).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_dialed_peer_gets_the_keepalive_of_its_link_where_that_is_not_the_default() {
+        let network = example("{}");
+        // `node-c` dials `node-a`; nobody dials `node-c`, which has no endpoint.
+        assert_eq!(
+            peer_keepalive(&network, "node-c", "node-a"),
+            Some(Range::new(15, 20).unwrap())
+        );
+        assert_eq!(peer_keepalive(&network, "node-a", "node-c"), None);
+        // A link that sets none.
+        assert_eq!(peer_keepalive(&network, "node-a", "node-b"), None);
+    }
+
+    #[test]
+    fn a_keepalive_equal_to_the_default_of_its_type_is_left_out() {
+        let of_the_defaults = example(
+            "{mesh: {wireguard: {persistent_keepalive: 25}, amneziawg: {persistent_keepalive: 20-30}, links: {a-c: {amneziawg: {persistent_keepalive: null}}}}}",
+        );
+        assert_eq!(peer_keepalive(&of_the_defaults, "node-a", "router1"), None);
+        assert_eq!(peer_keepalive(&of_the_defaults, "node-a", "node-b"), None);
+        let of_their_own = example(
+            "{mesh: {wireguard: {persistent_keepalive: 10}, amneziawg: {persistent_keepalive: 25}}}",
+        );
+        assert_eq!(
+            peer_keepalive(&of_their_own, "node-a", "router1"),
+            Some(Range::from(10))
+        );
+        assert_eq!(
+            peer_keepalive(&of_their_own, "node-a", "node-b"),
+            Some(Range::from(25))
+        );
+    }
+
+    fn refused(network: &Mesh<'_>, node: &str) -> crate::render::Error {
+        node_configs(network, node).unwrap_err()
+    }
+
+    #[test]
+    fn a_node_on_no_link_is_still_stopped_by_what_stops_every_node() {
+        let network = example(&format!(
+            "{{mesh: {{mtu: 9000}}, nodes: {{node-d: {NODE_D}}}}}"
+        ));
+        let refusal = refused(&network, "node-d");
+        assert!(
+            matches!(
+                &refusal,
+                crate::render::Error::RenderingAwg {
+                    source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit {
+                        mtu: 9000,
+                        ..
+                    }),
+                    ..
+                }
+            ),
+            "{refusal:?}"
+        );
+    }
+
+    #[test]
+    fn every_field_of_a_links_obfuscation_reaches_both_its_ends() {
+        let every_field = "{jc: 4, jmin: 40, jmax: 400, s1: 64, s2: 48, s3: 40, s4: 16, h1: 1101, \
+            h2: 2202, h3: 3303, h4: 4404-4499, i1: '<b 0xabcd>', i2: '<c>', i3: '<t>', i4: '<r 8>', \
+            i5: '<rd 6>', header_protection_key: ccccccccccccccccccccccccccccccccccccccccccc=, \
+            content_padding_addition: 0-32, rekey_after_time: 100-140, rekey_timeout: 6, \
+            reject_after_time: 170, keepalive_timeout: 12, max_handshake_attempts: 20, \
+            random_trailers: true, disable_cookies: true}";
+        let written: Obfuscation = sliplib_yaml::from_str(every_field).unwrap();
+        let fields = sliplib_yaml::to_value(&written).unwrap();
+        assert_eq!(fields.as_mapping().unwrap().len(), 25, "a field is not set");
+
+        let network = example(&format!(
+            "{{mesh: {{links: {{a-b: {{amneziawg: {{obfuscation: {every_field}}}}}}}}}}}"
+        ));
+        for (node, peer) in [("node-a", "node-b"), ("node-b", "node-a")] {
+            let configs = node_configs(&network, node).unwrap();
+            let interface = configs
+                .awg
+                .interfaces
+                .iter()
+                .find(|interface| interface.name == format!("mesh-{peer}"))
+                .unwrap();
+            assert_eq!(interface.obfuscation, written, "{node}");
+        }
+    }
+
+    #[test]
+    fn a_link_that_lacks_a_field_mint_writes_is_refused_when_its_nodes_are_computed() {
+        let unminted = example("{mesh: {links: {a-b: {amneziawg: {obfuscation: {jc: null}}}}}}");
+        let refusal = refused(&unminted, "node-b");
+        let missing = refusal.missing_secret().map(ToString::to_string);
+        assert!(
+            missing.is_some_and(|missing| missing.contains("a-b") && missing.contains("jc")),
+            "{refusal:?}"
+        );
+    }
+
+    #[test]
+    fn every_link_has_a_bfd_session_where_the_block_is_and_none_without_it() {
+        let with = configs_of(&example("{}"), "node-a").unwrap();
+        assert_eq!(
+            with.router.bfd,
+            Some(BfdSettings {
+                min_rx_ms: 300,
+                min_tx_ms: 300,
+                multiplier: 5
+            })
+        );
+        let without = configs_of(&example("{routing: {bfd: null}}"), "node-a").unwrap();
+        assert_eq!(without.router.bfd, None);
     }
 }

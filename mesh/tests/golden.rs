@@ -118,19 +118,15 @@ fn golden(directory: &str, file: &str) -> String {
 /// the keys only a daemon's own config holds.
 fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
     let files = sliplib_config::v2::File::parse(twin.text).unwrap();
-    let network = sliplib_mesh::v2::lower(&files).unwrap();
-    let names: Vec<&str> = network
-        .nodes
-        .iter()
-        .map(|node| node.name.as_str())
-        .collect();
+    let network = sliplib_mesh::Mesh::of(&files).unwrap();
+    let nodes = &network.network().nodes;
+    let names: Vec<&str> = nodes.keys().map(|name| name.as_str()).collect();
     assert_eq!(names, twin.v1.nodes);
-    let public_keys: Vec<(String, String)> = network
-        .nodes
+    let public_keys: Vec<(String, String)> = nodes
         .iter()
-        .filter_map(|node| {
-            let key = node.private_key.as_ref()?.public_key().unwrap();
-            Some((key, format!("<public key of {}>", node.name)))
+        .filter_map(|(name, node)| {
+            let key = node.private_key()?.public_key().unwrap();
+            Some((key, format!("<public key of {name}>")))
         })
         .collect();
     let named = |text: String| named(text, &public_keys);

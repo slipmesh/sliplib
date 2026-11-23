@@ -10,12 +10,13 @@ use std::path::Path;
 
 pub fn run(node: &str, config_path: &Path) -> Result<()> {
     let (mut yaml, file) = read_slipmesh(config_path)?;
-    let network = sliplib_mesh::v2::lower(&file)?;
+    let network = sliplib_mesh::Mesh::of(&file)?;
     if network.node(node).is_err() {
         let known: Vec<&str> = network
+            .network()
             .nodes
-            .iter()
-            .map(|node| node.name.as_str())
+            .keys()
+            .map(|name| name.as_str())
             .collect();
         anyhow::bail!("unknown node {node:?} - known nodes: {known:?}");
     }
@@ -26,11 +27,11 @@ pub fn run(node: &str, config_path: &Path) -> Result<()> {
     edit::set_node_key(&mut yaml, &file, node, &PrivateKey::generate())?;
     let edited = File::read(&yaml)
         .context("slipmesh.yaml with the new key does not read back - not written")?;
-    sliplib_mesh::v2::lower(&edited).context("slipmesh.yaml with the new key - not written")?;
+    sliplib_mesh::Mesh::of(&edited).context("slipmesh.yaml with the new key - not written")?;
     write_edits(config_path, &yaml)?;
     println!(
         "rekeyed {} in {}",
-        sliplib_mesh::model::node_key(node),
+        sliplib_mesh::network::node_key(node),
         config_path.display()
     );
     Ok(())
