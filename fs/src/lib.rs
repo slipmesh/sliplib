@@ -51,9 +51,10 @@ pub fn read_or_empty(path: &Path) -> Result<String, Error> {
     }
 }
 
-/// Unless the file already holds it, creating the directory. Whether it wrote.
+/// Unless the file already holds it, creating the directory: a file that cannot be read is written
+/// over. Whether it wrote.
 pub fn write_if_changed(path: &Path, content: &str) -> Result<bool, Error> {
-    if read_or_empty(path)? == content && path.exists() {
+    if std::fs::read(path).is_ok_and(|current| current == content.as_bytes()) {
         return Ok(false);
     }
     if let Some(dir) = path.parent() {
@@ -127,6 +128,15 @@ mod tests {
         );
         assert!(write_if_changed(&path, "a: 2\n").unwrap());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "a: 2\n");
+    }
+
+    #[test]
+    fn a_file_that_is_not_utf8_is_written_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("10-bridge.conflist");
+        std::fs::write(&path, [0xff, 0xfe]).unwrap();
+        assert!(write_if_changed(&path, "a: 1\n").unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a: 1\n");
     }
 
     #[test]
