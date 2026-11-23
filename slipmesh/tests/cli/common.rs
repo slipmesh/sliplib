@@ -43,12 +43,7 @@ impl Config {
     }
 
     pub fn documents(&self) -> Vec<Value> {
-        MultiDoc::parse(&self.text())
-            .unwrap()
-            .documents()
-            .iter()
-            .map(|document| document.value.clone())
-            .collect()
+        MultiDoc::parse(&self.text()).unwrap().values()
     }
 
     /// The path given last.

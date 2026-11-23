@@ -3,15 +3,12 @@
 
 use crate::file::{parse_slipmesh, read_text, write_text};
 use anyhow::Result;
-use sliplib_yaml::{MultiDoc, Value};
+use sliplib_yaml::MultiDoc;
 use std::path::Path;
 
 fn holds_the_values_of(rewritten: &str, original: &MultiDoc) -> Result<bool> {
     let rewritten = MultiDoc::parse(rewritten)?;
-    let values = |yaml: &MultiDoc| -> Vec<Value> {
-        yaml.documents().iter().map(|d| d.value.clone()).collect()
-    };
-    Ok(values(&rewritten) == values(original))
+    Ok(rewritten.values() == original.values())
 }
 
 pub fn run(config_path: &Path) -> Result<()> {

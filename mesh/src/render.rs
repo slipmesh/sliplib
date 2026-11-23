@@ -9,6 +9,7 @@ use sliplib_config::router::{
     AnnounceEntry, BfdSettings, BgpPeerEntry, InterfacePattern, Loopbacks, NodeIdentity,
     RouterConfig,
 };
+use sliplib_config::v2::Name;
 use sliplib_config::v2::network::{LinkKind, Node};
 use sliplib_config::{Obfuscation, ObfuscationError, Prefix, Prefix4, Prefix6};
 use sliplib_net::Ipv6Net;
@@ -143,11 +144,7 @@ fn mesh_interfaces_for(
     let own = mesh.addresses(node);
     let mut out = Vec::new();
     for (link_name, link) in &mesh.network().mesh.links {
-        let peer_name = if link.ends[0].as_str() == node_name {
-            link.ends[1].as_str()
-        } else if link.ends[1].as_str() == node_name {
-            link.ends[0].as_str()
-        } else {
+        let Some(peer_name) = link.other_end(node_name).map(Name::as_str) else {
             continue;
         };
         let peer_node = mesh.node(peer_name)?;

@@ -424,6 +424,24 @@ pub enum LinkError {
     },
 }
 
+impl Link {
+    pub fn has_end(&self, node: &str) -> bool {
+        self.ends.iter().any(|end| end.as_str() == node)
+    }
+
+    /// None where `node` is not an end.
+    pub fn other_end(&self, node: &str) -> Option<&Name> {
+        let [a, b] = &self.ends;
+        if a.as_str() == node {
+            Some(b)
+        } else if b.as_str() == node {
+            Some(a)
+        } else {
+            None
+        }
+    }
+}
+
 impl TryFrom<LinkKeys> for Link {
     type Error = LinkError;
 
@@ -708,6 +726,15 @@ mod tests {
 
     fn link(yaml: &str) -> Result<Link, String> {
         sliplib_yaml::from_str(yaml).map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn a_link_tells_its_ends_and_each_ends_other_end() {
+        let link = link("{type: wireguard, ends: {a: {}, b: {}}, wireguard: {port: 1}}").unwrap();
+        assert!(link.has_end("a") && link.has_end("b") && !link.has_end("c"));
+        assert_eq!(link.other_end("a").map(Name::as_str), Some("b"));
+        assert_eq!(link.other_end("b").map(Name::as_str), Some("a"));
+        assert_eq!(link.other_end("c"), None);
     }
 
     #[test]

@@ -112,7 +112,7 @@ impl<'a> Mesh<'a> {
             .mesh
             .links
             .values()
-            .any(|link| link.ends.iter().any(|end| end.as_str() == node))
+            .any(|link| link.has_end(node))
     }
 
     /// Distinct, none with a host part of zeros: the loader refuses a `node_id` that does not fit.

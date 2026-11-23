@@ -8,7 +8,7 @@ the command-line tool for `slipmesh.yaml` itself.
 | --- | --- |
 | [`sliplib-net`](net) | CIDR parsing and arithmetic on `ipnet`'s types |
 | [`sliplib-fs`](fs) | Files written whole, and only when their text changes |
-| [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and written back |
+| [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and turned back into text |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 | [`sliplib-config`](config) | `slipmesh.yaml`, its schema and its loader, and what every platform's daemons share of their configs, with its checks |
@@ -161,13 +161,14 @@ A file written through a temporary one beside it, so a reader sees the old text 
 
 ### `sliplib-yaml`
 
-Every read, edit and write of a YAML file, so a component deals in its own types. What the
-documents mean is the caller's.
+Every read and edit of a YAML file, and the text to write back, so a component deals in its own
+types; `sliplib-fs` writes it. What the documents mean is the caller's.
 
 - `MultiDoc`: `read` or `parse` a multi-document file, a YAML tag refused, then `documents()`,
-  each with its position, the line it starts on and its value. `Document::take` removes a top-level
-  key; `Document::deserialize` reads the rest, an error naming the line. `document_mut` edits a
-  value and `text` writes the file back, without its comments or documents of only comments.
+  each with its position, the line it starts on and its value, or their `values()`.
+  `Document::take` removes a top-level key; `Document::deserialize` reads the rest, an error naming
+  the line. `document_mut` edits a value and `text` gives the file's text back, without its
+  comments or documents of only comments.
 - `read`: a file of one document, into a type, a YAML tag refused.
 - `merge`: JSON Merge Patch (RFC 7386), key order kept; `join` puts documents together.
 - `Error`: what each of them refuses, naming the file or the document's line.
@@ -191,7 +192,8 @@ chain prints the whole message, each part once.
     `v2::Error`; a file of version 1 as `VersionOne`, naming the conversion document. A refusal of
     `open` names the file.
   - `network()` gives what is in force under each node's `routing` and in each link's block.
-  - A node gives its `underlay` and `private_key`; a `LinkKind` its `port`, `obfuscation` (empty
+  - A node gives its `underlay` and `private_key`; a `Link` whether a node is an end (`has_end`)
+    and the `other_end`; a `LinkKind` its `port`, `obfuscation` (empty
     on `wireguard`) and `persistent_keepalive`.
   - `network_document` is where the network stands, for a write. `InterfacePrefix::REFERENCE` is
     what `slipmesh mint` writes where `mesh.interface_prefix` is unset.
