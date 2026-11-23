@@ -95,7 +95,7 @@ pub fn create(mesh: &Mesh<'_>) -> Result<Minted, NoHeaderLeft> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::example;
+    use crate::test_support::{NODE_D, example};
 
     /// The 3.1 switches are never invented: they are not among the minted fields, so an
     /// unconfigured mesh stays as it was.
@@ -246,10 +246,6 @@ mod tests {
         }
     }
 
-    /// A node of `talos` without a key, to be laid on no link.
-    const NODE_D: &str = "{platform: talos, node_id: 0.0.0.5, underlay: {wan: {}}}";
-
-    #[cfg(feature = "mint")]
     #[test]
     fn mint_creates_a_key_for_a_node_on_a_link_alone() {
         let network = example(&format!(

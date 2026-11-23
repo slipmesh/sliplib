@@ -40,6 +40,9 @@ pub fn example_files(overlay: &str) -> sliplib_config::v2::File {
     laid(&[EXAMPLE_MESH, EXAMPLE_SECRETS, overlay])
 }
 
+/// A node of `talos` without a key, to be laid on no link.
+pub const NODE_D: &str = "{platform: talos, node_id: 0.0.0.5, underlay: {wan: {}}}";
+
 /// [`example_files`] as the mesh the configs are computed from.
 pub fn example(overlay: &str) -> crate::Mesh<'static> {
     mesh(example_files(overlay))

@@ -110,8 +110,8 @@ impl<'a> Mesh<'a> {
         }
     }
 
-    /// The node's list, with the links' pattern last where the links carry IPv4: then, and only
-    /// then, they are announced.
+    /// The node's list, with the links' pattern appended unless listed, where the links carry
+    /// IPv4: then, and only then, they are announced.
     pub fn direct_interfaces(&self, node: &Node) -> Vec<String> {
         let mut list = node.routing.direct_interfaces.clone();
         let tunnel = self.network.addressing.tunnel.as_ref();

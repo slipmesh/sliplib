@@ -95,7 +95,6 @@ pub fn mesh_mtu(mesh: &Mesh<'_>) -> Result<Option<u32>, MtuError> {
     Ok(Some(mtu))
 }
 
-/// The largest MTU at which a full-size packet crosses `link` unfragmented.
 /// The node's underlay MTU: its own, or that of Ethernet.
 pub(crate) fn underlay_mtu(node: &Node) -> u32 {
     node.underlay()
@@ -103,6 +102,7 @@ pub(crate) fn underlay_mtu(node: &Node) -> u32 {
         .unwrap_or(DEFAULT_UPLINK_MTU)
 }
 
+/// The largest MTU at which a full-size packet crosses `link` unfragmented.
 fn link_limit(mesh: &Mesh<'_>, link: &Link) -> Result<u32, LinkError> {
     let [a, b] = link.ends.each_ref().map(|end| end.as_str());
     let ip_header = match link_family(mesh, a, b)? {

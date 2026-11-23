@@ -234,9 +234,9 @@ refuses a name the network does not hold as `network::UnknownNode`.
 - `Mesh`, what the configs are computed from: the loader's network (`network()`) and its interface
   prefix. `Mesh::of` gives it for a `v2::File`, refusing one without `mesh.interface_prefix`. It
   derives what a node's `node_id` gives it (`addresses`: the loopbacks, the link-local and the
-  tunnel IPv4) and its `direct_interfaces`, with the links' pattern last where the links carry IPv4.
-  `network::node_key` and `network::link_obfuscation` name where the files hold a node's key and a
-  link's obfuscation.
+  tunnel IPv4) and its `direct_interfaces`, with the links' pattern appended unless listed, where
+  the links carry IPv4. `network::node_key` and `network::link_obfuscation` name where the files
+  hold a node's key and a link's obfuscation.
 - `render::node_configs` gives a node's `AwgConfig` and `RouterConfig` from the network, each
   checked as the node checks it. It refuses a missing key of the node, unless it is on no link, or
   of a peer, and a link of type `amneziawg` whose obfuscation lacks one of `jc`, `jmin`, `jmax`,

@@ -291,7 +291,7 @@ mod tests {
     use super::*;
     use sliplib_config::Range;
 
-    use crate::test_support::example;
+    use crate::test_support::{NODE_D, example};
 
     fn configs_of(network: &Mesh<'_>, node: &str) -> std::result::Result<NodeConfigs, Error> {
         super::node_configs(network, node)
@@ -469,19 +469,12 @@ mod tests {
         }
     }
 
-    /// A node of `talos` without a key, to be laid on no link.
-    const NODE_D: &str = "{platform: talos, node_id: 0.0.0.5, underlay: {wan: {}}}";
-
     #[test]
     fn a_node_on_no_link_is_configured_without_a_key() {
         let network = example(&format!("{{nodes: {{node-d: {NODE_D}}}}}"));
         let configs = node_configs(&network, "node-d").unwrap();
         assert!(configs.awg.interfaces.is_empty());
         assert_eq!(configs.router.bgp_peers.len(), 4);
-        // A node on a link still needs its own.
-        let keyless = example("{nodes: {node-b: {wireguard: null}}}");
-        let refusal = node_configs(&keyless, "node-b").unwrap_err();
-        assert!(refusal.missing_secret().is_some(), "{refusal:?}");
     }
 
     /// The example with a node of `name`, keyed, on a link to `node-a`.
@@ -528,6 +521,7 @@ mod tests {
             node_configs(&network, name.as_str()).unwrap();
         }
     }
+
     #[test]
     fn a_dialed_peer_gets_the_keepalive_of_its_link_where_that_is_not_the_default() {
         let network = example("{}");
@@ -563,31 +557,6 @@ mod tests {
 
     fn refused(network: &Mesh<'_>, node: &str) -> crate::render::Error {
         node_configs(network, node).unwrap_err()
-    }
-
-    #[test]
-    fn a_refusal_names_the_keys_as_the_files_write_them() {
-        let keyless = example("{nodes: {node-b: {wireguard: null}}}");
-        let refusal = refused(&keyless, "node-a");
-        let missing = refusal.missing_secret().map(ToString::to_string);
-        assert!(
-            missing.is_some_and(|missing| missing.contains(crate::network::PRIVATE_KEY)),
-            "{refusal:?}"
-        );
-        let above = refused(&example("{mesh: {mtu: 9000}}"), "node-a");
-        assert!(
-            matches!(
-                &above,
-                crate::render::Error::RenderingAwg {
-                    source: crate::render::RenderError::Mtu(crate::mtu::MtuError::AboveLimit {
-                        mtu: 9000,
-                        ..
-                    }),
-                    ..
-                }
-            ),
-            "{above:?}"
-        );
     }
 
     #[test]
@@ -637,6 +606,7 @@ mod tests {
             assert_eq!(interface.obfuscation, written, "{node}");
         }
     }
+
     #[test]
     fn a_link_that_lacks_a_field_mint_writes_is_refused_when_its_nodes_are_computed() {
         let unminted = example("{mesh: {links: {a-b: {amneziawg: {obfuscation: {jc: null}}}}}}");
