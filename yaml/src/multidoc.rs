@@ -99,10 +99,11 @@ impl Document {
         let document = Deserializer::from_str(source)
             .nth(self.index)
             .ok_or(Error::Gone)?;
-        Ok(document.deserialize_map(Without {
-            keys: &self.taken,
-            target: PhantomData,
-        })?)
+        if self.taken.is_empty() {
+            return Ok(T::deserialize(document)?);
+        }
+        let taken: Vec<&str> = self.taken.iter().map(String::as_str).collect();
+        Ok(document.deserialize_map(Without::new(&taken))?)
     }
 }
 
@@ -124,10 +125,19 @@ fn line_of(source: &str, index: usize) -> Result<usize> {
     Ok(stop.location().map_or(1, |location| location.line()))
 }
 
-/// A mapping as `T`, less `keys`.
-struct Without<'k, T> {
-    keys: &'k [String],
+/// A mapping as `T`, less `keys`; a key that is not a string is refused.
+pub struct Without<'k, T> {
+    keys: &'k [&'k str],
     target: PhantomData<T>,
+}
+
+impl<'k, T> Without<'k, T> {
+    pub fn new(keys: &'k [&'k str]) -> Self {
+        Self {
+            keys,
+            target: PhantomData,
+        }
+    }
 }
 
 impl<'de, T: Deserialize<'de>> Visitor<'de> for Without<'_, T> {
@@ -147,7 +157,7 @@ impl<'de, T: Deserialize<'de>> Visitor<'de> for Without<'_, T> {
 
 struct Skipping<'k, A> {
     map: A,
-    keys: &'k [String],
+    keys: &'k [&'k str],
 }
 
 impl<'de, A: MapAccess<'de>> MapAccess<'de> for Skipping<'_, A> {
@@ -186,7 +196,7 @@ enum Key<K> {
 /// Read by the parser itself, so an unknown field's error carries its line.
 struct KeySeed<'s, 'k, K> {
     seed: &'s mut Option<K>,
-    skipped: &'k [String],
+    skipped: &'k [&'k str],
 }
 
 impl<'de, K: DeserializeSeed<'de>> DeserializeSeed<'de> for KeySeed<'_, '_, K> {
@@ -205,7 +215,7 @@ impl<'de, K: DeserializeSeed<'de>> Visitor<'de> for KeySeed<'_, '_, K> {
     }
 
     fn visit_str<E: serde::de::Error>(self, key: &str) -> Result<Self::Value, E> {
-        if self.skipped.iter().any(|skipped| skipped == key) {
+        if self.skipped.contains(&key) {
             return Ok(Key::Skipped);
         }
         let seed = self.seed.take().expect("a key is read once");

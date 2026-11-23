@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use sliplib_yaml::{Error, MultiDoc, Value, join};
+use sliplib_yaml::{Error, MultiDoc, Value, Without, join};
 
 #[test]
 fn documents_keep_their_position_and_line_and_comment_only_ones_are_skipped() {
@@ -92,4 +92,43 @@ fn documents_join_into_one_text() {
         join(&["a: 1\n".into(), "b: 2\n".into()]),
         "a: 1\n---\nb: 2\n"
     );
+}
+
+#[test]
+fn a_document_nothing_was_taken_from_reads_whatever_its_keys() {
+    let file = MultiDoc::parse("? [a, b]: c\n5: x\nfield: 2\n").unwrap();
+    let read: Value = file.documents()[0].deserialize().unwrap();
+    assert_eq!(read, file.documents()[0].value);
+}
+
+/// `Strict` under `inner`, less its `kind`.
+#[derive(Deserialize, Debug)]
+struct Outer {
+    #[expect(dead_code, reason = "read for its refusal")]
+    inner: LessKind,
+}
+
+#[derive(Debug)]
+struct LessKind(#[expect(dead_code, reason = "read for its refusal")] Strict);
+
+impl<'de> Deserialize<'de> for LessKind {
+    fn deserialize<D: serde::Deserializer<'de>>(mapping: D) -> Result<Self, D::Error> {
+        mapping.deserialize_map(Without::new(&["kind"])).map(Self)
+    }
+}
+
+#[test]
+fn a_mapping_less_some_keys_refuses_another_by_its_key_and_line_and_a_list() {
+    sliplib_yaml::from_str::<Outer>("inner:\n  kind: x\n  field: 2\n").unwrap();
+    let stray = sliplib_yaml::from_str::<Outer>("inner:\n  kind: x\n  stray: 3\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        stray.starts_with("inner: unknown field `stray`") && stray.contains("at line 3 column 3"),
+        "{stray}"
+    );
+    let list = sliplib_yaml::from_str::<Outer>("inner: [2]\n")
+        .unwrap_err()
+        .to_string();
+    assert!(list.contains("expected a mapping"), "{list}");
 }
