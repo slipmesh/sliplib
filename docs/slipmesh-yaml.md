@@ -1035,11 +1035,6 @@ of the document - are merged into one in the order of their [rank](#aiming-a-doc
 [the one rule](#laying-one-value-over-another). Talos' own merge appends to a list; this one does
 not.
 
-A `talos` document with `$patch: delete` is not merged: it deletes the document of its identity.
-Where it comes after others, the result is the deletion; where another comes after it, that one
-replaces the result outright. The generator refuses one that deletes the `KubeNodeConfig`, which
-carries the node's annotations.
-
 A file that a `talos` document carries in `configFiles[].content` may be written as YAML, a mapping
 or a list, in place of a string. The node gets that YAML's text, and each of its fields is a field
 of `slipmesh.yaml` like any other.
