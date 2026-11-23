@@ -1,5 +1,6 @@
 //! Every edit made to `slipmesh.yaml`: minted secrets and a node's new key written into the
-//! fields they belong to, and the reference values `mint` writes where the files leave a key out.
+//! fields they belong to, and `mesh.interface_prefix`'s reference value where the files leave it
+//! out.
 //!
 //! Written, a minted value is the operator's like any other: the next run mints nothing, and
 //! deleting it mints a new identity for that node or link, and for every peer that refers to it.

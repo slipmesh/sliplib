@@ -106,7 +106,8 @@ fn check_refuses_every_node_that_lacks_a_secret_naming_what_creates_it() {
     assert_eq!(refusals.len(), 4, "{}", checked.stderr);
     for refusal in refusals {
         assert!(
-            refusal.contains("wireguard.private_key") && refusal.contains("`slipmesh mint`"),
+            refusal.contains("wireguard.private_key")
+                && refusal.ends_with(" - `slipmesh mint` creates it"),
             "{refusal}"
         );
     }

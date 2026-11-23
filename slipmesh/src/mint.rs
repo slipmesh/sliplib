@@ -1,6 +1,6 @@
 //! `mint`: writes whatever secrets the network lacks into the fields of `slipmesh.yaml` they
-//! belong to, and the reference values of the keys it leaves out - once every node's config passes
-//! with them. A run with nothing to write leaves the file as it is.
+//! belong to, and `mesh.interface_prefix`'s reference value where it leaves that out - once every
+//! node's config passes with them. A run with nothing to write leaves the file as it is.
 
 use crate::file::{read_slipmesh, write_edits};
 use crate::{check, edit};

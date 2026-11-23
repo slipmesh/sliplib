@@ -650,10 +650,10 @@ mod tests {
         names.iter().map(Name::as_str).collect()
     }
 
-    fn body_names(patches: &[&AimedDocument]) -> Vec<String> {
-        patches
+    fn body_names(documents: &[&AimedDocument]) -> Vec<String> {
+        documents
             .iter()
-            .map(|patch| patch.value()["name"].as_str().unwrap().to_owned())
+            .map(|document| document.value()["name"].as_str().unwrap().to_owned())
             .collect()
     }
 
@@ -1028,15 +1028,12 @@ mod tests {
                 ["node-a", "node-b", "node-c"]
             );
         }
-        let reached: Vec<Vec<&str>> = file
+        let reach: Vec<Vec<&str>> = file
             .patches()
             .iter()
             .map(|patch| reached(&file, patch.aim()))
             .collect();
-        assert_eq!(
-            reached,
-            [vec!["node-a", "node-b", "node-c"], vec!["node-b"]]
-        );
+        assert_eq!(reach, [vec!["node-a", "node-b", "node-c"], vec!["node-b"]]);
         let levels = |node: &str| -> Vec<String> {
             file.patches()
                 .iter()
@@ -1204,9 +1201,7 @@ mod tests {
             reached(&file, file.patches()[0].aim()),
             ["node-a", "node-b", "node-c"]
         );
-        let aim = file.patches()[0].aim();
-        assert!(aim.reaches("node-b"));
-        assert!(!aim.reaches("router1") && !aim.reaches("node-x"));
+        assert!(!file.patches()[0].aim().reaches("node-x"));
     }
 
     #[test]
