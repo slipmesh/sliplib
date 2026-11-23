@@ -34,6 +34,9 @@
 - A public function returns a typed error of the crate's own, with `Display` and `source()`: no
   `anyhow` in a public signature, so the caller adds the context it knows.
 - `unwrap`/`expect` only in tests.
+- A type read from a file has no `serde(flatten)`, `untagged` or internal `tag`: serde reads them
+  through a buffer, and the refusal loses its key and line. A file holding two types' keys is read
+  with `sliplib_yaml::read_two`. Writing through `flatten` loses nothing and stays allowed.
 
 ## Tests
 
