@@ -161,6 +161,8 @@ documents mean is the caller's.
 - `merge`: JSON Merge Patch (RFC 7386), key order kept; `join` puts documents together.
 - `replace_file` replaces a file atomically, keeping its permissions and following a symlink;
   `write_if_changed` writes only what differs; `read_or_empty` reads a file that may not exist.
+- `Error`: what each of them refuses, naming the file or the document's line.
+- `Without`: a mapping as a type with some keys passed over, an unknown key's error naming its line.
 - `Value`, `Mapping`, `from_str`, `from_value`, `to_string` and `to_value`, re-exported from
   `yaml_serde`.
 

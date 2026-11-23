@@ -38,8 +38,8 @@
   through a buffer, and the refusal loses its key and line. Where one text holds several types'
   keys, each type is read from the text on its own: `sliplib_yaml::read` for a file,
   `Document::deserialize` for a document. A value put together in memory, such as merged patches,
-  has no text, so each part is read from its own before they are put together. Writing through
-  `flatten` loses nothing and stays allowed.
+  has no text, so each part is read from its own text before the parts are put together. Writing
+  through `flatten` loses nothing and stays allowed.
 
 ## Tests
 
