@@ -990,6 +990,27 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_block_is_refused_as_malformed_and_a_key_written_twice_as_not_yaml() {
+        let network = network("{}");
+        for block in ["slipmesh:\n", "slipmesh: null\n"] {
+            let refusal = refusal(&[&network, block]);
+            assert!(
+                matches!(
+                    refusal,
+                    Error::Block {
+                        source: BlockError::Malformed(_),
+                        ..
+                    }
+                ),
+                "{block}: {refusal:?}"
+            );
+        }
+        let twice = "slipmesh: {kind: patch, platform: talos, include: [a], include: [b]}\n";
+        let refusal = refusal(&[&network, twice]);
+        assert!(matches!(refusal, Error::Yaml(_)), "{refusal:?}");
+    }
+
+    #[test]
     fn a_tagged_kind_or_platform_is_refused() {
         let newer = network_edited("{kind: !network, version: 3, revision: 1}", |_| ());
         let network = network("{}");

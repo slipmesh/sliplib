@@ -182,17 +182,20 @@ impl Block {
     pub(super) fn read(document: &Document) -> Result<Self, sliplib_yaml::Error> {
         let Header(KindOf(kind)) = document.deserialize()?;
         Ok(match kind {
-            Kind::Network => Self::Network(keys(document)?),
-            Kind::Groups => Self::Groups(keys(document)?),
-            Kind::Platform => Self::Platform(keys(document)?),
-            Kind::Template => Self::Template(keys(document)?),
-            Kind::Patch => Self::Patch(keys(document)?),
+            Kind::Network => Self::Network(read_as(document)?),
+            Kind::Groups => Self::Groups(read_as(document)?),
+            Kind::Platform => Self::Platform(read_as(document)?),
+            Kind::Template => Self::Template(read_as(document)?),
+            Kind::Patch => Self::Patch(read_as(document)?),
         })
     }
 }
 
-fn keys<T: DeserializeOwned>(document: &Document) -> Result<T, sliplib_yaml::Error> {
-    document.deserialize().map(|Header(Keys(keys))| keys)
+/// The block as its kind's own type.
+fn read_as<T: DeserializeOwned>(document: &Document) -> Result<T, sliplib_yaml::Error> {
+    document
+        .deserialize()
+        .map(|Header(WithoutKind(block))| block)
 }
 
 /// The block, every other key passed over whatever its type.
@@ -234,19 +237,19 @@ struct KindOf(Kind);
 impl<'de> Deserialize<'de> for KindOf {
     fn deserialize<D: Deserializer<'de>>(block: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
-        struct Of {
+        struct JustKind {
             kind: Kind,
         }
         block
-            .deserialize_map(Without::<Of>::new(&[]))
-            .map(|of| Self(of.kind))
+            .deserialize_map(Without::<JustKind>::new(&[]))
+            .map(|just| Self(just.kind))
     }
 }
 
 /// `kind` passed over: no kind's type holds it.
-struct Keys<T>(T);
+struct WithoutKind<T>(T);
 
-impl<'de, T: Deserialize<'de>> Deserialize<'de> for Keys<T> {
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for WithoutKind<T> {
     fn deserialize<D: Deserializer<'de>>(block: D) -> Result<Self, D::Error> {
         block.deserialize_map(Without::new(&["kind"])).map(Self)
     }
