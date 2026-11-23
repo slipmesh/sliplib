@@ -13,30 +13,6 @@ pub enum Error {
         #[source]
         source: Box<Error>,
     },
-    #[error("creating {}", path.display())]
-    Creating {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("resolving {}", path.display())]
-    Resolving {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("opening {} for writing", path.display())]
-    Opening {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("writing {}", path.display())]
-    Writing {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
     #[error("not valid YAML")]
     NotYaml(#[source] yaml_serde::Error),
     #[error("a document the parser did not keep")]

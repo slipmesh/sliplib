@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["config", "mesh", "net", "runtime", "secrets", "slipmesh", "yaml"]
+members = ["config", "fs", "mesh", "net", "runtime", "secrets", "slipmesh", "yaml"]
 
 # One version and one tag for every crate: the shared release flow releases one version per
 # repository.
@@ -39,6 +39,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 # The keys a derived reader passes over: a link's obfuscation refuses them, the daemons' does not.
 serde_ignored = "0.1.14"
 sliplib-config = { path = "config" }
+sliplib-fs = { path = "fs" }
 sliplib-mesh = { path = "mesh" }
 sliplib-net = { path = "net" }
 sliplib-secrets = { path = "secrets" }

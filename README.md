@@ -7,6 +7,7 @@ the command-line tool for `slipmesh.yaml` itself.
 | crate | what it gives |
 | --- | --- |
 | [`sliplib-net`](net) | CIDR parsing and arithmetic on `ipnet`'s types |
+| [`sliplib-fs`](fs) | Files written whole, and only when their text changes |
 | [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and written back |
 | [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
@@ -148,6 +149,16 @@ reaches every component. On top of its methods:
   errors that name the input;
 - `exclude(net, excluded)`: the rest of `net`, as the fewest networks, in address order.
 
+### `sliplib-fs`
+
+A file written through a temporary one beside it, so a reader sees the old text or the new one.
+
+- `write_if_changed` writes a file unless it already holds the text, creating its directory, and
+  says whether it wrote.
+- `replace_file` replaces a file that exists, keeping its permissions and following a symlink.
+- `read_or_empty` reads a file that may not exist.
+- `Error`: the step that failed, naming its path.
+
 ### `sliplib-yaml`
 
 Every read, edit and write of a YAML file, so a component deals in its own types. What the
@@ -159,8 +170,6 @@ documents mean is the caller's.
   value and `text` writes the file back, without its comments or documents of only comments.
 - `read`: a file of one document, into a type, a YAML tag refused.
 - `merge`: JSON Merge Patch (RFC 7386), key order kept; `join` puts documents together.
-- `replace_file` replaces a file atomically, keeping its permissions and following a symlink;
-  `write_if_changed` writes only what differs; `read_or_empty` reads a file that may not exist.
 - `Error`: what each of them refuses, naming the file or the document's line.
 - `Without`: a mapping as a type with some keys passed over, an unknown key's error naming its line.
 - `Value`, `Mapping`, `from_str`, `from_value`, `to_string` and `to_value`, re-exported from
