@@ -39,7 +39,8 @@ pub struct PeerEntry {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
-    /// What counts is [`PeerEntry::allowed_ips_or_all`].
+    /// Set, the daemon tracks the peer's handshake; what it is sent is
+    /// [`PeerEntry::allowed_ips_or_all`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_ips: Option<Vec<Prefix>>,
     /// Seconds, or a range the module draws from at every timer; `0` sends none. What counts is

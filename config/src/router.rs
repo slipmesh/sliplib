@@ -507,7 +507,7 @@ bypass:
     }
 
     #[test]
-    fn the_loopbacks_are_written_as_read() {
+    fn the_loopbacks_are_written_ipv4_first() {
         let cfg = with_loopbacks("[3fff::1/128, 198.51.100.1/32]").unwrap();
         assert_eq!(
             sliplib_yaml::to_string(&cfg.node).unwrap(),

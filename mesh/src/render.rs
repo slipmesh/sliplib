@@ -158,7 +158,9 @@ fn mesh_interfaces_for(
         )?;
         let port = link.kind.port().get();
 
-        let mut addresses = vec![Prefix(Ipv6Net::new_assert(own.link_local, 64).into())];
+        // 64 is a prefix length an IPv6 address takes, so the host's is never the one used.
+        let link_local = Ipv6Net::new(own.link_local, 64).unwrap_or(own.link_local.into());
+        let mut addresses = vec![Prefix(link_local.into())];
         if let Some(tunnel_v4) = own.tunnel_ipv4 {
             addresses.push(Prefix(IpAddr::V4(tunnel_v4).into()));
         }
