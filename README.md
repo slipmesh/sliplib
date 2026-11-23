@@ -155,8 +155,9 @@ reaches every component. On top of its methods:
 
 A file written through a temporary one beside it, so a reader sees the old text or the new one.
 
-- `write_if_changed` writes a file unless it already holds the text, creating its directory, and
-  says whether it wrote. A file it cannot read, such as one that is not UTF-8, is written over.
+- `write_if_changed` writes a file unless it already holds the text, and says whether it wrote. A
+  file it cannot read, such as one that is not UTF-8, is written over. Its directory has to exist:
+  a missing one is refused, naming the file.
 - `replace_file` replaces a file that exists, keeping its permissions and following a symlink.
 - `read_or_empty` reads a file that may not exist.
 - `Error`: the step that failed, naming its path.
