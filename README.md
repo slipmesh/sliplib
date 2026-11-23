@@ -212,6 +212,8 @@ chain prints the whole message, each part once.
   on. `trailer_loss` says how a tunnel with `random_trailers` on loses data packets, as
   `TrailerLoss`. `bytes_into_clear_header` says whether an offset reads a data packet's clear
   header.
+- `mtu::MIN_IPV6_MTU`, 1280, the least MTU of a link that carries IPv6, and
+  `mtu::MESH_MTU_ANNOTATION`, the annotation of a node's `Node` object that carries the mesh MTU.
 - `Prefix`, `Prefix4` and `Prefix6`: an address and its prefix length, host bits kept, read and
   written as `"<address>/<prefix length>"`.
 - `Range`: a number or `lo-hi` the module draws from. A range is written as a string, which a

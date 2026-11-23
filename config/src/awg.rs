@@ -1,5 +1,6 @@
 //! What every platform's `awg` daemon shares of its config.
 
+use crate::mtu::MIN_IPV6_MTU;
 use crate::{Obfuscation, Prefix, Range};
 use serde::{Deserialize, Serialize};
 use sliplib_net::{Ipv4Net, Ipv6Net};
@@ -138,7 +139,7 @@ pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
             .any(|prefix| prefix.0.addr().is_ipv6());
         if let Some(mtu) = iface.mtu {
             // RFC 8200, RFC 791: the kernel refuses less, once the daemon is converging.
-            let floor = if carries_ipv6 { 1280 } else { 68 };
+            let floor = if carries_ipv6 { MIN_IPV6_MTU } else { 68 };
             if mtu < floor {
                 return Err(Invalid::MtuTooSmall {
                     interface: iface.name.clone(),
