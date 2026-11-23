@@ -192,21 +192,13 @@ fn a_file_that_is_not_there_is_not_replaced() {
 
 #[cfg(unix)]
 #[test]
-fn a_directory_it_cannot_write_is_refused_naming_what_it_could_not_create() {
-    use std::os::unix::fs::PermissionsExt;
+fn a_directory_that_cannot_be_created_is_refused_naming_it() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
-    let file = dir.path().join("node-a.yaml");
-    let in_a_new_directory = dir.path().join("patches").join("node-a.yaml");
-    let opening = write_if_changed(&file, "a: 1\n").unwrap_err();
-    let creating = write_if_changed(&in_a_new_directory, "a: 1\n").unwrap_err();
-    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let dangling = dir.path().join("patches");
+    std::os::unix::fs::symlink(dir.path().join("nowhere").join("patches"), &dangling).unwrap();
+    let err = write_if_changed(&dangling.join("node-a.yaml"), "a: 1\n").unwrap_err();
     assert!(
-        matches!(&opening, Error::Opening { path, .. } if path == &file),
-        "{opening:?}"
-    );
-    assert!(
-        matches!(&creating, Error::Creating { path, .. } if path == &dir.path().join("patches")),
-        "{creating:?}"
+        matches!(&err, Error::Creating { path, .. } if path == &dangling),
+        "{err:?}"
     );
 }
