@@ -159,10 +159,15 @@ pub enum Error {
     NoNetwork,
     #[error(transparent)]
     Invalid(#[from] Invalid),
+    /// Of the groups' own definitions.
     #[error(transparent)]
     Groups(#[from] GroupsError),
+    /// Of a document's `include` and `exclude`, which name the document.
+    #[error(transparent)]
+    Reach(GroupsError),
     #[error(
-        "two `kind: platform` documents for `{platform}`, at {first} and {second}, and a platform has at most one - write their keys in one"
+        "two `kind: platform` documents for `{platform}`, at {}, and a platform has at most one - write their keys in one",
+        both(first, second)
     )]
     PlatformTwice {
         platform: Platform,
@@ -182,6 +187,20 @@ pub enum Error {
         node: Name,
         other: Platform,
     },
+}
+
+/// One file named once.
+fn both(first: &Start, second: &Start) -> String {
+    match (&first.file, &second.file) {
+        (Some(one), Some(other)) if one != other => format!("{first} and {second}"),
+        (Some(file), _) => format!(
+            "lines {} and {} of {}",
+            first.line,
+            second.line,
+            file.display()
+        ),
+        _ => format!("lines {} and {}", first.line, second.line),
+    }
 }
 
 fn shown(paths: &[PathBuf]) -> String {
@@ -662,7 +681,9 @@ impl Aimed {
             include: self.include,
             exclude: self.exclude,
         };
-        let reach = groups.reach(&selection, &of_the_platform, &place.to_string())?;
+        let reach = groups
+            .reach(&selection, &of_the_platform, &place.to_string())
+            .map_err(Error::Reach)?;
         let of_another = reach
             .iter()
             .map(|node| (node, network.nodes[node].platform))
@@ -1079,6 +1100,30 @@ mod tests {
             matches!(&err, Error::Block { start, source: BlockError::Missing } if start.file() == Some(path.as_path())),
             "{err:?}"
         );
+        let settings = "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n";
+        // An aim at an unknown name, one left with no node, two platform documents.
+        for extra in [
+            patch("platform: talos, include: [nogroup]", "one"),
+            patch(
+                "platform: talos, include: [node-a], exclude: [node-a]",
+                "one",
+            ),
+            format!("{settings}---\n{settings}"),
+        ] {
+            std::fs::write(&path, format!("{}---\n{extra}", network("{}"))).unwrap();
+            named_once(File::open(&[&path]).unwrap_err());
+        }
+        let other = dir.path().join("talos.yaml");
+        std::fs::write(&path, format!("{}---\n{settings}", network("{}"))).unwrap();
+        std::fs::write(&other, settings).unwrap();
+        let twice = File::open(&[&path, &other]).unwrap_err().to_string();
+        for file in [&path, &other] {
+            assert_eq!(
+                twice.matches(&file.display().to_string()).count(),
+                1,
+                "{twice}"
+            );
+        }
         std::fs::remove_file(&path).unwrap();
         named_once(File::open(&[&path]).unwrap_err());
     }
@@ -1241,7 +1286,7 @@ mod tests {
         };
         let refusal = refusal(&documents);
         assert!(
-            matches!(&refusal, Error::Groups(groups) if *groups == unknown),
+            matches!(&refusal, Error::Reach(groups) if *groups == unknown),
             "{refusal:?}"
         );
     }
@@ -2144,7 +2189,7 @@ mod tests {
         };
         let refusal = refusal(&documents);
         assert!(
-            matches!(&refusal, Error::Groups(groups) if *groups == unknown),
+            matches!(&refusal, Error::Reach(groups) if *groups == unknown),
             "{refusal:?}"
         );
     }
@@ -2159,7 +2204,7 @@ mod tests {
         let empty = GroupsError::Empty(place(TEMPLATE, &documents, 1).to_string());
         let refusal = refusal(&documents);
         assert!(
-            matches!(&refusal, Error::Groups(groups) if *groups == empty),
+            matches!(&refusal, Error::Reach(groups) if *groups == empty),
             "{refusal:?}"
         );
     }
