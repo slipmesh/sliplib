@@ -6,7 +6,7 @@ use super::{ClassName, Map, Name, Platform, unique_keys};
 use crate::router::{
     BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER, InterfacePattern,
 };
-use crate::{Obfuscation, Prefix4, Prefix6, Range};
+use crate::{Mark, Obfuscation, Prefix4, Prefix6, Range};
 use serde::{Deserialize, Deserializer};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{IpAddr, Ipv4Addr};
@@ -99,11 +99,41 @@ pub struct Bfd {
     pub multiplier: NonZeroU8,
 }
 
-/// The protocol number of routes something other than the router installs.
+/// The protocol number of routes something other than the router installs, and the routing rules
+/// that lead to its table.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Class {
     pub protocol: u8,
+    /// Absent, `main`.
+    #[serde(default)]
+    pub table: Option<u8>,
+    #[serde(default = "both_families")]
+    pub families: Vec<Family>,
+    #[serde(default, deserialize_with = "unique_keys")]
+    pub rules: Map<Name, Rule>,
+}
+
+fn both_families() -> Vec<Family> {
+    vec![Family::Ipv4, Family::Ipv6]
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Rule {
+    pub priority: u32,
+    /// Absent, every packet.
+    #[serde(default)]
+    pub mark: Option<Mark>,
+    /// Absent, the class's table.
+    #[serde(default)]
+    pub lookup: Option<Lookup>,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Lookup {
+    Main,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -143,7 +173,8 @@ pub struct Underlay {
     pub mtu: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum Family {
     Ipv4,
     Ipv6,
@@ -487,7 +518,37 @@ mod tests {
         assert_eq!(links, ["a-b", "a-c", "a-r1"]);
 
         assert_eq!(network.routing.bgp.number.get(), 64500);
-        assert_eq!(network.routing.classes.len(), 1);
+        let mark = |bits| NonZeroU32::new(bits).unwrap();
+        let rule = |priority, mark, lookup| Rule {
+            priority,
+            mark,
+            lookup,
+        };
+        assert_eq!(
+            network.routing.classes["egress"],
+            Class {
+                protocol: 152,
+                table: Some(152),
+                families: vec![Family::Ipv4],
+                rules: Map::from_iter([
+                    (
+                        Name::try_from("uplink-replies".to_owned()).unwrap(),
+                        rule(
+                            1000,
+                            Some(Mark {
+                                value: mark(0x10_0000),
+                                mask: mark(0x10_0000),
+                            }),
+                            Some(Lookup::Main),
+                        ),
+                    ),
+                    (
+                        Name::try_from("egress".to_owned()).unwrap(),
+                        rule(1001, None, None),
+                    ),
+                ]),
+            }
+        );
         assert_eq!(network.mesh.interface_prefix.unwrap().as_str(), "mesh-");
         assert_eq!(network.mesh.mtu, Some(1320));
         assert_eq!(network.nodes["router1"].platform, Platform::Routeros);
@@ -527,6 +588,7 @@ mod tests {
             "{routing: {bgp: {color: red}}}",
             "{routing: {bfd: {color: red}}}",
             "{routing: {classes: {egress: {color: red}}}}",
+            "{routing: {classes: {egress: {rules: {egress: {color: red}}}}}}",
             "{nodes: {node-a: {color: red}}}",
             "{nodes: {node-a: {underlay: {wan: {color: red}}}}}",
             "{nodes: {node-a: {underlay: {wan: {endpoint: {color: red}}}}}}",
@@ -552,7 +614,6 @@ mod tests {
             "{addressing: {tunnel: {ipv6: \"3fff:0:0:9::/64\"}}}",
             "{routing: {ospf: {cost: 10}}}",
             "{routing: {bgp: {sessions: {}}}}",
-            "{routing: {classes: {egress: {table: 152}}}}",
             "{mesh: {wireguard: {fwmark: \"0x10\"}}}",
             "{mesh: {links: {a-b: {mtu: 1400}}}}",
             "{mesh: {links: {a-b: {routing: {ospf: {cost: 5}}}}}}",
@@ -571,6 +632,9 @@ mod tests {
             &["addressing", "loopback", "ipv6"],
             &["routing", "bgp", "as"],
             &["routing", "classes", "egress", "protocol"],
+            &[
+                "routing", "classes", "egress", "rules", "egress", "priority",
+            ],
             &["nodes", "node-a", "platform"],
             &["nodes", "node-a", "node_id"],
             &["nodes", "node-a", "underlay"],
@@ -593,6 +657,10 @@ mod tests {
             "{routing: {bfd: {multiplier: 256}}}",
             "{routing: {classes: {egress: {protocol: 256}}}}",
             "{routing: {classes: {-egress: {protocol: 7}}}}",
+            "{routing: {classes: {egress: {table: 256}}}}",
+            "{routing: {classes: {egress: {families: [ipv5]}}}}",
+            "{routing: {classes: {egress: {rules: {egress: {priority: 4294967296}}}}}}",
+            "{routing: {classes: {egress: {rules: {egress: {lookup: local}}}}}}",
             "{routing: {direct_interfaces: [\"lan?\"]}}",
             "{nodes: {node-a: {routing: {direct_interfaces: [198.51.100.0/25]}}}}",
             "{routing: {learn: [\"3fff::/64\"]}}",

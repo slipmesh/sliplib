@@ -79,6 +79,7 @@ The kinds:
 | `nftables`, kept only to be refused with a hint | Gone: an unknown kind like any other. |
 | A `patch` naming the `ExtensionServiceConfig` `router`, to give it `router.conf.j2` | A `template` with `daemon: router`. |
 | A `patch` that is the whole `ExtensionServiceConfig` `nftables`, with `nftables.conf.j2` | A `template` with `daemon: firewall`. The generator makes the document, and a `patch` may only add files to it. |
+| A `patch` that is a `RoutingRuleConfig`, reaching every Talos node | A rule of a route class. The generator makes the document. |
 | A `patch` naming the `ExtensionServiceConfig` `mikrotik`, with how to reach the device | Gone from the files. The RouterOS tool takes that from its environment. |
 | `exclude` of the non-Talos nodes on every `patch` | Not needed: a `patch` names its `platform` and reaches no other. |
 
@@ -158,7 +159,9 @@ comes from the conversion.
       name; `learn` holds `pod_subnet` and `announce` holds `service_subnet`, each in a list. The
       label `k8s-services` has no place in version 2. `bfd` moves here without `enable`: where
       `enable` was `false` or absent, delete the block. `classes.egress.protocol` is
-      `cluster.route_proto_id.egress`, which a file that passes step 1 always has. An entry of a
+      `cluster.route_proto_id.egress`, which a file that passes step 1 always has, and its `table`
+      the table the `RoutingRuleConfig` patches look up other than `main`, if there is one. An
+      entry of a
       `direct_interfaces`, here or a node's, that is a CIDR or holds a character other than ASCII
       letters, digits, `-`, `_` and `.` before a trailing `*`, as `?` is, does not load: rewrite it
       as interface names, or prefixes and `*`.
@@ -206,10 +209,23 @@ comes from the conversion.
        template's among them. Version 1 already refused any other key in a `patch` of the `router`
        document. The rest of the `nftables` document the generator now writes itself, so its other
        keys have no place in the files.
-   13. Give every remaining `patch` its `platform`, drop the `exclude` that kept it from the nodes of
+   13. Turn into a rule of a route class each `patch` that is a `RoutingRuleConfig` reaching every
+       node of `talos`, an `exclude` of nodes of other platforms aside, and holding nothing but
+       `name`, `table`, `fwMark`, `fwMask` and a `dst` of `0.0.0.0/0` or `::/0`. The rule goes into
+       the class whose `table` it looks up, and one that looks up `main` into the class of the rule
+       it lets packets past, `egress` for the reference setup. Its `priority` is the `name`; its
+       own name is free. `fwMark` and `fwMask` become its `mark`, in hexadecimal,
+       `0x100000/0x100000` for `1048576` and `1048576`, the mask left out where it was absent or
+       every bit. `table: main` becomes `lookup: main`, and the class's own table is left out. The
+       `dst` of the rules of one class gives the class its `families`: `[ipv4]` for `0.0.0.0/0`,
+       `[ipv6]` for `::/0`, the key left out for none. Rules of one class that differ in `dst`
+       cannot share it. Delete the `patch`. A `RoutingRuleConfig` with any other key, reaching some
+       nodes of `talos` only, or differing in `dst` from the other rules of its class, stays a
+       `patch`.
+   14. Give every remaining `patch` its `platform`, drop the `exclude` that kept it from the nodes of
        other platforms, take a node of another platform out of its `include`, and delete the
        `mikrotik` document.
-   14. Where several documents name the same set of nodes, a group in a `groups` document may name
+   15. Where several documents name the same set of nodes, a group in a `groups` document may name
        it once. Where the keys or the obfuscation should be kept apart, move them into a file of
        their own, laid over the rest:
        `nodes.<name>.wireguard` and `mesh.links.<name>.amneziawg.obfuscation` keep their paths
@@ -249,6 +265,9 @@ comes from the conversion.
    - where step 4.9 made a link to a `routeros` node, which version 1 could have marked as
      obfuscated, a link of type `wireguard`, the interface of its `talos` end has no obfuscation,
      and the peer's keepalive is 25 where an obfuscated link gave it `20-30`;
+   - where step 4.13 turned a `patch` into a rule, its `RoutingRuleConfig` document stands after the
+     generated documents of the node's patch file, not among the documents of the `patch`es, with
+     the same contents;
    - where step 4.11 turned a `patch` of `router` or `nftables` into a template, the files of that
      document come in the generator's order and not the `patch`'s: the generator's config, then the
      template, then the files the `patch` adds, so a file the `patch` listed before the template
