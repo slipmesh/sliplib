@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use sliplib_config::v2::{DocumentId, File, META_KEY, REVISION, Sources, VERSION};
 use sliplib_yaml::{MultiDoc, Value};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// The files read for a write, and where it goes.
@@ -102,12 +103,7 @@ impl Edit {
         *self.sources.files_mut()[self.at].yaml_mut() = MultiDoc::parse(&text)?;
         File::read(&self.sources).context("the edited files do not read back - not written")?;
         if self.sources.files()[self.at].is_new() {
-            create_private(&self.path)?;
-            if let Err(failed) = sliplib_fs::replace_file(&self.path, &text) {
-                // Left empty, the file would be refused as holding no network document.
-                let _ = std::fs::remove_file(&self.path);
-                return Err(failed.into());
-            }
+            create_private(&self.path, &text)?;
         } else {
             sliplib_fs::replace_file(&self.path, &text)?;
         }
@@ -116,15 +112,18 @@ impl Edit {
 }
 
 /// Its owner's alone, as it may hold private keys; refused if it appeared since it was read.
-fn create_private(path: &Path) -> Result<()> {
+/// Written through the handle that created it, so nothing put at the path since is followed.
+fn create_private(path: &Path, text: &str) -> Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    options
+    let mut file = options
         .open(path)
         .with_context(|| format!("creating {}", path.display()))?;
-    Ok(())
+    file.write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+        .with_context(|| format!("writing {}", path.display()))
 }
 
 /// A key there, `null` or not.
