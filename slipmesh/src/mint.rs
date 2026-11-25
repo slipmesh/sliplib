@@ -1,31 +1,32 @@
 //! `mint`: the secrets the files lack, and `mesh.interface_prefix`'s reference value, written once
 //! every node passes with them.
 
-use crate::file::{read_slipmesh, write_edits};
+use crate::file::Edit;
 use crate::{check, edit};
 use anyhow::{Context, Result};
-use sliplib_config::v2::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-pub fn run(config_path: &Path) -> Result<()> {
-    let (mut sources, mut file) = read_slipmesh(config_path)?;
+pub fn run(inputs: &[PathBuf], edit_path: &Path) -> Result<()> {
+    let mut files = Edit::read(inputs, edit_path)?;
     // First: the files give no mesh without it.
-    let unset = file.network().mesh.interface_prefix.is_none();
+    let unset = files.file.network().mesh.interface_prefix.is_none();
     if unset {
-        edit::write_interface_prefix(&mut sources, &file)?;
-        file = File::read(&sources)
-            .context("slipmesh.yaml with what it lacked does not read back - not written")?;
+        edit::write_interface_prefix(&mut files)?;
+        files.file = files
+            .reread()
+            .context("the files with what they lacked do not read back - not written")?;
     }
-    let minted = sliplib_mesh::mint::create(&sliplib_mesh::Mesh::of(&file)?)?;
-    edit::record(&mut sources, &file, &minted)?;
+    let minted = sliplib_mesh::mint::create(&sliplib_mesh::Mesh::of(&files.file)?)?;
+    edit::record(&mut files, &minted)?;
     if minted.is_empty() && !unset {
         return Ok(());
     }
-    let path = config_path.display();
+    let path = files.path().display().to_string();
 
     // A written value is never minted again, so one a node is refused with must not be written.
-    let edited = File::read(&sources)
-        .context("slipmesh.yaml with what was minted does not read back - not written")?;
+    let edited = files
+        .reread()
+        .context("the files with what was minted do not read back - not written")?;
     let network = sliplib_mesh::Mesh::of(&edited)?;
     let refusals: Vec<anyhow::Error> = check::nodes(&network)
         .into_iter()
@@ -36,10 +37,10 @@ pub fn run(config_path: &Path) -> Result<()> {
     }
     anyhow::ensure!(
         refusals.is_empty(),
-        "{path}: not written - with what was minted, {} of its nodes would be refused",
+        "{path}: not written - with what was minted, {} of the nodes would be refused",
         refusals.len()
     );
-    write_edits(config_path, &sources)?;
+    files.save()?;
 
     if !minted.is_empty() {
         println!("minted {} into {path}", minted.routes().join(", "));

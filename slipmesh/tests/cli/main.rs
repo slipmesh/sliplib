@@ -2,6 +2,7 @@
 
 mod check;
 mod common;
+mod files;
 mod fmt;
 mod mint;
 mod v2;

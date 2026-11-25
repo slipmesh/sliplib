@@ -14,11 +14,10 @@ does.
 
 ## The files
 
-A network is written in one file, which a tool takes with `--config`, and may be laid from several
-`network` documents of it; [several files](#several-files) are **Planned**. A tool takes the file as
-plain text: a file kept encrypted is decrypted by whatever runs the tool, and the format knows
-nothing of how. The nodes' private keys are written in the clear, so the file that holds them is
-kept where such files are kept; with several files it could be a file of its own.
+A network is written in one file or in [several](#several-files), which a tool takes with `--in`.
+A tool takes each file as plain text: a file kept encrypted is decrypted by whatever runs the tool,
+and the format knows nothing of how. The nodes' private keys are written in the clear, so the file
+that holds them is kept where such files are kept, and can be a file of its own.
 
 People write the documents. Only [`slipmesh`](../README.md#slipmesh) writes values into them - the
 keys nobody can derive, and reference values - and it checks the files as a whole. Every other
@@ -65,7 +64,7 @@ error; one that holds nothing - empty, only comments, or `~` - is skipped.
 
 ### Several files
 
-**Planned:** a tool takes its files with `--in`, which takes several values and may be repeated:
+A tool takes its files with `--in`, which takes several values and may be repeated:
 `--in cfg/*.yaml` reads every such file of the directory. A command that writes also reads the file
 of its [`--edit`](#what-slipmesh-writes). Every path is first brought to its canonical form, and
 the files are read sorted by those paths, byte by byte. Neither the order on the command line nor
@@ -117,9 +116,10 @@ It is used in three places:
   one field of `mesh.amneziawg.obfuscation`. A `null` at a field `slipmesh mint` writes leaves the
   link without it, and the link is refused as any link that lacks the field is; `slipmesh mint`
   then writes that field over the `null`, as it writes into any link that lacks it once the
-  defaults are laid under. Where the link's whole `obfuscation` is `null`, which takes away every
-  field laid under it, `mint` writes the fields it mints and a `null` at each other field of
-  `mesh.amneziawg.obfuscation`, so the link goes without those still.
+  defaults are laid under; with several files, where its `--edit` file is laid over the `null`.
+  Where the link's whole `obfuscation` is `null`, which takes away every field laid under it, `mint`
+  writes the fields it mints and a `null` at each other field of `mesh.amneziawg.obfuscation`, so
+  the link goes without those still.
 
 Every key of these two places takes `null`, besides the type its table gives.
 
@@ -879,10 +879,9 @@ no links, which has no interface to give it to.
 
 Named sets of nodes, for documents to be [aimed at](#aiming-a-document-at-nodes). They are not the
 architecture of the mesh but what other documents name, so they can be written beside those
-documents, in the same file or, once several files are read, in their own. The block of a `groups`
-document takes `kind` and `order` alone. Several are [laid over each other](#several-files) into
-one set of groups. The loader turns a group into its nodes, so every tool understands it; a group
-configures nothing by itself.
+documents, in the same file or in their own. The block of a `groups` document takes `kind` and
+`order` alone. Several are [laid over each other](#several-files) into one set of groups. The loader
+turns a group into its nodes, so every tool understands it; a group configures nothing by itself.
 
 ```yaml
 slipmesh:
@@ -1087,9 +1086,8 @@ mesh as computed.
   patches, and two groups: `workers`, which one patch is aimed with, and `core`, which `workers` is
   made of.
 
-**Planned:** a tool takes the three with `--in`; until then they are given as one file, their
-documents in that order. The three hold no Planned part, since a file with one is refused. One link has a header, a timer
-and its [keepalive](#keepalive) written as ranges.
+A tool takes the three with `--in`. They hold no Planned part, since a file with one is refused. One
+link has a header, a timer and its [keepalive](#keepalive) written as ranges.
 
 Their networks and addresses are from the ranges reserved for documentation, but for the
 link-local `fe80::` of the links; a `node_id` is an identity, not an address. Their AS number is
@@ -1106,26 +1104,28 @@ repeated.
   `mesh.interface_prefix`;
 - `rekey` replaces one node's `wireguard.private_key`.
 
-A command that writes replaces the one file it reads, given with `--config`, with what it
-creates in it.
-
-**Planned:** with [several files](#several-files), a command that writes takes one file with
-`--edit` and writes what it creates there. It reads the file too, among the files of `--in`, so it
-sees what was already written in it; the file may stand in `--in` as well, and is one file, read
-once, either way. An `--edit` file that does not exist yet is created, holding one `network`
-document with the `version` and `revision` of the ones read.
+A command that writes takes one file with `--edit` and writes what it creates there. It reads the
+file too, among the files of `--in`, so it sees what was already written in it; the file may stand
+in `--in` as well, and is one file, read once, either way. An `--edit` file that does not exist yet
+is created, holding one `network` document with the `version` and `revision` of the ones read.
 
 ```bash
 slipmesh mint --in mesh.yaml --edit secrets.yaml
 ```
 
-With several files, refused:
+Refused:
 
 - an `--edit` file that exists and does not hold exactly one `network` document, since the command
   would not know which to write into;
 - a change to a value already set, as `rekey` makes, where the value lies in a file other than the
   `--edit` one. The refusal names that file: written into the `--edit` file, the new value would lie
-  under or over the old one by the order of the documents, not by the intent of the command.
+  under or over the old one by the order of the documents, not by the intent of the command;
+- a value written that the files laid together do not hold, since a file laid over the `--edit` one
+  takes it away, with a `null` at its key or above it. The refusal names that file;
+- a write that changes the order of the nodes or the links: a key stands where it first appears
+  among the documents, so an `--edit` file laid before the files that name them would move them to
+  the front. A node's peers and interfaces follow that order: give the `--edit` file a name that
+  sorts after those files, or a later `order`.
 
 The commands are described [with the tool](../README.md#slipmesh). Everything else - nodes, links,
 groups, templates, every document - is written by hand.
@@ -1146,13 +1146,13 @@ written by hand, this does not:
 
 So the first write to a file written by hand changes most of its lines. `slipmesh fmt` makes that
 change alone: it rewrites a file in the form every write leaves it in and changes no value. It takes
-the file given with `--config` and rewrites it in place. **Planned:** with several files, it takes
 the files to rewrite as its arguments, not `--in` and `--edit`, and rewrites each in place, laying
 nothing over anything. It reads back the text it is about to write, and refuses to write it if the
-values of any document differ from the file's. Run once and committed on its own, it keeps every
-later write down to the lines that write is about. What a comment said has to move elsewhere first,
-for instance into a README beside the files.
+values of any document differ from the file's; one file refused, none is written. Run once and
+committed on its own, it keeps every later write down to the lines that write is about. What a
+comment said has to move elsewhere first, for instance into a README beside the files.
 
 A command with nothing to write leaves the file as it is. Before it replaces the file, a command
 other than `fmt` checks that the files, with the result in its place, still read as a valid
-network. Every command replaces the file in one step, keeping its permissions.
+network. Every command replaces the file in one step, keeping its permissions; a file it creates is
+its owner's alone.

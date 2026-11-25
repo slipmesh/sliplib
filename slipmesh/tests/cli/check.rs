@@ -3,7 +3,7 @@ use std::path::Path;
 
 fn check_at(path: &Path) -> Ran {
     slipmesh()
-        .args(["check", "--config"])
+        .args(["check", "--in"])
         .arg(path)
         .output()
         .unwrap()
@@ -182,23 +182,5 @@ fn files_with_a_key_the_loader_does_not_know_are_one_refusal_naming_the_file() {
         !checked.stderr.contains("slipmesh mint"),
         "{}",
         checked.stderr
-    );
-}
-
-#[test]
-fn the_file_is_slipmesh_yaml_of_the_working_directory_unless_given() {
-    let config = minted();
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("slipmesh.yaml"), config.text()).unwrap();
-    let checked: Ran = slipmesh()
-        .arg("check")
-        .current_dir(dir.path())
-        .output()
-        .unwrap()
-        .into();
-    assert_eq!(checked.code, Some(0), "{}", checked.stderr);
-    assert_eq!(
-        checked.stdout,
-        "node-a: ok\nnode-b: ok\nnode-c: ok\nrouter1: ok\n"
     );
 }

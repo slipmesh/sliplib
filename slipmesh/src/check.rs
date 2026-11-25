@@ -4,7 +4,7 @@ use anyhow::Result;
 use sliplib_config::v2::File;
 use sliplib_mesh::Mesh;
 use sliplib_mesh::render::node_configs;
-use std::path::Path;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// In order, each with its refusal: one says nothing of the next.
@@ -22,13 +22,13 @@ pub fn nodes<'a>(network: &Mesh<'a>) -> Vec<(&'a str, Result<()>)> {
 
 /// `<node>: ok` or the refusal, each on a line. Warnings only where nothing was refused: they are
 /// counted from settings that pass.
-pub fn run(config_path: &Path) -> ExitCode {
+pub fn run(inputs: &[PathBuf]) -> ExitCode {
     let mut passed = ExitCode::SUCCESS;
     let mut refuse = |refusal: anyhow::Error| {
         eprintln!("{refusal:#}");
         passed = ExitCode::FAILURE;
     };
-    match File::open(&[config_path]) {
+    match File::open(inputs) {
         Err(refusal) => refuse(refusal.into()),
         Ok(file) => match Mesh::of(&file) {
             Err(refusal) => refuse(refusal.into()),

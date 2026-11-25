@@ -10,6 +10,14 @@ fn documents_keep_their_position_and_line_and_comment_only_ones_are_skipped() {
 }
 
 #[test]
+fn the_text_read_stays_whatever_is_edited() {
+    let text = "# a\na: 1\n";
+    let mut file = MultiDoc::parse(text).unwrap();
+    file.document_mut(0).unwrap()["a"] = 2.into();
+    assert_eq!(file.source(), text);
+}
+
+#[test]
 fn the_values_of_a_file_are_its_documents_in_order() {
     let file = MultiDoc::parse("a: 1\n---\n# nothing here yet\n---\nb: 2\n").unwrap();
     let expected: Vec<Value> = ["a: 1", "b: 2"]
