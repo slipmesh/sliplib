@@ -104,6 +104,12 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
+    #[error("reading {}", shown(paths))]
+    Files {
+        paths: Vec<PathBuf>,
+        #[source]
+        source: Box<Error>,
+    },
     #[error(
         "{place} has no `version`, or one below {VERSION}, so the files are of format version 1, which this release does not read - convert them to version {VERSION} as `docs/slipmesh-yaml-v1-to-v2.md` of sliplib says under \"Converting a file by hand\""
     )]
@@ -132,12 +138,12 @@ pub enum Error {
         #[source]
         source: Source,
     },
-    /// In a `network` or `groups` document laid with the others of its kind: `place` is the last
-    /// that wrote the key, `line` the key's.
-    #[error("{place}, at line {line}")]
+    /// Of the `network` or the `groups` documents laid together: `at` is the key's line in the
+    /// last that wrote it.
+    #[error("the `kind: {kind}` documents laid together, at {at}")]
     Laid {
-        place: Place,
-        line: usize,
+        kind: &'static str,
+        at: Start,
         #[source]
         source: Refused,
     },
@@ -148,12 +154,12 @@ pub enum Error {
     #[error(transparent)]
     Groups(#[from] GroupsError),
     #[error(
-        "two `kind: platform` documents for `{platform}`, {first} and {second}, and a platform has at most one - write their keys in one"
+        "two `kind: platform` documents for `{platform}`, at {first} and {second}, and a platform has at most one - write their keys in one"
     )]
     PlatformTwice {
         platform: Platform,
-        first: Place,
-        second: Place,
+        first: Start,
+        second: Start,
     },
     #[error(
         "{place} is written for `{platform}`, whose tool takes no document of this kind - take it out"
@@ -168,6 +174,14 @@ pub enum Error {
         node: Name,
         other: Platform,
     },
+}
+
+fn shown(paths: &[PathBuf]) -> String {
+    let shown: Vec<String> = paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    shown.join(", ")
 }
 
 /// A file read, or a text given as it is.
@@ -197,25 +211,27 @@ impl Sources {
             .iter()
             .map(|input| {
                 let input = input.as_ref();
-                std::fs::canonicalize(input).map_err(|source| Error::Reading {
+                let canonical = std::fs::canonicalize(input).map_err(|source| Error::Reading {
                     path: input.to_owned(),
                     source,
-                })
+                })?;
+                Ok((canonical, input))
             })
-            .collect::<Result<Vec<PathBuf>, Error>>()?;
-        // `Path` compares by components, so `a/b` would come before `a-b`.
-        paths.sort_by(|a, b| {
+            .collect::<Result<Vec<(PathBuf, &Path)>, Error>>()?;
+        // `Path` compares by components, so `a/b` would come before `a-b`. Stable, so a file is
+        // named as it was first given.
+        paths.sort_by(|(a, _), (b, _)| {
             a.as_os_str()
                 .as_encoded_bytes()
                 .cmp(b.as_os_str().as_encoded_bytes())
         });
-        paths.dedup();
+        paths.dedup_by(|(a, _), (b, _)| a == b);
         let files = paths
             .into_iter()
-            .map(|path| {
-                let yaml = MultiDoc::read(&path).map_err(|source| Error::Yaml(source.into()))?;
+            .map(|(_, given)| {
+                let yaml = MultiDoc::read(given).map_err(|source| Error::Yaml(source.into()))?;
                 Ok(SourceFile {
-                    path: Some(path.into()),
+                    path: Some(given.into()),
                     yaml,
                 })
             })
@@ -385,37 +401,43 @@ fn keeps_null(path: &[&Value]) -> bool {
     in_routing || in_link
 }
 
-/// In the order of the documents, from an empty tree.
-fn laid(layers: &[Taken], keeps: &dyn Fn(&[&Value]) -> bool) -> Value {
-    layers.iter().fold(Value::Null, |tree, layer| {
-        merge_keeping(tree, &layer.body.value, keeps)
-    })
+/// The documents of one kind, in their order.
+struct Layers<'a> {
+    first: &'a Taken,
+    later: &'a [Taken],
 }
 
-/// A refusal names the last of `layers` that wrote the key, and the key's line there.
-fn read_laid<T: DeserializeOwned>(
-    tree: Value,
-    layers: &[Taken],
-    kind: &'static str,
-) -> Result<T, Error> {
-    sliplib_yaml::from_value_at(tree).map_err(|refused| {
-        let values: Vec<&Value> = layers.iter().map(|layer| &layer.body.value).collect();
-        let path = refused.path();
-        match sliplib_yaml::written_by(&values, &path) {
-            Some((layer, depth)) => {
-                let layer = &layers[layer];
-                Error::Laid {
-                    place: layer.place(kind),
-                    line: layer
-                        .body
-                        .line_at(&path[..depth])
-                        .unwrap_or(layer.start.line),
-                    source: refused,
-                }
+impl Layers<'_> {
+    /// From an empty tree.
+    fn laid(&self, keeps: &dyn Fn(&[&Value]) -> bool) -> Value {
+        std::iter::once(self.first)
+            .chain(self.later)
+            .fold(Value::Null, |tree, layer| {
+                merge_keeping(tree, &layer.body.value, keeps)
+            })
+    }
+
+    /// A refusal names the last layer that wrote the key, and the key's line there.
+    fn read<T: DeserializeOwned>(&self, tree: Value, kind: &'static str) -> Result<T, Error> {
+        sliplib_yaml::from_value_at(tree).map_err(|refused| {
+            let later: Vec<&Value> = self.later.iter().map(|layer| &layer.body.value).collect();
+            let path = refused.path();
+            let (layer, depth) = sliplib_yaml::written_by(&self.first.body.value, &later, &path);
+            let layer = match layer {
+                0 => self.first,
+                later => &self.later[later - 1],
+            };
+            let line = layer.body.line_at(&path[..depth]);
+            Error::Laid {
+                kind,
+                at: Start {
+                    file: layer.start.file.clone(),
+                    line: line.unwrap_or(layer.start.line),
+                },
+                source: refused,
             }
-            None => Error::Yaml(refused.into()),
-        }
-    })
+        })
+    }
 }
 
 /// Those a node may hold its own of.
@@ -634,7 +656,27 @@ impl File {
         Self::read(&Sources::read(inputs)?)
     }
 
+    /// A refusal about no document in particular names the files read.
     pub fn read(sources: &Sources) -> Result<Self, Error> {
+        Self::read_documents(sources).map_err(|refusal| {
+            let paths: Vec<PathBuf> = sources
+                .files
+                .iter()
+                .filter_map(|file| Some(file.path.as_deref()?.to_owned()))
+                .collect();
+            match refusal {
+                Error::NoNetwork | Error::Invalid(_) | Error::Groups(_) if !paths.is_empty() => {
+                    Error::Files {
+                        paths,
+                        source: Box::new(refusal),
+                    }
+                }
+                refusal => refusal,
+            }
+        })
+    }
+
+    fn read_documents(sources: &Sources) -> Result<Self, Error> {
         let raw: Vec<Raw> = sources
             .files
             .iter()
@@ -671,8 +713,8 @@ impl File {
                     if let Some((_, first)) = platforms.iter().find(|(of, _)| *of == platform) {
                         return Err(Error::PlatformTwice {
                             platform,
-                            first: first.place.clone(),
-                            second: place,
+                            first: first.place.start.clone(),
+                            second: place.start,
                         });
                     }
                     let body = document.body;
@@ -687,21 +729,24 @@ impl File {
             }
         }
 
-        if networks.is_empty() {
+        let Some((first, later)) = networks.split_first() else {
             return Err(Error::NoNetwork);
-        }
-        let written = laid(&networks, &keeps_null);
+        };
+        let layers = Layers { first, later };
+        let written = layers.laid(&keeps_null);
         // Read as laid first: a refusal of what is laid under a node or a link would name no
         // document that wrote it.
-        read_laid::<Network>(merge(Value::Null, &written), &networks, NETWORK)?;
-        let network: Network = read_laid(in_force(&written), &networks, NETWORK)?;
+        layers.read::<Network>(merge(Value::Null, &written), NETWORK)?;
+        let network: Network = layers.read(in_force(&written), NETWORK)?;
         network.check()?;
 
         let nodes: Vec<Name> = network.nodes.keys().cloned().collect();
-        let groups = if groups.is_empty() {
-            Groups::default()
-        } else {
-            read_laid::<Groups>(laid(&groups, &|_| false), &groups, GROUPS)?
+        let groups = match groups.split_first() {
+            None => Groups::default(),
+            Some((first, later)) => {
+                let layers = Layers { first, later };
+                layers.read::<Groups>(layers.laid(&|_| false), GROUPS)?
+            }
         }
         .resolve(&nodes)?;
 
@@ -886,20 +931,16 @@ mod tests {
             );
             err
         };
-        std::fs::write(
-            &path,
-            format!(
-                "{}---
-metrics: {{}}
-",
-                network("{}")
-            ),
-        )
-        .unwrap();
+        std::fs::write(&path, "slipmesh: {kind: patch, platform: talos}\n").unwrap();
         let err = named_once(File::open(&[&path]).unwrap_err());
-        let canonical = std::fs::canonicalize(&path).unwrap();
         assert!(
-            matches!(&err, Error::Block { start, source: BlockError::Missing } if start.file() == Some(canonical.as_path())),
+            matches!(&err, Error::Files { paths, source } if *paths == [path.clone()] && matches!(**source, Error::NoNetwork)),
+            "{err:?}"
+        );
+        std::fs::write(&path, format!("{}---\nmetrics: {{}}\n", network("{}"))).unwrap();
+        let err = named_once(File::open(&[&path]).unwrap_err());
+        assert!(
+            matches!(&err, Error::Block { start, source: BlockError::Missing } if start.file() == Some(path.as_path())),
             "{err:?}"
         );
         std::fs::remove_file(&path).unwrap();
@@ -1008,7 +1049,7 @@ metrics: {{}}
         let at = file_line(&documents, "a-b:");
         let refusal = refusal(&documents);
         assert!(
-            matches!(&refusal, Error::Laid { place, line, .. } if *place == Place::new(NETWORK, 1) && *line == at),
+            matches!(&refusal, Error::Laid { kind: NETWORK, at: key, .. } if key.file().is_none() && key.line() == at),
             "{refusal:?}"
         );
     }
@@ -1398,6 +1439,7 @@ metrics: {{}}
         assert_eq!(file.network().mesh.mtu, Some(1300));
     }
 
+    #[cfg(unix)]
     #[test]
     fn files_are_read_once_each_in_the_byte_order_of_their_canonical_paths() {
         let dir = tempfile::tempdir().unwrap();
@@ -1421,7 +1463,8 @@ metrics: {{}}
         assert_eq!(Sources::read(&inputs).unwrap().files().len(), 4);
         let file = File::open(&inputs).unwrap();
         assert_eq!(file.network().mesh.mtu, Some(1200));
-        assert!(file.platform(Platform::Talos).is_some());
+        let talos = file.platform(Platform::Talos).unwrap().place().start();
+        assert_eq!(talos.file(), Some(root.join("talos.yaml").as_path()));
     }
 
     #[test]
@@ -1494,6 +1537,7 @@ metrics: {{}}
     fn a_key_written_null_outside_those_blocks_is_the_key_left_out_in_any_layer() {
         for path in [
             &["routing", "bfd"][..],
+            &["routing", "bfd", "min_rx_ms"],
             &["routing", "direct_interfaces"],
             &["routing", "learn"],
             &["routing", "announce"],
@@ -1553,12 +1597,12 @@ metrics: {{}}
                 ),
                 4,
             ),
-            // An obfuscation that refuses the keys its reader passes over: the path stops there.
+            // An obfuscation that refuses the keys its reader passes over.
             (
                 format!(
                     "{network_block}mesh:\n  links:\n    a-b:\n      amneziawg:\n        obfuscation:\n          colour: 1\n"
                 ),
-                6,
+                7,
             ),
             // A required key missing: the path stops at what lacks it.
             (
@@ -1576,10 +1620,9 @@ metrics: {{}}
             std::fs::write(&base, network("{}")).unwrap();
             std::fs::write(&laid, &overlay).unwrap();
             let refusal = File::open(&[&base, &laid]).unwrap_err();
-            let laid = std::fs::canonicalize(&laid).unwrap();
             assert!(
-                matches!(&refusal, Error::Laid { place, line: at, .. }
-                    if place.start().file() == Some(laid.as_path()) && *at == line),
+                matches!(&refusal, Error::Laid { at, .. }
+                    if at.file() == Some(laid.as_path()) && at.line() == line),
                 "{overlay}: {refusal:?}"
             );
             assert!(
@@ -1587,6 +1630,99 @@ metrics: {{}}
                 "{refusal}"
             );
         }
+    }
+
+    #[test]
+    fn a_refusal_names_the_first_file_where_a_later_one_writes_beside_the_key() {
+        for (written, beside, key) in [
+            (
+                "{mesh: {links: {a-c: {amneziawg: {obfuscation: {colour: 1}}}}}}",
+                "{mesh: {links: {a-c: {amneziawg: {obfuscation: {jc: 5}}}}}}",
+                "colour: 1",
+            ),
+            (
+                "{mesh: {mtu: many}}",
+                "{mesh: {interface_prefix: wg-}}",
+                "mtu: many",
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (first, later) = (dir.path().join("0.yaml"), dir.path().join("1.yaml"));
+            let text = network(written);
+            std::fs::write(&first, &text).unwrap();
+            std::fs::write(&later, layer(beside)).unwrap();
+            let at = file_line(&[&text], key);
+            let refusal = File::open(&[&later, &first]).unwrap_err();
+            assert!(
+                matches!(&refusal, Error::Laid { at: key, .. }
+                    if key.file() == Some(first.as_path()) && key.line() == at),
+                "{written}: {refusal:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_required_key_written_null_is_refused_as_left_out() {
+        let text = network_edited(BLOCK, |tree| {
+            tree["nodes"]["node-a"]["platform"] = Value::Null
+        });
+        let documents = [text.as_str()];
+        let at = file_line(&documents, "node-a:");
+        let refusal = refusal(&documents);
+        assert!(
+            matches!(&refusal, Error::Laid { at: key, .. } if key.line() == at),
+            "{refusal:?}"
+        );
+    }
+
+    #[test]
+    fn two_keys_that_read_as_one_name_in_two_layers_are_refused() {
+        let node = "{platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}";
+        let first = network(&format!("{{nodes: {{1.0: {node}}}}}"));
+        let later = layer(&format!("{{nodes: {{1: {node}}}}}"));
+        let refusal = file(&[&first, &later]).unwrap_err();
+        let Error::Laid { source, .. } = &refusal else {
+            panic!("{refusal:?}");
+        };
+        let twice = super::super::NameError::Twice("1".to_owned()).to_string();
+        assert!(
+            std::error::Error::source(source)
+                .unwrap()
+                .to_string()
+                .contains(&twice),
+            "{refusal:?}"
+        );
+    }
+
+    #[test]
+    fn version_and_revision_are_checked_across_files_every_version_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let (older, newer) = (dir.path().join("a.yaml"), dir.path().join("b.yaml"));
+        std::fs::write(
+            &older,
+            network_edited("{kind: network, version: 2, revision: 0}", |_| {}),
+        )
+        .unwrap();
+        std::fs::write(
+            &newer,
+            network_edited("{kind: network, version: 3, revision: 1}", |_| {}),
+        )
+        .unwrap();
+        let refusal = File::open(&[&older, &newer]).unwrap_err();
+        assert!(
+            matches!(&refusal, Error::NewerVersion { place, version: 3 } if place.start().file() == Some(newer.as_path())),
+            "{refusal:?}"
+        );
+        assert!(
+            refusal.to_string().contains(&newer.display().to_string()),
+            "{refusal}"
+        );
+        std::fs::write(&newer, layer("{}")).unwrap();
+        let refusal = File::open(&[&older, &newer]).unwrap_err();
+        assert!(
+            matches!(&refusal, Error::OlderRevision { place, revision: 0 } if place.start().file() == Some(older.as_path())),
+            "{refusal:?}"
+        );
     }
 
     #[test]
@@ -1736,7 +1872,7 @@ metrics: {{}}
         let at = file_line(&documents, "colour: red");
         let refusal = refusal(&documents);
         assert!(
-            matches!(&refusal, Error::Laid { place, line, .. } if *place == Place::new(NETWORK, 1) && *line == at),
+            matches!(&refusal, Error::Laid { kind: NETWORK, at: key, .. } if key.file().is_none() && key.line() == at),
             "{refusal:?}"
         );
     }
@@ -1895,13 +2031,10 @@ metrics: {{}}
             "slipmesh: {kind: groups}\ncore: {include: [node-a], only: [node-b]}\n".to_owned(),
         ];
         let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
-        let at = (
-            place(GROUPS, &documents, 1),
-            file_line(&documents, "core: {include: [node-a], only: [node-b]}"),
-        );
+        let at = file_line(&documents, "core: {include: [node-a], only: [node-b]}");
         let refusal = refusal(&documents);
         assert!(
-            matches!(&refusal, Error::Laid { place, line, .. } if (place, *line) == (&at.0, at.1)),
+            matches!(&refusal, Error::Laid { kind: GROUPS, at: key, .. } if key.line() == at),
             "{refusal:?}"
         );
     }
@@ -2071,7 +2204,7 @@ metrics: {{}}
         let refusal = refusal(&documents);
         assert!(
             matches!(&refusal, Error::PlatformTwice { platform: Platform::Talos, first, second }
-                if (first, second) == (&places.0, &places.1)),
+                if (first, second) == (places.0.start(), places.1.start())),
             "{refusal:?}"
         );
     }

@@ -14,10 +14,11 @@ does.
 
 ## The files
 
-A network is written in one file or in [several](#several-files), which a tool takes with `--in`.
-A tool takes each file as plain text: a file kept encrypted is decrypted by whatever runs the tool,
-and the format knows nothing of how. The nodes' private keys are written in the clear, so the file
-that holds them is kept where such files are kept, and can be a file of its own.
+A network is written in one file, which a tool takes with `--config`, and may be laid from several
+`network` documents of it; [several files](#several-files) are **Planned**. A tool takes the file as
+plain text: a file kept encrypted is decrypted by whatever runs the tool, and the format knows
+nothing of how. The nodes' private keys are written in the clear, so the file that holds them is
+kept where such files are kept; with several files it could be a file of its own.
 
 People write the documents. Only [`slipmesh`](../README.md#slipmesh) writes values into them - the
 keys nobody can derive, and reference values - and it checks the files as a whole. Every other
@@ -64,7 +65,7 @@ error; one that holds nothing - empty, only comments, or `~` - is skipped.
 
 ### Several files
 
-A tool takes its files with `--in`, which takes several values and may be repeated:
+**Planned:** a tool takes its files with `--in`, which takes several values and may be repeated:
 `--in cfg/*.yaml` reads every such file of the directory. A command that writes also reads the file
 of its [`--edit`](#what-slipmesh-writes). Every path is first brought to its canonical form, and
 the files are read sorted by those paths, byte by byte. Neither the order on the command line nor
@@ -101,11 +102,11 @@ other.
 
 It is used in three places:
 
-- **Between documents, with [several files](#several-files):** the `network` documents in order
-  over an empty tree, and the `groups` documents likewise, so a `null` in any of them, the first
-  included, means the key is absent, but for the two cases below. Inside a node's `routing` and a
-  link's block of its type, a `null` is kept as a value from one document to the next, and a
-  `null` at the block itself removes the block with every `null` in it.
+- **Between [documents](#several-files):** the `network` documents in order over an empty tree,
+  and the `groups` documents likewise, so a `null` in any of them, the first included, means the
+  key is absent, but for the two cases below. Inside a node's `routing` and a link's block of its
+  type, a `null` is kept as a value from one document to the next, and a `null` at the block itself
+  removes the block with every `null` in it.
 - **For a node:** `nodes.<name>.routing` over [`routing`](#routing), by
   [the same path](#a-nodes-routing). A `null` at one of its keys takes the network's value away
   for that node.
@@ -878,9 +879,10 @@ no links, which has no interface to give it to.
 
 Named sets of nodes, for documents to be [aimed at](#aiming-a-document-at-nodes). They are not the
 architecture of the mesh but what other documents name, so they can be written beside those
-documents, in the same file or in their own. The block of a `groups` document takes `kind` and
-`order` alone. Several are [laid over each other](#several-files) into one set of groups. The loader
-turns a group into its nodes, so every tool understands it; a group configures nothing by itself.
+documents, in the same file or, once several files are read, in their own. The block of a `groups`
+document takes `kind` and `order` alone. Several are [laid over each other](#several-files) into
+one set of groups. The loader turns a group into its nodes, so every tool understands it; a group
+configures nothing by itself.
 
 ```yaml
 slipmesh:
@@ -1085,7 +1087,8 @@ mesh as computed.
   patches, and two groups: `workers`, which one patch is aimed with, and `core`, which `workers` is
   made of.
 
-The three hold no Planned part, since a file with one is refused. One link has a header, a timer
+**Planned:** a tool takes the three with `--in`; until then they are given as one file, their
+documents in that order. The three hold no Planned part, since a file with one is refused. One link has a header, a timer
 and its [keepalive](#keepalive) written as ranges.
 
 Their networks and addresses are from the ranges reserved for documentation, but for the

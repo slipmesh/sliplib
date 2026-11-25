@@ -13,7 +13,7 @@ pub enum Step {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("`{path}`")]
+#[error("{}", shown(path))]
 pub struct Refused {
     path: serde_path_to_error::Path,
     #[source]
@@ -34,6 +34,13 @@ impl Refused {
     }
 }
 
+fn shown(path: &serde_path_to_error::Path) -> String {
+    match path.iter().next() {
+        None => "its top level".to_owned(),
+        Some(_) => format!("`{path}`"),
+    }
+}
+
 /// For a value laid from several texts, which has no line of its own.
 pub fn from_value_at<T: DeserializeOwned>(value: Value) -> Result<T, Refused> {
     serde_path_to_error::deserialize(value).map_err(|refused| Refused {
@@ -42,15 +49,21 @@ pub fn from_value_at<T: DeserializeOwned>(value: Value) -> Result<T, Refused> {
     })
 }
 
-/// The last layer holding, not `null`, the deepest part of `path` any layer holds, and how many
-/// steps that part is.
-pub fn written_by(layers: &[&Value], path: &[Step]) -> Option<(usize, usize)> {
-    (0..=path.len()).rev().find_map(|depth| {
-        layers
-            .iter()
-            .rposition(|layer| at(layer, &path[..depth]).is_some_and(|value| !value.is_null()))
-            .map(|layer| (layer, depth))
-    })
+/// Of `first` and the `later` layers, by position, the last holding, not `null`, the deepest part
+/// of `path` any of them holds, and how many steps that part is. The top is every layer's.
+pub fn written_by(first: &Value, later: &[&Value], path: &[Step]) -> (usize, usize) {
+    let layers: Vec<&Value> = std::iter::once(first)
+        .chain(later.iter().copied())
+        .collect();
+    (1..=path.len())
+        .rev()
+        .find_map(|depth| {
+            layers
+                .iter()
+                .rposition(|layer| at(layer, &path[..depth]).is_some_and(|value| !value.is_null()))
+                .map(|layer| (layer, depth))
+        })
+        .unwrap_or((later.len(), 0))
 }
 
 fn at<'a>(value: &'a Value, path: &[Step]) -> Option<&'a Value> {
@@ -156,6 +169,7 @@ impl Key<'_> {
 impl<'de> DeserializeSeed<'de> for Key<'_> {
     type Value = bool;
 
+    // Not read into a `Value`: the line is the parser's only while the key is being read.
     fn deserialize<D: Deserializer<'de>>(self, key: D) -> Result<bool, D::Error> {
         key.deserialize_any(self)
     }
@@ -180,7 +194,25 @@ impl<'de> Visitor<'de> for Key<'_> {
         self.found(key.into())
     }
 
+    fn visit_f64<E: serde::de::Error>(self, key: f64) -> Result<bool, E> {
+        self.found(key.into())
+    }
+
     fn visit_bool<E: serde::de::Error>(self, key: bool) -> Result<bool, E> {
         self.found(key.into())
+    }
+
+    fn visit_unit<E: serde::de::Error>(self) -> Result<bool, E> {
+        Ok(false)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut items: A) -> Result<bool, A::Error> {
+        while items.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(false)
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut entries: A) -> Result<bool, A::Error> {
+        while entries.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(false)
     }
 }

@@ -7,7 +7,7 @@ use crate::router::{
     BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER, InterfacePattern,
 };
 use crate::{Obfuscation, Prefix4, Prefix6, Range};
-use serde::{Deserialize, Deserializer, de};
+use serde::{Deserialize, Deserializer};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32};
@@ -461,27 +461,13 @@ impl TryFrom<LinkKeys> for Link {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum ObfuscationError {
-    #[error("`obfuscation` has no key `{0}` - take it out, or correct its name")]
-    UnknownKey(String),
-}
-
 /// Refusing an unknown key, which a daemon passes over.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StrictObfuscation(pub Obfuscation);
 
 impl<'de> Deserialize<'de> for StrictObfuscation {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut unknown = None;
-        let obfuscation = serde_ignored::deserialize(deserializer, |key| {
-            unknown.get_or_insert_with(|| key.to_string());
-        })?;
-        match unknown {
-            Some(key) => Err(de::Error::custom(ObfuscationError::UnknownKey(key))),
-            None => Ok(Self(obfuscation)),
-        }
+        sliplib_yaml::strict(deserializer).map(Self)
     }
 }
 
@@ -826,8 +812,7 @@ mod tests {
     fn a_key_the_obfuscation_does_not_have_is_refused_naming_it() {
         assert!(obfuscation("{jc: 4}").is_ok());
         let refused = obfuscation("{jc: 4, color: red}").unwrap_err();
-        let refusal = ObfuscationError::UnknownKey("color".to_owned()).to_string();
-        assert!(refused.contains(&refusal), "{refused}");
+        assert!(refused.contains("`color`"), "{refused}");
     }
 
     #[test]

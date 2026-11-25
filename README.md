@@ -180,6 +180,7 @@ types; `sliplib-fs` writes it. What the documents mean is the caller's.
   `Document::line_at` the line of a path in a document's text.
 - `Error`: what each of them refuses, naming the file or the document's line.
 - `Without`: a mapping as a type with some keys passed over, an unknown key's error naming its line.
+  `strict`: a struct read refusing a key it has no field for, the refusal's path reaching the key.
 - `Value`, `Mapping`, `from_str`, `from_value`, `to_string` and `to_value`, re-exported from
   `yaml_serde`.
 
@@ -200,7 +201,8 @@ chain prints the whole message, each part once.
     paths, `read` of `Sources`, `parse` of one text) refuses what its specification has the loader
     refuse, as `v2::Error`; a file of version 1 as `VersionOne`, naming the conversion document. A
     refusal of a document names its file and line; one of the network or the groups as laid
-    (`Laid`) names the last document that wrote the key, and the key's line there.
+    (`Laid`) names the key's line in the last document that wrote it, or, where the refusal is of a
+    mapping as a whole, the mapping's; one about no document (`Files`) names the files read.
   - `network()` gives what is in force under each node's `routing` and in each link's block.
   - A node gives its `underlay` and `private_key`; a `Link` whether a node is an end (`has_end`)
     and the `other_end`; a `LinkKind` its `port`, `obfuscation` (empty

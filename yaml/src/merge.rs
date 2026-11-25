@@ -21,7 +21,7 @@ fn lay<'a>(
     };
     let mut merged = match base {
         Value::Mapping(mapping) => mapping,
-        // Over anything else a mapping starts empty, so its nulls neither delete nor stay.
+        // Over anything else a mapping starts empty, with nothing for a `null` to remove.
         _ => Mapping::new(),
     };
     for (key, value) in overlay {

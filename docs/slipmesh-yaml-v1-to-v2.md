@@ -13,8 +13,8 @@ In general:
   `cluster`, `bfd`, `obfuscation`, `nodes` and `mesh`.
 - What is named is a mapping by name: nodes, links, groups, a node's underlay entries, route
   classes. Version 1 held nodes and links in lists, and a link had no name.
-- The network may be written in several files, laid over each other by one rule. Version 1 read
-  one file.
+- The network may be written in several `network` documents, laid over each other by one rule;
+  **Planned:** in several files. Version 1 read one file and one network document.
 - A document may set its place among the others with `order`, which ranks before everything else.
   In version 1 a document had the place it stood in.
 - The format says its `version` and `revision`.
@@ -210,8 +210,8 @@ comes from the conversion.
        other platforms, take a node of another platform out of its `include`, and delete the
        `mikrotik` document.
    14. Where several documents name the same set of nodes, a group in a `groups` document may name
-       it once. Where the keys or the obfuscation should be kept apart, move them into a file of
-       their own, laid over the rest:
+       it once. **Planned:** where the keys or the obfuscation should be kept apart, move them into
+       a file of their own, laid over the rest, once several files are read:
        `nodes.<name>.wireguard` and `mesh.links.<name>.amneziawg.obfuscation` keep their paths
        there.
 

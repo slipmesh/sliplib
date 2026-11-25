@@ -11,5 +11,5 @@ pub use error::Error;
 pub use file::read;
 pub use laid::{Refused, Step, from_value_at, written_by};
 pub use merge::{merge, merge_keeping};
-pub use multidoc::{Document, MultiDoc, Without, join};
+pub use multidoc::{Document, MultiDoc, Without, join, strict};
 pub use yaml_serde::{Mapping, Value, from_str, from_value, to_string, to_value};
