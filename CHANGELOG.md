@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.24.0] - 2026-11-25
+
+### Breaking changes 💥
+
+- Lay the network and the groups from several documents (#93)
+- Read the files with --in and write into --edit (#94)
+
 ## [0.23.0] - 2026-11-23
 
 ### Breaking changes 💥
