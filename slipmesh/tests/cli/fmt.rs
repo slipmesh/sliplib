@@ -162,12 +162,13 @@ fn fmt_leaves_files_already_in_that_form_untouched_and_says_so() {
 }
 
 #[test]
-fn fmt_refuses_files_the_loader_refuses_for_its_reason_and_names_no_key() {
+fn fmt_refuses_a_block_the_loader_refuses_for_its_reason_and_names_no_key() {
     let key = PrivateKey::generate();
     let content = by_hand(key.expose()).replace(
-        "  interface_prefix: mesh-\n",
-        "  interface_prefix: mesh-\n  no_such_setting: 1\n",
+        "slipmesh: {kind: network, version: 2, revision: 1}",
+        "slipmesh: {kind: network, version: 2, revision: 1, no_such_setting: 1}",
     );
+    assert!(content.contains("no_such_setting"));
     let config = Config::holding(&content);
     let ran = config.run(&["fmt"]);
     assert_eq!(ran.code, Some(1));

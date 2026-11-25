@@ -19,22 +19,24 @@ the tag for all of them; for a consumer of another crate that update changes not
 
 ## `slipmesh`
 
-`slipmesh` works on `slipmesh.yaml` whatever platform its nodes run, and is the one tool that
-writes into it: the tools that configure a node only read the file. It takes the file as plain
-text: a file kept encrypted is decrypted by whatever runs the tool. It reads [format version
-2](docs/slipmesh-yaml.md), in one file given with `--config`, and refuses a file of version 1,
-which [the conversion document](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand) turns
-into version 2.
+`slipmesh` works on the files of `slipmesh.yaml` whatever platform its nodes run, and is the one
+tool that writes into them: the tools that configure a node only read them. It takes each file as
+plain text: a file kept encrypted is decrypted by whatever runs the tool. It reads [format version
+2](docs/slipmesh-yaml.md), in one file or [several](docs/slipmesh-yaml.md#several-files), and
+refuses a file of version 1, which [the conversion
+document](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand) turns into version 2.
 
 ```bash
-slipmesh check --config slipmesh.yaml
-slipmesh mint --config slipmesh.yaml
-slipmesh fmt --config slipmesh.yaml
-slipmesh rekey --node node-a --config slipmesh.yaml
+slipmesh check --in mesh.yaml secrets.yaml talos.yaml
+slipmesh mint --in mesh.yaml talos.yaml --edit secrets.yaml
+slipmesh fmt mesh.yaml secrets.yaml talos.yaml
+slipmesh rekey --node node-a --in mesh.yaml talos.yaml --edit secrets.yaml
 ```
 
-`--config` is `slipmesh.yaml` of the working directory unless given. A command that writes
-replaces the file in place.
+`--in` takes several files and may be repeated. A command that writes reads the file of `--edit`
+too, given in `--in` or not, and writes into it alone, replacing it in place; one that is not there
+yet is created, holding one `network` document. It refuses an `--edit` file that does not hold
+exactly one `network` document, and a change to a value another file holds, naming that file.
 
 Writing anything rewrites the whole file from its values, in the layout of the YAML serializer.
 Comments outside block scalars are not kept; a document that holds nothing - only comments, empty,
@@ -44,7 +46,7 @@ A command with nothing to write leaves the file as it is.
 
 ### `check`
 
-`check` reads the whole file through the loader every tool reads it with, then computes every
+`check` reads the files through the loader every tool reads them with, then computes every
 node's `awg` and `router` configs and checks each the way its node would. It prints `<node>: ok`
 for a node that passes and, for one that does not, the first thing that refuses it on a line of
 its own. It goes through every node whatever the others gave, and exits 1 when anything was
@@ -100,13 +102,14 @@ The file holds private keys in the clear; keep it where such files are kept.
 
 ### `fmt`
 
-`fmt` rewrites the file in the form every writing command leaves it in and changes no value: it
-reads the text it is about to write and refuses to write it if any document's values differ from
-the file's. What a hand-written file loses is its layout, its comments outside block scalars, its
-documents that hold nothing - only comments, empty, or `~` - and the link between an anchor and its
-aliases, each of which becomes a copy. Committed on its own, that rewrite keeps a later `mint` or
-`rekey` down to the lines it edits. A file already in that form is not touched, and one that does
-not read is refused as it is. One line says whether the file was rewritten.
+`fmt` rewrites each file it is given in the form every writing command leaves it in and changes no
+value, laying nothing over anything: it reads the text it is about to write and refuses to write it
+if any document's values differ from the file's. What a hand-written file loses is its layout, its
+comments outside block scalars, its documents that hold nothing - only comments, empty, or `~` -
+and the link between an anchor and its aliases, each of which becomes a copy. Committed on its own,
+that rewrite keeps a later `mint` or `rekey` down to the lines it edits. A file already in that
+form is not touched. One whose blocks do not read, or of another version or revision, is refused as
+it is, and then no file is written. One line says whether each file was rewritten.
 
 ### `rekey`
 
@@ -197,13 +200,16 @@ chain prints the whole message, each part once.
 
 - `v2`: [format version 2](docs/slipmesh-yaml.md).
   - `Sources::read` reads files as [several files](docs/slipmesh-yaml.md#several-files) are
-    read: each once, by its canonical path, in the byte order of those paths. `File` (`open` of
+    read: each once, by its canonical path, in the byte order of those paths, an `edit` file among
+    them read as empty and `is_new` where it is not there yet. `check_blocks` refuses what a file
+    is refused for alone: a block, a version or a revision. `File` (`open` of
     paths, `read` of `Sources`, `parse` of one text) refuses what its specification has the loader
     refuse, as `v2::Error`; a file of version 1 as `VersionOne`, naming the conversion document. A
     refusal of a document names its file and line; one of the network or the groups as laid
     (`Laid`) names the key's line in the last document that wrote it, or, where the refusal is of a
     mapping as a whole, the mapping's; one about no document (`Files`) names the files read.
-  - `network()` gives what is in force under each node's `routing` and in each link's block.
+  - `network()` gives what is in force under each node's `routing` and in each link's block;
+    `laid()` the `network` documents laid over each other, for a write.
   - A node gives its `underlay` and `private_key`; a `Link` whether a node is an end (`has_end`)
     and the `other_end`; a `LinkKind` its `port`, `obfuscation` (empty
     on `wireguard`) and `persistent_keepalive`.

@@ -16,7 +16,7 @@ pub use block::{
 pub use check::Invalid;
 pub use file::{
     Aim, AimedDocument, BlockError, DocumentId, Error, File, META_KEY, Place, PlatformDocument,
-    REVISION, SourceFile, Sources, Start, VERSION,
+    REVISION, SourceFile, Sources, Start, VERSION, check_blocks,
 };
 pub(crate) use name::is_name_character;
 pub use name::{ClassName, Name, NameError};

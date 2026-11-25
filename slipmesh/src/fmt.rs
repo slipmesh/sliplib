@@ -1,33 +1,42 @@
-//! `fmt`: the file in the form every write leaves it, no value changed, so a later edit shows
+//! `fmt`: each file in the form every write leaves it, no value changed, so a later edit shows
 //! alone.
 
-use crate::file::{parse_slipmesh, read_text, write_text};
-use anyhow::Result;
+use anyhow::{Context, Result};
+use sliplib_config::v2::{Sources, check_blocks};
 use sliplib_yaml::MultiDoc;
-use std::path::Path;
+use std::path::PathBuf;
 
 fn holds_the_values_of(rewritten: &str, original: &MultiDoc) -> Result<bool> {
     let rewritten = MultiDoc::parse(rewritten)?;
     Ok(rewritten.values() == original.values())
 }
 
-pub fn run(config_path: &Path) -> Result<()> {
-    let original = read_text(config_path)?;
-    let (sources, _) = parse_slipmesh(config_path, &original)?;
-    let yaml = sources.files()[0].yaml();
-    let rewritten = yaml.text()?;
-    let path = config_path.display();
-    if rewritten == original {
-        println!("{path}: already in the form slipmesh writes");
-        return Ok(());
+/// Each file alone, laying nothing: none is written unless every one may be.
+pub fn run(paths: &[PathBuf]) -> Result<()> {
+    let mut rewrites = Vec::new();
+    for path in paths {
+        let original =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let sources = Sources::read(&[path], None)?;
+        check_blocks(&sources)?;
+        let yaml = sources.files()[0].yaml();
+        let rewritten = yaml.text()?;
+        // Its one promise, checked on the text written.
+        anyhow::ensure!(
+            holds_the_values_of(&rewritten, yaml)?,
+            "{}: rewriting it would change a value - not written",
+            path.display()
+        );
+        rewrites.push((path, rewritten == original, rewritten));
     }
-    // Its one promise, checked on the text written.
-    anyhow::ensure!(
-        holds_the_values_of(&rewritten, yaml)?,
-        "{path}: rewriting it would change a value - not written"
-    );
-    write_text(config_path, &rewritten)?;
-    println!("rewrote {path} in the form slipmesh writes");
+    for (path, unchanged, rewritten) in rewrites {
+        if unchanged {
+            println!("{}: already in the form slipmesh writes", path.display());
+        } else {
+            sliplib_fs::replace_file(path, &rewritten)?;
+            println!("rewrote {} in the form slipmesh writes", path.display());
+        }
+    }
     Ok(())
 }
 

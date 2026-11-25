@@ -1,7 +1,7 @@
 //! The one tool that writes `slipmesh.yaml`. Plain text to it: encryption is the caller's.
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -17,47 +17,59 @@ mod rekey;
     name = env!("CARGO_BIN_NAME"),
     bin_name = env!("CARGO_BIN_NAME"),
     version,
-    about = "Checks slipmesh.yaml and writes what it lacks"
+    about = "Checks the files of slipmesh.yaml and writes what they lack"
 )]
 struct Cli {
     #[command(subcommand)]
     command: Command,
 }
 
+/// What a write reads, and the one file it writes into.
+#[derive(Args)]
+struct Edit {
+    /// Read; may be repeated.
+    #[arg(long = "in", num_args = 1..)]
+    inputs: Vec<PathBuf>,
+    /// Read too, and the one file written; created with one network document if not there.
+    #[arg(long)]
+    edit: PathBuf,
+}
+
 #[derive(Subcommand)]
 enum Command {
-    /// Check the whole file and every node's configs, writing nothing.
+    /// Check the files as a whole and every node's configs, writing nothing.
     Check {
-        #[arg(long, default_value = "slipmesh.yaml")]
-        config: PathBuf,
+        /// Read; may be repeated.
+        #[arg(long = "in", num_args = 1.., required = true)]
+        inputs: Vec<PathBuf>,
     },
-    /// Write the secrets slipmesh.yaml lacks into it, and mesh.interface_prefix's reference value
-    /// where it leaves it out.
+    /// Write the secrets the files lack, and mesh.interface_prefix's reference value where they
+    /// leave it out.
     Mint {
-        #[arg(long, default_value = "slipmesh.yaml")]
-        config: PathBuf,
+        #[command(flatten)]
+        files: Edit,
     },
-    /// Rewrite slipmesh.yaml in the form this tool writes it, changing no value.
+    /// Rewrite each file in the form this tool writes it, changing no value.
     Fmt {
-        #[arg(long, default_value = "slipmesh.yaml")]
-        config: PathBuf,
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
     },
-    /// Replace one node's mesh key in slipmesh.yaml with a new one.
+    /// Replace one node's mesh key with a new one.
     Rekey {
-        /// The node, by its name in the network document.
+        /// The node, by its name in the network.
         #[arg(long)]
         node: String,
-        #[arg(long, default_value = "slipmesh.yaml")]
-        config: PathBuf,
+        #[command(flatten)]
+        files: Edit,
     },
 }
 
 fn main() -> Result<ExitCode> {
     match Cli::parse().command {
-        Command::Check { config } => return Ok(check::run(&config)),
-        Command::Mint { config } => mint::run(&config)?,
-        Command::Fmt { config } => fmt::run(&config)?,
-        Command::Rekey { node, config } => rekey::run(&node, &config)?,
+        Command::Check { inputs } => return Ok(check::run(&inputs)),
+        Command::Mint { files } => mint::run(&files.inputs, &files.edit)?,
+        Command::Fmt { files } => fmt::run(&files)?,
+        Command::Rekey { node, files } => rekey::run(&node, &files.inputs, &files.edit)?,
     }
     Ok(ExitCode::SUCCESS)
 }

@@ -188,9 +188,20 @@ fn shown(paths: &[PathBuf]) -> String {
 pub struct SourceFile {
     path: Option<Arc<Path>>,
     yaml: MultiDoc,
+    new: bool,
 }
 
 impl SourceFile {
+    /// As given; none for a text given as it is.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    /// An `edit` file not there yet, read as empty.
+    pub fn is_new(&self) -> bool {
+        self.new
+    }
+
     pub fn yaml(&self) -> &MultiDoc {
         &self.yaml
     }
@@ -202,48 +213,121 @@ impl SourceFile {
 
 pub struct Sources {
     files: Vec<SourceFile>,
+    edit: Option<usize>,
+}
+
+/// A file as given, by its canonical path.
+struct Given<'a> {
+    canonical: PathBuf,
+    path: &'a Path,
+    edit: bool,
+    new: bool,
+}
+
+fn canonical(path: &Path) -> Result<PathBuf, Error> {
+    std::fs::canonicalize(path).map_err(|source| Error::Reading {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+/// One not there yet stands where its directory is.
+fn given_edit(path: &Path) -> Result<Given<'_>, Error> {
+    let (canonical, new) =
+        match std::fs::canonicalize(path) {
+            Ok(canonical) => (canonical, false),
+            Err(missing) if missing.kind() == std::io::ErrorKind::NotFound => {
+                let directory = path
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty());
+                let directory = std::fs::canonicalize(directory.unwrap_or(Path::new(".")))
+                    .map_err(|source| Error::Reading {
+                        path: path.to_owned(),
+                        source,
+                    })?;
+                (directory.join(path.file_name().unwrap_or_default()), true)
+            }
+            Err(source) => {
+                return Err(Error::Reading {
+                    path: path.to_owned(),
+                    source,
+                });
+            }
+        };
+    Ok(Given {
+        canonical,
+        path,
+        edit: true,
+        new,
+    })
 }
 
 impl Sources {
-    /// Each file once, whatever the path it is reached by, in the byte order of the canonical paths.
-    pub fn read<P: AsRef<Path>>(inputs: &[P]) -> Result<Self, Error> {
-        let mut paths = inputs
+    /// Each file once, whatever the path it is reached by, in the byte order of the canonical paths;
+    /// `edit` among them, read too if it is there.
+    pub fn read<P: AsRef<Path>>(inputs: &[P], edit: Option<&Path>) -> Result<Self, Error> {
+        let mut given = inputs
             .iter()
             .map(|input| {
-                let input = input.as_ref();
-                let canonical = std::fs::canonicalize(input).map_err(|source| Error::Reading {
-                    path: input.to_owned(),
-                    source,
-                })?;
-                Ok((canonical, input))
+                let path = input.as_ref();
+                Ok(Given {
+                    canonical: canonical(path)?,
+                    path,
+                    edit: false,
+                    new: false,
+                })
             })
-            .collect::<Result<Vec<(PathBuf, &Path)>, Error>>()?;
+            .collect::<Result<Vec<Given>, Error>>()?;
+        if let Some(edit) = edit {
+            given.push(given_edit(edit)?);
+        }
         // `Path` compares by components, so `a/b` would come before `a-b`. Stable, so a file is
         // named as it was first given.
-        paths.sort_by(|(a, _), (b, _)| {
-            a.as_os_str()
+        given.sort_by(|a, b| {
+            a.canonical
+                .as_os_str()
                 .as_encoded_bytes()
-                .cmp(b.as_os_str().as_encoded_bytes())
+                .cmp(b.canonical.as_os_str().as_encoded_bytes())
         });
-        paths.dedup_by(|(a, _), (b, _)| a == b);
-        let files = paths
+        given.dedup_by(|later, first| {
+            let same = later.canonical == first.canonical;
+            first.edit |= same && later.edit;
+            same
+        });
+        let edit = given.iter().position(|file| file.edit);
+        let files = given
             .into_iter()
-            .map(|(_, given)| {
-                let yaml = MultiDoc::read(given).map_err(|source| Error::Yaml(source.into()))?;
+            .map(|file| {
+                let yaml = match file.new {
+                    true => MultiDoc::parse(""),
+                    false => MultiDoc::read(file.path),
+                }
+                .map_err(|source| Error::Yaml(source.into()))?;
                 Ok(SourceFile {
-                    path: Some(given.into()),
+                    path: Some(file.path.into()),
                     yaml,
+                    new: file.new,
                 })
             })
             .collect::<Result<_, Error>>()?;
-        Ok(Self { files })
+        Ok(Self { files, edit })
+    }
+
+    /// Its position in [`Sources::files`].
+    pub fn edit(&self) -> Option<usize> {
+        self.edit
     }
 
     /// One text, of no file.
     pub fn parse(text: &str) -> Result<Self, Error> {
         let yaml = MultiDoc::parse(text).map_err(|source| Error::Yaml(source.into()))?;
         Ok(Self {
-            files: vec![SourceFile { path: None, yaml }],
+            files: vec![SourceFile {
+                path: None,
+                yaml,
+                new: false,
+            }],
+            edit: None,
         })
     }
 
@@ -627,8 +711,36 @@ fn reaching<'a>(documents: &'a [AimedDocument], node: &str) -> Vec<&'a AimedDocu
     reaching
 }
 
+/// Every document's block, after the version and revision of every `network` document.
+fn blocks(sources: &Sources) -> Result<Vec<Read>, Error> {
+    let raw: Vec<Raw> = sources
+        .files
+        .iter()
+        .enumerate()
+        .flat_map(|(file, source)| {
+            source.yaml.documents().iter().map(move |document| Raw {
+                id: DocumentId {
+                    file,
+                    document: document.index,
+                },
+                file: &source.path,
+                document,
+            })
+        })
+        .collect();
+    generation(&raw)?;
+    raw.iter().map(Read::block).collect()
+}
+
+/// What a file of the format is refused for alone, with nothing laid: a block that does not read,
+/// another version or revision.
+pub fn check_blocks(sources: &Sources) -> Result<(), Error> {
+    blocks(sources).map(|_| ())
+}
+
 pub struct File {
     network: Network,
+    laid: Value,
     network_documents: Vec<DocumentId>,
     platforms: Vec<(Platform, PlatformDocument)>,
     templates: Vec<AimedDocument>,
@@ -653,7 +765,7 @@ impl File {
 
     /// As [`Sources::read`] reads them.
     pub fn open<P: AsRef<Path>>(inputs: &[P]) -> Result<Self, Error> {
-        Self::read(&Sources::read(inputs)?)
+        Self::read(&Sources::read(inputs, None)?)
     }
 
     /// A refusal about no document in particular names the files read.
@@ -677,26 +789,7 @@ impl File {
     }
 
     fn read_documents(sources: &Sources) -> Result<Self, Error> {
-        let raw: Vec<Raw> = sources
-            .files
-            .iter()
-            .enumerate()
-            .flat_map(|(file, source)| {
-                source.yaml.documents().iter().map(move |document| Raw {
-                    id: DocumentId {
-                        file,
-                        document: document.index,
-                    },
-                    file: &source.path,
-                    document,
-                })
-            })
-            .collect();
-        generation(&raw)?;
-        let mut documents = raw
-            .iter()
-            .map(Read::block)
-            .collect::<Result<Vec<Read>, Error>>()?;
+        let mut documents = blocks(sources)?;
         // Stable: documents of one `order` keep the order they were read in.
         documents.sort_by_key(|document| document.block.order());
 
@@ -764,6 +857,7 @@ impl File {
         }
         Ok(Self {
             network,
+            laid: written,
             network_documents: networks.iter().map(|layer| layer.id).collect(),
             platforms,
             templates,
@@ -774,6 +868,12 @@ impl File {
     /// What is in force under each node's `routing` and in each link's block.
     pub fn network(&self) -> &Network {
         &self.network
+    }
+
+    /// The `network` documents laid over each other, a `null` kept inside a node's `routing` and a
+    /// link's block, for a write to go by.
+    pub fn laid(&self) -> &Value {
+        &self.laid
     }
 
     /// In the order they are laid, for a write.
@@ -1460,11 +1560,79 @@ mod tests {
             root.join("link.yaml"),
             root.join("0-mesh.yaml"),
         ];
-        assert_eq!(Sources::read(&inputs).unwrap().files().len(), 4);
+        assert_eq!(Sources::read(&inputs, None).unwrap().files().len(), 4);
         let file = File::open(&inputs).unwrap();
         assert_eq!(file.network().mesh.mtu, Some(1200));
         let talos = file.platform(Platform::Talos).unwrap().place().start();
         assert_eq!(talos.file(), Some(root.join("talos.yaml").as_path()));
+    }
+
+    #[test]
+    fn an_edit_file_is_read_once_among_the_others_and_one_not_there_yet_as_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, c) = (dir.path().join("a.yaml"), dir.path().join("c.yaml"));
+        std::fs::write(&a, network("{}")).unwrap();
+        std::fs::write(&c, layer("{}")).unwrap();
+        let new = dir.path().join("./b.yaml");
+        let sources = Sources::read(&[&a, &c], Some(&new)).unwrap();
+        assert_eq!(sources.edit(), Some(1));
+        let edit = &sources.files()[1];
+        assert!(edit.is_new() && edit.yaml().documents().is_empty());
+        assert_eq!(edit.path(), Some(new.as_path()));
+        assert!(!sources.files()[0].is_new());
+        let given = dir.path().join("x/../c.yaml");
+        std::fs::create_dir(dir.path().join("x")).unwrap();
+        let sources = Sources::read(&[&a, &c], Some(&given)).unwrap();
+        assert_eq!((sources.files().len(), sources.edit()), (2, Some(1)));
+        assert!(!sources.files()[1].is_new());
+        assert_eq!(Sources::read(&[&c], Some(&a)).unwrap().edit(), Some(0));
+        assert_eq!(Sources::read(&[&a], None).unwrap().edit(), None);
+        // Under a directory that is not there, or under a file.
+        for nowhere in [dir.path().join("no/such.yaml"), a.join("such.yaml")] {
+            assert!(
+                matches!(
+                    Sources::read(&[&a], Some(&nowhere)),
+                    Err(Error::Reading { ref path, .. }) if *path == nowhere
+                ),
+                "{nowhere:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_documents_of_a_file_are_checked_alone_with_nothing_laid() {
+        let secrets = Sources::parse(&layer("{nodes: {node-a: {wireguard: {}}}}")).unwrap();
+        check_blocks(&secrets).unwrap();
+        assert!(File::read(&secrets).is_err());
+        let version_one = Sources::parse("slipmesh: {kind: network}\n").unwrap();
+        assert!(matches!(
+            check_blocks(&version_one),
+            Err(Error::VersionOne { .. })
+        ));
+        let blockless = Sources::parse("nodes: {}\n").unwrap();
+        assert!(matches!(
+            check_blocks(&blockless),
+            Err(Error::Block {
+                source: BlockError::Missing,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn the_laid_network_keeps_a_null_inside_a_block_for_a_write() {
+        let layers = [
+            network("{}"),
+            layer("{nodes: {node-b: {routing: {learn: null}}}}"),
+        ];
+        let layers: Vec<&str> = layers.iter().map(String::as_str).collect();
+        let file = file(&layers).unwrap();
+        assert!(file.laid()["nodes"]["node-b"]["routing"]["learn"].is_null());
+        assert!(
+            file.laid()["nodes"]["node-b"]["routing"]
+                .get("learn")
+                .is_some()
+        );
     }
 
     #[test]

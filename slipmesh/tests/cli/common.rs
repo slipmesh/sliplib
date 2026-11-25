@@ -46,11 +46,16 @@ impl Config {
         MultiDoc::parse(&self.text()).unwrap().values()
     }
 
-    /// The path given last.
+    /// The path given last: read by `check`, written by `mint` and `rekey`, rewritten by `fmt`.
     pub fn run(&self, command: &[&str]) -> Ran {
+        let flag = match command[0] {
+            "check" => &["--in"][..],
+            "fmt" => &[],
+            _ => &["--edit"],
+        };
         slipmesh()
             .args(command)
-            .arg("--config")
+            .args(flag)
             .arg(&self.path)
             .output()
             .unwrap()

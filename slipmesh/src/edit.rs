@@ -1,28 +1,49 @@
-//! Every edit to `slipmesh.yaml`. Only what a run generated is written, never a field copied down
-//! from the link's type. Written back from values, the file keeps no comments.
+//! Every edit a command makes. Only what a run generated is written, never a field copied down from
+//! the link's type. Written back from values, the file keeps no comments.
 
+use crate::file::Edit;
 use anyhow::{Context, Result};
-use sliplib_config::Obfuscation;
+use sliplib_config::v2::Name;
 use sliplib_config::v2::network::InterfacePrefix;
-use sliplib_config::v2::{File, Name, Sources};
 use sliplib_mesh::mint::Minted;
 use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{Mapping, Value};
 
-/// Into the `sources` `files` were read from; `minted` names nodes and links by position.
-pub fn record(sources: &mut Sources, files: &File, minted: &Minted) -> Result<()> {
-    let network = files.network();
-    for (node, key) in &minted.node_keys {
-        let (name, _) = network
-            .nodes
-            .get_index(*node)
-            .context("no node at that position")?;
-        set_node_key(sources, files, name.as_str(), key)?;
+/// `minted` names nodes and links by position.
+pub fn record(edit: &mut Edit, minted: &Minted) -> Result<()> {
+    let network = edit.file.network();
+    let nodes: Vec<(String, &PrivateKey)> = minted
+        .node_keys
+        .iter()
+        .map(|(node, key)| {
+            let (name, _) = network
+                .nodes
+                .get_index(*node)
+                .context("no node at that position")?;
+            Ok((name.to_string(), key))
+        })
+        .collect::<Result<_>>()?;
+    let links: Vec<(String, Value)> = minted
+        .link_obfuscation
+        .iter()
+        .map(|(link, generated)| {
+            let (name, _) = network
+                .mesh
+                .links
+                .get_index(*link)
+                .context("no link at that position")?;
+            let fields =
+                sliplib_yaml::to_value(generated).context("serializing generated obfuscation")?;
+            Ok((name.to_string(), fields))
+        })
+        .collect::<Result<_>>()?;
+    for (name, key) in nodes {
+        set_node_key(edit, &name, key)?;
     }
-    let mesh = network_document(sources, files)?.get_mut("mesh");
+    let laid = edit.file.laid().clone();
+    let mesh = laid.get("mesh");
     // Those a link writing `null` there goes without.
     let of_the_type: Vec<Value> = mesh
-        .as_deref()
         .and_then(|mesh| mesh.get("amneziawg"))
         .and_then(|block| block.get("obfuscation"))
         .and_then(Value::as_mapping)
@@ -31,106 +52,87 @@ pub fn record(sources: &mut Sources, files: &File, minted: &Minted) -> Result<()
         .filter(|(_, value)| !value.is_null())
         .map(|(key, _)| key.clone())
         .collect();
-    let mut links = mesh.and_then(|mesh| mesh.get_mut("links"));
-    for (link, generated) in &minted.link_obfuscation {
-        let (name, _) = network
-            .mesh
-            .links
-            .get_index(*link)
-            .context("no link at that position")?;
-        let name = name.as_str();
+    let all_links = mesh.and_then(|mesh| mesh.get("links"));
+    for (name, fields) in links {
+        let link = key_of(all_links, &name)
+            .with_context(|| format!("the link {name} is not in the network"))?;
         // Only `amneziawg` is minted for, under its block.
-        let entry = named(links.as_deref_mut(), name)
-            .and_then(|link| link.get_mut("amneziawg"))
-            .with_context(|| format!("the link {name} is not in the network document"))?;
-        write_obfuscation(entry, generated, &of_the_type)?;
+        let block = &all_links
+            .and_then(|links| links.get(&link))
+            .and_then(|link| link.get("amneziawg"));
+        let path = [
+            "mesh".into(),
+            "links".into(),
+            link,
+            "amneziawg".into(),
+            "obfuscation".into(),
+        ];
+        write_obfuscation(
+            edit,
+            &path,
+            block.and_then(|block| block.get("obfuscation")),
+            &fields,
+            &of_the_type,
+        )?;
     }
     Ok(())
 }
 
-pub fn set_node_key(
-    sources: &mut Sources,
-    files: &File,
-    node: &str,
-    key: &PrivateKey,
-) -> Result<()> {
-    let nodes = network_document(sources, files)?.get_mut("nodes");
-    let entry = named(nodes, node)
-        .with_context(|| format!("the node {node} is not in the network document"))?;
-    if entry.get("wireguard").is_none_or(Value::is_null) {
-        set(entry, "wireguard", Value::Mapping(Mapping::new()))?;
-    }
-    set(&mut entry["wireguard"], "private_key", key.expose().into())
+pub fn set_node_key(edit: &mut Edit, node: &str, key: &PrivateKey) -> Result<()> {
+    let nodes = edit.file.laid().get("nodes");
+    let name =
+        key_of(nodes, node).with_context(|| format!("the node {node} is not in the network"))?;
+    let path = [
+        "nodes".into(),
+        name,
+        "wireguard".into(),
+        "private_key".into(),
+    ];
+    edit.write(&path, key.expose().into())
 }
 
-/// Indexing inserts a missing `mesh` and panics on none: one that is there is a mapping, or the
-/// file would not have parsed.
-pub fn write_interface_prefix(sources: &mut Sources, files: &File) -> Result<()> {
-    let network = network_document(sources, files)?;
-    network["mesh"]["interface_prefix"] = InterfacePrefix::REFERENCE.into();
-    Ok(())
+pub fn write_interface_prefix(edit: &mut Edit) -> Result<()> {
+    edit.write(
+        &["mesh".into(), "interface_prefix".into()],
+        InterfacePrefix::REFERENCE.into(),
+    )
 }
 
-/// Where `obfuscation` is written `null`, each of `laid_under` not minted is written `null` too, so
+/// Where `obfuscation` is laid `null`, each of `laid_under` not minted is written `null` too, so
 /// minting brings none back.
 fn write_obfuscation(
-    owner: &mut Value,
-    generated: &Obfuscation,
+    edit: &mut Edit,
+    path: &[Value],
+    laid: Option<&Value>,
+    generated: &Value,
     laid_under: &[Value],
 ) -> Result<()> {
-    let fields = sliplib_yaml::to_value(generated).context("serializing generated obfuscation")?;
-    let fields: Mapping = fields
+    let fields: Mapping = generated
         .as_mapping()
         .into_iter()
         .flatten()
         .filter(|(_, value)| !value.is_null())
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    match owner.get_mut("obfuscation") {
-        Some(Value::Mapping(obfuscation)) => obfuscation.extend(fields),
-        Some(Value::Null) => {
-            let mut dropped = fields;
-            for key in laid_under {
-                dropped.entry(key.clone()).or_insert(Value::Null);
-            }
-            set(owner, "obfuscation", Value::Mapping(dropped))?;
+    if laid.is_some_and(Value::is_null) {
+        let mut dropped = fields;
+        for key in laid_under {
+            dropped.entry(key.clone()).or_insert(Value::Null);
         }
-        _ => set(owner, "obfuscation", Value::Mapping(fields))?,
+        return edit.write(path, Value::Mapping(dropped));
+    }
+    for (key, value) in fields {
+        edit.write(&[path, &[key]].concat(), value)?;
     }
     Ok(())
 }
 
 /// As the loader reads keys: a name YAML reads as a number stands under a key that is one.
-fn named<'a>(mapping: Option<&'a mut Value>, name: &str) -> Option<&'a mut Value> {
-    mapping?
-        .as_mapping_mut()?
-        .iter_mut()
-        .find_map(|(key, value)| {
-            let key: Name = sliplib_yaml::from_value(key.clone()).ok()?;
-            (key.as_str() == name).then_some(value)
-        })
-}
-
-fn set(entry: &mut Value, key: &str, value: Value) -> Result<()> {
-    entry
-        .as_mapping_mut()
-        .with_context(|| format!("an entry to set `{key}` on is not a mapping"))?
-        .insert(key.into(), value);
-    Ok(())
-}
-
-/// A write goes into one: of several, which would not be known.
-fn network_document<'a>(sources: &'a mut Sources, files: &File) -> Result<&'a mut Value> {
-    let [at] = files.network_documents() else {
-        anyhow::bail!(
-            "{} `kind: network` documents, and a write goes into one - write them as one",
-            files.network_documents().len()
-        );
-    };
-    sources.files_mut()[at.file]
-        .yaml_mut()
-        .document_mut(at.document)
-        .with_context(|| format!("no document at position {}", at.document))
+fn key_of(mapping: Option<&Value>, name: &str) -> Option<Value> {
+    mapping?.as_mapping()?.keys().find_map(|key| {
+        let read: Name = sliplib_yaml::from_value(key.clone()).ok()?;
+        (read.as_str() == name).then(|| key.clone())
+    })
 }
 
 #[cfg(test)]
@@ -140,13 +142,23 @@ mod tests {
 
     const NINE: [&str; 9] = ["jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"];
 
+    /// `edit` run on `raw` as the one file, its text after.
+    fn edited(raw: &str, edit: impl FnOnce(&mut Edit)) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("network.yaml");
+        std::fs::write(&path, raw).unwrap();
+        let mut files = Edit::read(&[], &path).unwrap();
+        edit(&mut files);
+        files.save().unwrap();
+        std::fs::read_to_string(&path).unwrap()
+    }
+
     /// Read, mint, write.
     fn run(raw: &str) -> String {
-        let mut sources = Sources::parse(raw).unwrap();
-        let files = File::read(&sources).unwrap();
-        let minted = mint::create(&sliplib_mesh::Mesh::of(&files).unwrap()).unwrap();
-        record(&mut sources, &files, &minted).unwrap();
-        sources.files()[0].yaml().text().unwrap()
+        edited(raw, |edit| {
+            let minted = mint::create(&sliplib_mesh::Mesh::of(&edit.file).unwrap()).unwrap();
+            record(edit, &minted).unwrap();
+        })
     }
 
     fn values(raw: &str) -> Vec<Value> {
@@ -194,20 +206,12 @@ mod tests {
     }
 
     #[test]
-    fn a_write_into_one_of_two_network_documents_is_refused() {
-        let secrets = "slipmesh: {kind: network, version: 2, revision: 1}\nmesh: {mtu: 1300}\n";
-        let mut sources = Sources::parse(&format!("{EXAMPLE}---\n{secrets}")).unwrap();
-        let files = File::read(&sources).unwrap();
-        assert!(set_node_key(&mut sources, &files, "node-a", &PrivateKey::generate()).is_err());
-    }
-
-    #[test]
     fn a_node_named_like_a_number_is_rekeyed_under_its_own_key() {
-        let mut sources = Sources::parse(&numbered()).unwrap();
-        let files = File::read(&sources).unwrap();
-        set_node_key(&mut sources, &files, "7", &PrivateKey::generate()).unwrap();
-        let node = &sources.files()[0].yaml().documents()[0].value["nodes"][&Value::from(7)];
-        assert!(node["wireguard"]["private_key"].is_string());
+        let written = edited(&numbered(), |edit| {
+            set_node_key(edit, "7", &PrivateKey::generate()).unwrap();
+        });
+        let written: Value = sliplib_yaml::from_str(&written).unwrap();
+        assert!(written["nodes"][&Value::from(7)]["wireguard"]["private_key"].is_string());
     }
 
     /// Once minted.
