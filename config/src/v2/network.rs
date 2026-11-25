@@ -2,7 +2,7 @@
 //! and a link's block hold what is in force: their own laid over the network's.
 
 use super::name::is_name_character;
-use super::{ClassName, Map, Name, Platform, UniqueKeys, absent_when_null, unique_keys};
+use super::{ClassName, Map, Name, Platform, unique_keys};
 use crate::router::{
     BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER, InterfacePattern,
 };
@@ -11,18 +11,6 @@ use serde::{Deserialize, Deserializer, de};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32};
-
-/// `null` as left out, a key twice refused.
-fn names_absent_when_null<'de, D, K, V>(deserializer: D) -> Result<Map<K, V>, D::Error>
-where
-    D: Deserializer<'de>,
-    K: Deserialize<'de> + std::hash::Hash + Eq + std::borrow::Borrow<str>,
-    V: Deserialize<'de>,
-{
-    Ok(Option::<UniqueKeys<K, V>>::deserialize(deserializer)?
-        .map(|keys| keys.0)
-        .unwrap_or_default())
-}
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -66,13 +54,13 @@ pub struct Routing {
     /// Present, a BFD session on every link.
     #[serde(default)]
     pub bfd: Option<Bfd>,
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default)]
     pub direct_interfaces: Vec<InterfacePattern>,
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default)]
     pub learn: Vec<Prefix4>,
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default)]
     pub announce: Vec<Prefix4>,
-    #[serde(default, deserialize_with = "names_absent_when_null")]
+    #[serde(default, deserialize_with = "unique_keys")]
     pub classes: Map<ClassName, Class>,
 }
 
@@ -128,7 +116,7 @@ pub struct Node {
     pub underlay: Map<Name, Underlay>,
     #[serde(default)]
     pub wireguard: Option<NodeWireguard>,
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default)]
     pub routing: NodeRouting,
 }
 
@@ -232,11 +220,11 @@ pub struct NodeWireguard {
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct NodeRouting {
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default)]
     pub direct_interfaces: Vec<InterfacePattern>,
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default)]
     pub learn: Vec<Prefix4>,
-    #[serde(default, deserialize_with = "absent_when_null")]
+    #[serde(default)]
     pub announce: Vec<Prefix4>,
 }
 
@@ -293,7 +281,7 @@ pub struct Mesh {
     pub wireguard: Option<WireguardDefaults>,
     #[serde(default)]
     pub amneziawg: Option<AmneziawgDefaults>,
-    #[serde(default, deserialize_with = "names_absent_when_null")]
+    #[serde(default, deserialize_with = "unique_keys")]
     pub links: Map<Name, Link>,
 }
 
@@ -500,7 +488,7 @@ impl<'de> Deserialize<'de> for StrictObfuscation {
 #[cfg(test)]
 mod tests {
     use super::super::NameError;
-    use super::super::testing::{example, left_out, network, with, written_null};
+    use super::super::testing::{example, left_out, network, with};
     use super::*;
     use sliplib_yaml::Value;
 
@@ -591,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    fn a_required_key_left_out_or_written_null_is_refused() {
+    fn a_required_key_left_out_is_refused() {
         for path in [
             &["addressing"][..],
             &["addressing", "loopback", "ipv6"],
@@ -604,8 +592,7 @@ mod tests {
             &["mesh", "links", "a-b", "ends"],
             &["mesh", "links", "a-b", "amneziawg", "port"],
         ] {
-            assert!(left_out(path).is_err(), "{path:?} left out");
-            assert!(written_null(path).is_err(), "{path:?} written null");
+            assert!(left_out(path).is_err(), "{path:?}");
         }
     }
 
@@ -639,24 +626,6 @@ mod tests {
             "{mesh: {amneziawg: {obfuscation: {h1: 9-1}}}}",
         ] {
             assert!(with(overlay).is_err(), "{overlay}");
-        }
-    }
-
-    #[test]
-    fn a_key_written_null_reads_as_the_key_left_out() {
-        for path in [
-            &["routing", "bfd"][..],
-            &["routing", "direct_interfaces"],
-            &["routing", "learn"],
-            &["routing", "announce"],
-            &["routing", "classes"],
-            &["mesh", "links"],
-            &["nodes", "router1", "routing"],
-            &["nodes", "router1", "routing", "direct_interfaces"],
-            &["nodes", "router1", "routing", "learn"],
-            &["nodes", "router1", "routing", "announce"],
-        ] {
-            assert_eq!(written_null(path), left_out(path), "{path:?}");
         }
     }
 

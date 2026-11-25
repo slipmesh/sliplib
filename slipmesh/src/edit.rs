@@ -4,22 +4,22 @@
 use anyhow::{Context, Result};
 use sliplib_config::Obfuscation;
 use sliplib_config::v2::network::InterfacePrefix;
-use sliplib_config::v2::{File, Name};
+use sliplib_config::v2::{File, Name, Sources};
 use sliplib_mesh::mint::Minted;
 use sliplib_secrets::wireguard::PrivateKey;
-use sliplib_yaml::{Mapping, MultiDoc, Value};
+use sliplib_yaml::{Mapping, Value};
 
-/// Into the `yaml` `files` were read from; `minted` names nodes and links by position.
-pub fn record(yaml: &mut MultiDoc, files: &File, minted: &Minted) -> Result<()> {
+/// Into the `sources` `files` were read from; `minted` names nodes and links by position.
+pub fn record(sources: &mut Sources, files: &File, minted: &Minted) -> Result<()> {
     let network = files.network();
     for (node, key) in &minted.node_keys {
         let (name, _) = network
             .nodes
             .get_index(*node)
             .context("no node at that position")?;
-        set_node_key(yaml, files, name.as_str(), key)?;
+        set_node_key(sources, files, name.as_str(), key)?;
     }
-    let mesh = document(yaml, files.network_document())?.get_mut("mesh");
+    let mesh = network_document(sources, files)?.get_mut("mesh");
     // Those a link writing `null` there goes without.
     let of_the_type: Vec<Value> = mesh
         .as_deref()
@@ -48,8 +48,13 @@ pub fn record(yaml: &mut MultiDoc, files: &File, minted: &Minted) -> Result<()> 
     Ok(())
 }
 
-pub fn set_node_key(yaml: &mut MultiDoc, files: &File, node: &str, key: &PrivateKey) -> Result<()> {
-    let nodes = document(yaml, files.network_document())?.get_mut("nodes");
+pub fn set_node_key(
+    sources: &mut Sources,
+    files: &File,
+    node: &str,
+    key: &PrivateKey,
+) -> Result<()> {
+    let nodes = network_document(sources, files)?.get_mut("nodes");
     let entry = named(nodes, node)
         .with_context(|| format!("the node {node} is not in the network document"))?;
     if entry.get("wireguard").is_none_or(Value::is_null) {
@@ -60,8 +65,8 @@ pub fn set_node_key(yaml: &mut MultiDoc, files: &File, node: &str, key: &Private
 
 /// Indexing inserts a missing `mesh` and panics on none: one that is there is a mapping, or the
 /// file would not have parsed.
-pub fn write_interface_prefix(yaml: &mut MultiDoc, files: &File) -> Result<()> {
-    let network = document(yaml, files.network_document())?;
+pub fn write_interface_prefix(sources: &mut Sources, files: &File) -> Result<()> {
+    let network = network_document(sources, files)?;
     network["mesh"]["interface_prefix"] = InterfacePrefix::REFERENCE.into();
     Ok(())
 }
@@ -114,9 +119,18 @@ fn set(entry: &mut Value, key: &str, value: Value) -> Result<()> {
     Ok(())
 }
 
-fn document(yaml: &mut MultiDoc, index: usize) -> Result<&mut Value> {
-    yaml.document_mut(index)
-        .with_context(|| format!("no document at position {index}"))
+/// A write goes into one: of several, which would not be known.
+fn network_document<'a>(sources: &'a mut Sources, files: &File) -> Result<&'a mut Value> {
+    let [at] = files.network_documents() else {
+        anyhow::bail!(
+            "{} `kind: network` documents, and a write goes into one - write them as one",
+            files.network_documents().len()
+        );
+    };
+    sources.files_mut()[at.file]
+        .yaml_mut()
+        .document_mut(at.document)
+        .with_context(|| format!("no document at position {}", at.document))
 }
 
 #[cfg(test)]
@@ -128,15 +142,15 @@ mod tests {
 
     /// Read, mint, write.
     fn run(raw: &str) -> String {
-        let mut yaml = MultiDoc::parse(raw).unwrap();
-        let files = File::read(&yaml).unwrap();
+        let mut sources = Sources::parse(raw).unwrap();
+        let files = File::read(&sources).unwrap();
         let minted = mint::create(&sliplib_mesh::Mesh::of(&files).unwrap()).unwrap();
-        record(&mut yaml, &files, &minted).unwrap();
-        yaml.text().unwrap()
+        record(&mut sources, &files, &minted).unwrap();
+        sources.files()[0].yaml().text().unwrap()
     }
 
     fn values(raw: &str) -> Vec<Value> {
-        MultiDoc::parse(raw).unwrap().values()
+        sliplib_yaml::MultiDoc::parse(raw).unwrap().values()
     }
 
     /// Its keys with their values, its items in their places.
@@ -180,11 +194,19 @@ mod tests {
     }
 
     #[test]
+    fn a_write_into_one_of_two_network_documents_is_refused() {
+        let secrets = "slipmesh: {kind: network, version: 2, revision: 1}\nmesh: {mtu: 1300}\n";
+        let mut sources = Sources::parse(&format!("{EXAMPLE}---\n{secrets}")).unwrap();
+        let files = File::read(&sources).unwrap();
+        assert!(set_node_key(&mut sources, &files, "node-a", &PrivateKey::generate()).is_err());
+    }
+
+    #[test]
     fn a_node_named_like_a_number_is_rekeyed_under_its_own_key() {
-        let mut yaml = MultiDoc::parse(&numbered()).unwrap();
-        let files = File::read(&yaml).unwrap();
-        set_node_key(&mut yaml, &files, "7", &PrivateKey::generate()).unwrap();
-        let node = &yaml.documents()[0].value["nodes"][&Value::from(7)];
+        let mut sources = Sources::parse(&numbered()).unwrap();
+        let files = File::read(&sources).unwrap();
+        set_node_key(&mut sources, &files, "7", &PrivateKey::generate()).unwrap();
+        let node = &sources.files()[0].yaml().documents()[0].value["nodes"][&Value::from(7)];
         assert!(node["wireguard"]["private_key"].is_string());
     }
 

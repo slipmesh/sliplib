@@ -8,7 +8,7 @@ use sliplib_secrets::wireguard::PrivateKey;
 use std::path::Path;
 
 pub fn run(node: &str, config_path: &Path) -> Result<()> {
-    let (mut yaml, file) = read_slipmesh(config_path)?;
+    let (mut sources, file) = read_slipmesh(config_path)?;
     let network = sliplib_mesh::Mesh::of(&file)?;
     if network.node(node).is_err() {
         let known: Vec<&str> = network
@@ -23,11 +23,11 @@ pub fn run(node: &str, config_path: &Path) -> Result<()> {
         network.needs_a_key(node),
         "node {node:?} is on no link, and a node holds a key only on a link - put it on one first"
     );
-    edit::set_node_key(&mut yaml, &file, node, &PrivateKey::generate())?;
-    let edited = File::read(&yaml)
+    edit::set_node_key(&mut sources, &file, node, &PrivateKey::generate())?;
+    let edited = File::read(&sources)
         .context("slipmesh.yaml with the new key does not read back - not written")?;
     sliplib_mesh::Mesh::of(&edited).context("slipmesh.yaml with the new key - not written")?;
-    write_edits(config_path, &yaml)?;
+    write_edits(config_path, &sources)?;
     println!(
         "rekeyed {} in {}",
         sliplib_mesh::network::node_key(node),

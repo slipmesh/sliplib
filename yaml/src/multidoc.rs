@@ -115,17 +115,15 @@ impl Document {
         let taken: Vec<&str> = self.taken.iter().map(String::as_str).collect();
         Ok(document.deserialize_map(Without::new(&taken))?)
     }
+
+    /// None once the document is edited.
+    pub fn line_at(&self, path: &[crate::Step]) -> Option<usize> {
+        crate::laid::line_at(self.source.as_ref()?, self.index, path)
+    }
 }
 
 /// Where the parser stands when asked for something no YAML value is.
 fn line_of(source: &str, index: usize) -> Result<usize> {
-    struct Nothing;
-    impl Visitor<'_> for Nothing {
-        type Value = ();
-        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("nothing")
-        }
-    }
     let document = Deserializer::from_str(source)
         .nth(index)
         .ok_or(Error::NotKept)?;
@@ -134,6 +132,16 @@ fn line_of(source: &str, index: usize) -> Result<usize> {
         .err()
         .and_then(|stop| stop.location())
         .map_or(1, |location| location.line()))
+}
+
+pub(crate) struct Nothing;
+
+impl Visitor<'_> for Nothing {
+    type Value = ();
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("nothing")
+    }
 }
 
 /// A mapping as `T`, `keys` passed over unread: a field of `T` among them reads as missing. A key

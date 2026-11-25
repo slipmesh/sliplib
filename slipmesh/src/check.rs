@@ -28,7 +28,7 @@ pub fn run(config_path: &Path) -> ExitCode {
         eprintln!("{refusal:#}");
         passed = ExitCode::FAILURE;
     };
-    match File::open(config_path) {
+    match File::open(&[config_path]) {
         Err(refusal) => refuse(refusal.into()),
         Ok(file) => match Mesh::of(&file) {
             Err(refusal) => refuse(refusal.into()),

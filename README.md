@@ -173,7 +173,11 @@ types; `sliplib-fs` writes it. What the documents mean is the caller's.
   the line. `document_mut` edits a value and `text` gives the file's text back, without its
   comments or documents of only comments.
 - `read`: a file of one document, into a type, a YAML tag refused.
-- `merge`: JSON Merge Patch (RFC 7386), key order kept; `join` puts documents together.
+- `merge`: JSON Merge Patch (RFC 7396), key order kept; `merge_keeping` keeps a `null` where the
+  caller says; `join` puts documents together.
+- `from_value_at`: a value laid from several texts, read whole, a refusal (`Refused`) giving the
+  path of its key; `written_by` the last layer holding that path or its deepest part, and
+  `Document::line_at` the line of a path in a document's text.
 - `Error`: what each of them refuses, naming the file or the document's line.
 - `Without`: a mapping as a type with some keys passed over, an unknown key's error naming its line.
 - `Value`, `Mapping`, `from_str`, `from_value`, `to_string` and `to_value`, re-exported from
@@ -191,21 +195,23 @@ A cause it names itself is a field, and one of its own line is its `source`, nev
 chain prints the whole message, each part once.
 
 - `v2`: [format version 2](docs/slipmesh-yaml.md).
-  - `File` (`open`, `parse`, `read`) refuses what its specification has the loader refuse, as
-    `v2::Error`; a file of version 1 as `VersionOne`, naming the conversion document. A refusal of
-    `open` names the file.
+  - `Sources::read` reads files as [several files](docs/slipmesh-yaml.md#several-files) are
+    read: each once, by its canonical path, in the byte order of those paths. `File` (`open` of
+    paths, `read` of `Sources`, `parse` of one text) refuses what its specification has the loader
+    refuse, as `v2::Error`; a file of version 1 as `VersionOne`, naming the conversion document. A
+    refusal of a document names its file and line; one of the network or the groups as laid
+    (`Laid`) names the last document that wrote the key, and the key's line there.
   - `network()` gives what is in force under each node's `routing` and in each link's block.
   - A node gives its `underlay` and `private_key`; a `Link` whether a node is an end (`has_end`)
     and the `other_end`; a `LinkKind` its `port`, `obfuscation` (empty
     on `wireguard`) and `persistent_keepalive`.
-  - `network_document` is where the network stands, for a write. `InterfacePrefix::REFERENCE` is
-    what `slipmesh mint` writes where `mesh.interface_prefix` is unset.
+  - `network_documents` are where the network's layers stand, for a write.
+    `InterfacePrefix::REFERENCE` is what `slipmesh mint` writes where `mesh.interface_prefix` is
+    unset.
   - `templates`, `templates_for` and `patches` give `AimedDocument`s with their `Aim`: what each
     reaches and its rank. `platform` gives a `PlatformDocument`.
   - A body is its platform's tool's: `read` gives it as the tool's type, a refusal naming the
     document and the line. A template or patch also gives its `value`.
-  - This release refuses a second `network` or `groups` document, which the format lays over the
-    first, until the tools read several files.
 - `awg`: `AwgConfig` and `validate`. `InterfaceEntry::keepalive_of` is a peer's keepalive: none
   for one without an `endpoint`; else its own, or 25 on a plain interface and 20 to 30 on an
   obfuscated one. `PeerEntry::allowed_ips_or_all` is a peer's own, or `0.0.0.0/0` and `::/0`.

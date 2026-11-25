@@ -7,9 +7,10 @@ use super::groups::{Groups, GroupsError, Resolved, Selection};
 use super::network::{AMNEZIAWG, Network, WIREGUARD};
 use super::{Name, Platform};
 use serde::de::DeserializeOwned;
-use sliplib_yaml::{Document, Mapping, MultiDoc, Value, merge};
+use sliplib_yaml::{Document, Mapping, MultiDoc, Refused, Value, merge, merge_keeping};
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Of the syntax.
 pub const VERSION: u64 = 2;
@@ -28,26 +29,58 @@ pub const META_KEY: &str = "slipmesh";
 
 type Source = Box<dyn std::error::Error + Send + Sync>;
 
-/// A document's kind and the line it starts at.
+/// Where a document starts: its file, none for a text given as it is, and its line.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Place {
-    kind: &'static str,
+pub struct Start {
+    file: Option<Arc<Path>>,
     line: usize,
 }
 
+impl Start {
+    pub fn file(&self) -> Option<&Path> {
+        self.file.as_deref()
+    }
+
+    pub fn line(&self) -> usize {
+        self.line
+    }
+}
+
+impl fmt::Display for Start {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "line {}", self.line)?;
+        match &self.file {
+            Some(file) => write!(f, " of {}", file.display()),
+            None => Ok(()),
+        }
+    }
+}
+
+/// A document's kind and where it starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    kind: &'static str,
+    start: Start,
+}
+
 impl Place {
+    /// Of a text given as it is.
+    #[cfg(test)]
     pub(crate) fn new(kind: &'static str, line: usize) -> Self {
-        Self { kind, line }
+        Self {
+            kind,
+            start: Start { file: None, line },
+        }
+    }
+
+    pub fn start(&self) -> &Start {
+        &self.start
     }
 }
 
 impl fmt::Display for Place {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "the `kind: {}` document at line {}",
-            self.kind, self.line
-        )
+        write!(f, "the `kind: {}` document at {}", self.kind, self.start)
     }
 }
 
@@ -65,6 +98,12 @@ pub enum BlockError {
 pub enum Error {
     #[error(transparent)]
     Yaml(Source),
+    #[error("reading {}", path.display())]
+    Reading {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error(
         "{place} has no `version`, or one below {VERSION}, so the files are of format version 1, which this release does not read - convert them to version {VERSION} as `docs/slipmesh-yaml-v1-to-v2.md` of sliplib says under \"Converting a file by hand\""
     )]
@@ -81,9 +120,9 @@ pub enum Error {
         "{place} is of revision {revision}, and this tool is built for revision {REVISION} - move the files to revision {REVISION}, together with every other tool"
     )]
     OlderRevision { place: Place, revision: u64 },
-    #[error("the document starting at line {line}")]
+    #[error("the document starting at {start}")]
     Block {
-        line: usize,
+        start: Start,
         #[source]
         source: BlockError,
     },
@@ -93,34 +132,28 @@ pub enum Error {
         #[source]
         source: Source,
     },
-    #[error("reading {}", path.display())]
-    Reading {
-        path: PathBuf,
+    /// In a `network` or `groups` document laid with the others of its kind: `place` is the last
+    /// that wrote the key, `line` the key's.
+    #[error("{place}, at line {line}")]
+    Laid {
+        place: Place,
+        line: usize,
         #[source]
-        source: Box<Error>,
+        source: Refused,
     },
     #[error("there is no `kind: network` document, and without one there is no network")]
     NoNetwork,
-    #[error(
-        "{count} `kind: {kind}` documents, the first two at lines {first} and {second}: this release reads one and lays no two over each other - write them as one document"
-    )]
-    Several {
-        kind: &'static str,
-        count: usize,
-        first: usize,
-        second: usize,
-    },
     #[error(transparent)]
     Invalid(#[from] Invalid),
     #[error(transparent)]
     Groups(#[from] GroupsError),
     #[error(
-        "two `kind: platform` documents for `{platform}`, at lines {first} and {second}, and a platform has at most one - write their keys in one"
+        "two `kind: platform` documents for `{platform}`, {first} and {second}, and a platform has at most one - write their keys in one"
     )]
     PlatformTwice {
         platform: Platform,
-        first: usize,
-        second: usize,
+        first: Place,
+        second: Place,
     },
     #[error(
         "{place} is written for `{platform}`, whose tool takes no document of this kind - take it out"
@@ -137,41 +170,166 @@ pub enum Error {
     },
 }
 
+/// A file read, or a text given as it is.
+pub struct SourceFile {
+    path: Option<Arc<Path>>,
+    yaml: MultiDoc,
+}
+
+impl SourceFile {
+    pub fn yaml(&self) -> &MultiDoc {
+        &self.yaml
+    }
+
+    pub fn yaml_mut(&mut self) -> &mut MultiDoc {
+        &mut self.yaml
+    }
+}
+
+pub struct Sources {
+    files: Vec<SourceFile>,
+}
+
+impl Sources {
+    /// Each file once, whatever the path it is reached by, in the byte order of the canonical paths.
+    pub fn read<P: AsRef<Path>>(inputs: &[P]) -> Result<Self, Error> {
+        let mut paths = inputs
+            .iter()
+            .map(|input| {
+                let input = input.as_ref();
+                std::fs::canonicalize(input).map_err(|source| Error::Reading {
+                    path: input.to_owned(),
+                    source,
+                })
+            })
+            .collect::<Result<Vec<PathBuf>, Error>>()?;
+        // `Path` compares by components, so `a/b` would come before `a-b`.
+        paths.sort_by(|a, b| {
+            a.as_os_str()
+                .as_encoded_bytes()
+                .cmp(b.as_os_str().as_encoded_bytes())
+        });
+        paths.dedup();
+        let files = paths
+            .into_iter()
+            .map(|path| {
+                let yaml = MultiDoc::read(&path).map_err(|source| Error::Yaml(source.into()))?;
+                Ok(SourceFile {
+                    path: Some(path.into()),
+                    yaml,
+                })
+            })
+            .collect::<Result<_, Error>>()?;
+        Ok(Self { files })
+    }
+
+    /// One text, of no file.
+    pub fn parse(text: &str) -> Result<Self, Error> {
+        let yaml = MultiDoc::parse(text).map_err(|source| Error::Yaml(source.into()))?;
+        Ok(Self {
+            files: vec![SourceFile { path: None, yaml }],
+        })
+    }
+
+    /// In the order they are read.
+    pub fn files(&self) -> &[SourceFile] {
+        &self.files
+    }
+
+    pub fn files_mut(&mut self) -> &mut [SourceFile] {
+        &mut self.files
+    }
+}
+
+/// A document by its file, in the order of [`Sources::files`], and its position there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DocumentId {
+    pub file: usize,
+    pub document: usize,
+}
+
+/// A document as read, before its block is.
+struct Raw<'a> {
+    id: DocumentId,
+    file: &'a Option<Arc<Path>>,
+    document: &'a Document,
+}
+
+impl Raw<'_> {
+    fn start(&self) -> Start {
+        Start {
+            file: self.file.clone(),
+            line: self.document.line,
+        }
+    }
+
+    fn place(&self, kind: &'static str) -> Place {
+        Place {
+            kind,
+            start: self.start(),
+        }
+    }
+}
+
+/// A document whose block is read.
 struct Read {
     block: Block,
-    /// Without the block, its lines kept for an error to name.
+    document: Taken,
+}
+
+/// Without its block, its lines kept for an error to name.
+struct Taken {
+    id: DocumentId,
+    start: Start,
     body: Document,
 }
 
 impl Read {
-    fn block(mut body: Document) -> Result<Self, Error> {
-        let line = body.line;
+    fn block(raw: &Raw) -> Result<Self, Error> {
+        let mut body = raw.document.clone();
+        let start = raw.start();
         let block = match body.value.get(META_KEY) {
             None => Err(BlockError::Missing),
             Some(_) => Block::read(&body).map_err(|source| BlockError::Malformed(source.into())),
         }
-        .map_err(|source| Error::Block { line, source })?;
+        .map_err(|source| Error::Block {
+            start: start.clone(),
+            source,
+        })?;
         body.take(META_KEY);
-        Ok(Self { block, body })
+        let document = Taken {
+            id: raw.id,
+            start,
+            body,
+        };
+        Ok(Self { block, document })
     }
 }
 
-fn body<T: DeserializeOwned>(document: &Document, kind: &'static str) -> Result<T, Error> {
+impl Taken {
+    fn place(&self, kind: &'static str) -> Place {
+        Place {
+            kind,
+            start: self.start.clone(),
+        }
+    }
+}
+
+fn body<T: DeserializeOwned>(document: &Document, place: &Place) -> Result<T, Error> {
     document.deserialize().map_err(|source| Error::Body {
-        place: Place::new(kind, document.line),
+        place: place.clone(),
         source: source.into(),
     })
 }
 
 /// Before anything else, so a newer format is not refused for a key unknown here: every version,
 /// then every revision.
-fn generation(yaml: &MultiDoc) -> Result<(), Error> {
-    let networks: Vec<(Place, &Value)> = yaml
-        .documents()
+fn generation(documents: &[Raw]) -> Result<(), Error> {
+    let networks: Vec<(Place, &Value)> = documents
         .iter()
-        .filter_map(|document| Some((document.line, document.value.get(META_KEY)?)))
+        .filter_map(|raw| Some((raw, raw.document.value.get(META_KEY)?)))
         .filter(|(_, block)| block.get("kind").and_then(Value::as_str) == Some(NETWORK))
-        .map(|(line, block)| (Place::new(NETWORK, line), block))
+        .map(|(raw, block)| (raw.place(NETWORK), block))
         .collect();
     let written =
         |block: &Value, key: &str| block.get(key).filter(|value| !value.is_null()).cloned();
@@ -217,34 +375,55 @@ fn generation(yaml: &MultiDoc) -> Result<(), Error> {
     Ok(())
 }
 
-fn at_most_one(
-    mut documents: Vec<Document>,
+/// Below `nodes.<name>.routing` and `mesh.links.<name>.<type>`, a `null` takes the network's value
+/// away, so laying one document over another keeps it.
+fn keeps_null(path: &[&Value]) -> bool {
+    let in_routing =
+        matches!(path, [nodes, _, routing, _, ..] if *nodes == "nodes" && *routing == "routing");
+    let in_link = matches!(path, [mesh, links, _, kind, _, ..]
+        if *mesh == "mesh" && *links == "links" && (*kind == WIREGUARD || *kind == AMNEZIAWG));
+    in_routing || in_link
+}
+
+/// In the order of the documents, from an empty tree.
+fn laid(layers: &[Taken], keeps: &dyn Fn(&[&Value]) -> bool) -> Value {
+    layers.iter().fold(Value::Null, |tree, layer| {
+        merge_keeping(tree, &layer.body.value, keeps)
+    })
+}
+
+/// A refusal names the last of `layers` that wrote the key, and the key's line there.
+fn read_laid<T: DeserializeOwned>(
+    tree: Value,
+    layers: &[Taken],
     kind: &'static str,
-) -> Result<Option<Document>, Error> {
-    match documents.len() {
-        0 | 1 => Ok(documents.pop()),
-        count => {
-            let mut lines: Vec<usize> = documents.iter().map(|document| document.line).collect();
-            lines.sort_unstable();
-            Err(Error::Several {
-                kind,
-                count,
-                first: lines[0],
-                second: lines[1],
-            })
+) -> Result<T, Error> {
+    sliplib_yaml::from_value_at(tree).map_err(|refused| {
+        let values: Vec<&Value> = layers.iter().map(|layer| &layer.body.value).collect();
+        let path = refused.path();
+        match sliplib_yaml::written_by(&values, &path) {
+            Some((layer, depth)) => {
+                let layer = &layers[layer];
+                Error::Laid {
+                    place: layer.place(kind),
+                    line: layer
+                        .body
+                        .line_at(&path[..depth])
+                        .unwrap_or(layer.start.line),
+                    source: refused,
+                }
+            }
+            None => Error::Yaml(refused.into()),
         }
-    }
+    })
 }
 
 /// Those a node may hold its own of.
 const NODE_LISTS: [&str; 3] = ["direct_interfaces", "learn", "announce"];
 
-/// `network` holds no `null`. Without a mapping of its own, the network's.
+/// `network` holds no `null`. Without values of its own, the network's.
 fn lay(network: &Value, own: Option<&Value>) -> Value {
-    match own {
-        Some(own) if own.is_mapping() => merge(network.clone(), own),
-        _ => network.clone(),
-    }
+    own.map_or_else(|| network.clone(), |own| merge(network.clone(), own))
 }
 
 /// Laid over the empty tree, so no `null` is left, with `routing` laid under each node's and
@@ -385,7 +564,7 @@ impl AimedDocument {
 
     /// A refusal names the document and the line.
     pub fn read<T: DeserializeOwned>(&self) -> Result<T, Error> {
-        body(&self.body, self.aim.place.kind)
+        body(&self.body, &self.aim.place)
     }
 }
 
@@ -411,7 +590,7 @@ impl PlatformDocument {
 
     /// A refusal names the document and the line.
     pub fn read<T: DeserializeOwned>(&self) -> Result<T, Error> {
-        body(&self.body, PLATFORM)
+        body(&self.body, &self.place)
     }
 }
 
@@ -428,7 +607,7 @@ fn reaching<'a>(documents: &'a [AimedDocument], node: &str) -> Vec<&'a AimedDocu
 
 pub struct File {
     network: Network,
-    network_document: usize,
+    network_documents: Vec<DocumentId>,
     platforms: Vec<(Platform, PlatformDocument)>,
     templates: Vec<AimedDocument>,
     patches: Vec<AimedDocument>,
@@ -447,24 +626,33 @@ impl fmt::Debug for File {
 
 impl File {
     pub fn parse(raw: &str) -> Result<Self, Error> {
-        Self::read(&MultiDoc::parse(raw).map_err(|source| Error::Yaml(source.into()))?)
+        Self::read(&Sources::parse(raw)?)
     }
 
-    /// The file at `path`; an error names it.
-    pub fn open(path: &Path) -> Result<Self, Error> {
-        let yaml = MultiDoc::read(path).map_err(|source| Error::Yaml(source.into()))?;
-        Self::read(&yaml).map_err(|source| Error::Reading {
-            path: path.to_owned(),
-            source: Box::new(source),
-        })
+    /// As [`Sources::read`] reads them.
+    pub fn open<P: AsRef<Path>>(inputs: &[P]) -> Result<Self, Error> {
+        Self::read(&Sources::read(inputs)?)
     }
 
-    pub fn read(yaml: &MultiDoc) -> Result<Self, Error> {
-        generation(yaml)?;
-        let mut documents = yaml
-            .documents()
+    pub fn read(sources: &Sources) -> Result<Self, Error> {
+        let raw: Vec<Raw> = sources
+            .files
             .iter()
-            .cloned()
+            .enumerate()
+            .flat_map(|(file, source)| {
+                source.yaml.documents().iter().map(move |document| Raw {
+                    id: DocumentId {
+                        file,
+                        document: document.index,
+                    },
+                    file: &source.path,
+                    document,
+                })
+            })
+            .collect();
+        generation(&raw)?;
+        let mut documents = raw
+            .iter()
             .map(Read::block)
             .collect::<Result<Vec<Read>, Error>>()?;
         // Stable: documents of one `order` keep the order they were read in.
@@ -474,49 +662,54 @@ impl File {
         let mut groups = Vec::new();
         let mut platforms: Vec<(Platform, PlatformDocument)> = Vec::new();
         let mut aimed_documents = Vec::new();
-        for Read { block, body } in documents {
+        for Read { block, document } in documents {
             match block {
-                Block::Network(_) => networks.push(body),
-                Block::Groups(_) => groups.push(body),
+                Block::Network(_) => networks.push(document),
+                Block::Groups(_) => groups.push(document),
                 Block::Platform(PlatformBlock { platform, .. }) => {
+                    let place = document.place(PLATFORM);
                     if let Some((_, first)) = platforms.iter().find(|(of, _)| *of == platform) {
-                        let first = first.body.line;
                         return Err(Error::PlatformTwice {
                             platform,
-                            first: first.min(body.line),
-                            second: first.max(body.line),
+                            first: first.place.clone(),
+                            second: place,
                         });
                     }
-                    let place = Place::new(PLATFORM, body.line);
+                    let body = document.body;
                     platforms.push((platform, PlatformDocument { place, body }));
                 }
-                Block::Template(aimed) => aimed_documents.push((TEMPLATE, aimed, body)),
-                Block::Patch(aimed) => aimed_documents.push((PATCH, aimed, body)),
+                Block::Template(aimed) => {
+                    aimed_documents.push((document.place(TEMPLATE), aimed, document.body));
+                }
+                Block::Patch(aimed) => {
+                    aimed_documents.push((document.place(PATCH), aimed, document.body));
+                }
             }
         }
 
-        let written = at_most_one(networks, NETWORK)?.ok_or(Error::NoNetwork)?;
-        let network_document = written.index;
-        // Read as written first: from the text, an error names the line.
-        body::<Network>(&written, NETWORK)?;
-        let network: Network =
-            sliplib_yaml::from_value(in_force(&written.value)).map_err(|source| Error::Body {
-                place: Place::new(NETWORK, written.line),
-                source: source.into(),
-            })?;
+        if networks.is_empty() {
+            return Err(Error::NoNetwork);
+        }
+        let written = laid(&networks, &keeps_null);
+        // Read as laid first: a refusal of what is laid under a node or a link would name no
+        // document that wrote it.
+        read_laid::<Network>(merge(Value::Null, &written), &networks, NETWORK)?;
+        let network: Network = read_laid(in_force(&written), &networks, NETWORK)?;
         network.check()?;
 
         let nodes: Vec<Name> = network.nodes.keys().cloned().collect();
-        let groups = match at_most_one(groups, GROUPS)? {
-            Some(document) => body::<Groups>(&document, GROUPS)?,
-            None => Groups::default(),
+        let groups = if groups.is_empty() {
+            Groups::default()
+        } else {
+            read_laid::<Groups>(laid(&groups, &|_| false), &groups, GROUPS)?
         }
         .resolve(&nodes)?;
 
         let mut templates = Vec::new();
         let mut patches = Vec::new();
-        for (kind, aimed, body) in aimed_documents {
-            let aim = aimed.aim(Place::new(kind, body.line), &network, &groups)?;
+        for (place, aimed, body) in aimed_documents {
+            let kind = place.kind;
+            let aim = aimed.aim(place, &network, &groups)?;
             let document = AimedDocument { aim, body };
             if kind == TEMPLATE {
                 templates.push(document);
@@ -526,7 +719,7 @@ impl File {
         }
         Ok(Self {
             network,
-            network_document,
+            network_documents: networks.iter().map(|layer| layer.id).collect(),
             platforms,
             templates,
             patches,
@@ -538,9 +731,9 @@ impl File {
         &self.network
     }
 
-    /// Its position in the file, for a write.
-    pub fn network_document(&self) -> usize {
-        self.network_document
+    /// In the order they are laid, for a write.
+    pub fn network_documents(&self) -> &[DocumentId] {
+        &self.network_documents
     }
 
     pub fn platform(&self, platform: Platform) -> Option<&PlatformDocument> {
@@ -593,6 +786,18 @@ mod tests {
     /// The example's network as a document, with `overlay` laid over it.
     fn network(overlay: &str) -> String {
         network_edited(BLOCK, |tree| *tree = merge(tree.clone(), &yaml(overlay)))
+    }
+
+    /// A `network` document holding `overlay` alone, to be laid over others.
+    fn layer(overlay: &str) -> String {
+        layer_of(yaml(overlay))
+    }
+
+    fn layer_of(overlay: Value) -> String {
+        let mut document = Mapping::new();
+        document.insert(META_KEY.into(), yaml(BLOCK));
+        document.extend(overlay.as_mapping().unwrap().clone());
+        sliplib_yaml::to_string(&Value::Mapping(document)).unwrap()
     }
 
     fn file(documents: &[&str]) -> Result<File, Error> {
@@ -664,7 +869,7 @@ mod tests {
         let path = dir.path().join("slipmesh.yaml");
         std::fs::write(&path, network("{}")).unwrap();
         assert_eq!(
-            File::open(&path).unwrap().network(),
+            File::open(&[&path]).unwrap().network(),
             file(&[&network("{}")]).unwrap().network()
         );
         let named_once = |err: Error| {
@@ -681,14 +886,24 @@ mod tests {
             );
             err
         };
-        std::fs::write(&path, "slipmesh: {kind: patch, platform: talos}\n").unwrap();
-        let err = named_once(File::open(&path).unwrap_err());
+        std::fs::write(
+            &path,
+            format!(
+                "{}---
+metrics: {{}}
+",
+                network("{}")
+            ),
+        )
+        .unwrap();
+        let err = named_once(File::open(&[&path]).unwrap_err());
+        let canonical = std::fs::canonicalize(&path).unwrap();
         assert!(
-            matches!(&err, Error::Reading { source, .. } if matches!(**source, Error::NoNetwork)),
+            matches!(&err, Error::Block { start, source: BlockError::Missing } if start.file() == Some(canonical.as_path())),
             "{err:?}"
         );
         std::fs::remove_file(&path).unwrap();
-        named_once(File::open(&path).unwrap_err());
+        named_once(File::open(&[&path]).unwrap_err());
     }
 
     #[test]
@@ -789,9 +1004,11 @@ mod tests {
             let ends = &mut tree["mesh"]["links"]["a-b"]["ends"];
             *ends = yaml("{node-a: null, node-b: null}");
         });
-        let refusal = refusal(&[&none]);
+        let documents = [none.as_str()];
+        let at = file_line(&documents, "a-b:");
+        let refusal = refusal(&documents);
         assert!(
-            matches!(&refusal, Error::Body { place, .. } if *place == Place::new(NETWORK, 1)),
+            matches!(&refusal, Error::Laid { place, line, .. } if *place == Place::new(NETWORK, 1) && *line == at),
             "{refusal:?}"
         );
     }
@@ -976,7 +1193,13 @@ mod tests {
         let settings = "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n";
         // An empty document counts: the position is that of the file, which an edit goes by.
         let file = file(&[settings, "", &network("{}")]).unwrap();
-        assert_eq!(file.network_document(), 2);
+        assert_eq!(
+            file.network_documents(),
+            [DocumentId {
+                file: 0,
+                document: 2
+            }]
+        );
     }
 
     #[test]
@@ -986,7 +1209,7 @@ mod tests {
         let line = line(&documents, 1);
         let refusal = refusal(&documents);
         assert!(
-            matches!(refusal, Error::Block { line: at, source: BlockError::Missing } if at == line),
+            matches!(&refusal, Error::Block { start, source: BlockError::Missing } if start.line() == line),
             "{refusal:?}"
         );
     }
@@ -1037,7 +1260,7 @@ mod tests {
             let line = line(&documents, 1);
             let refusal = refusal(&documents);
             assert!(
-                matches!(refusal, Error::Block { line: at, source: BlockError::Malformed(_) } if at == line),
+                matches!(&refusal, Error::Block { start, source: BlockError::Malformed(_) } if start.line() == line),
                 "{block}: {refusal:?}"
             );
         }
@@ -1153,12 +1376,235 @@ mod tests {
     }
 
     #[test]
-    fn the_talos_documents_of_the_example_reach_the_nodes_they_say() {
-        let file = file(&[
-            include_str!("../../../docs/example/mesh.yaml"),
-            include_str!("../../../docs/example/talos.yaml"),
-        ])
-        .unwrap();
+    fn a_layer_alone_need_not_be_valid_and_layers_are_laid_by_order_then_place() {
+        let without_routing = network_edited(BLOCK, |tree| {
+            tree.as_mapping_mut().unwrap().shift_remove("routing");
+        });
+        let mut routing = yaml("{mesh: {mtu: 1300}}");
+        routing["routing"] = example()["routing"].clone();
+        let routing = layer_of(routing);
+        let first = network_edited(
+            "{kind: network, version: 2, revision: 1, order: 10}",
+            |tree| *tree = yaml("{mesh: {mtu: 1200}}"),
+        );
+        let file = file(&[&without_routing, &routing, &first]).unwrap();
+        assert_eq!(
+            file.network().routing,
+            super::tests::file(&[&network("{}")])
+                .unwrap()
+                .network()
+                .routing
+        );
+        assert_eq!(file.network().mesh.mtu, Some(1300));
+    }
+
+    #[test]
+    fn files_are_read_once_each_in_the_byte_order_of_their_canonical_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join("a")).unwrap();
+        std::fs::write(root.join("0-mesh.yaml"), network("{}")).unwrap();
+        // `a-b` before `a/x` byte by byte, after it component by component.
+        std::fs::write(root.join("a-b.yaml"), layer("{mesh: {mtu: 1300}}")).unwrap();
+        std::fs::write(root.join("a/x.yaml"), layer("{mesh: {mtu: 1200}}")).unwrap();
+        let settings = "slipmesh: {kind: platform, platform: talos, order: 0}\nmetrics: {}\n";
+        std::fs::write(root.join("talos.yaml"), settings).unwrap();
+        std::os::unix::fs::symlink(root.join("talos.yaml"), root.join("link.yaml")).unwrap();
+        let inputs = [
+            root.join("a/x.yaml"),
+            root.join("a-b.yaml"),
+            root.join("talos.yaml"),
+            root.join("a/../talos.yaml"),
+            root.join("link.yaml"),
+            root.join("0-mesh.yaml"),
+        ];
+        assert_eq!(Sources::read(&inputs).unwrap().files().len(), 4);
+        let file = File::open(&inputs).unwrap();
+        assert_eq!(file.network().mesh.mtu, Some(1200));
+        assert!(file.platform(Platform::Talos).is_some());
+    }
+
+    #[test]
+    fn what_is_edited_in_the_sources_is_what_is_read() {
+        let mut sources = Sources::parse(&network("{}")).unwrap();
+        sources.files_mut()[0].yaml_mut().document_mut(0).unwrap()["mesh"]["mtu"] = 1300.into();
+        assert_eq!(File::read(&sources).unwrap().network().mesh.mtu, Some(1300));
+    }
+
+    #[test]
+    fn a_key_a_layer_takes_out_and_a_later_writes_again_stands_last() {
+        let mut again = yaml("{nodes: {}}");
+        again["nodes"]["node-a"] = example()["nodes"]["node-a"].clone();
+        let again = layer_of(again);
+        let documents = [network("{}"), layer("{nodes: {node-a: null}}"), again];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let file = file(&documents).unwrap();
+        let nodes: Vec<&str> = file.network().nodes.keys().map(Name::as_str).collect();
+        assert_eq!(nodes, ["node-b", "node-c", "router1", "node-a"]);
+    }
+
+    #[test]
+    fn a_null_inside_a_nodes_routing_stays_until_a_later_layer_takes_the_routing_out() {
+        let taken_away = [
+            network("{}"),
+            layer("{nodes: {node-b: {routing: {learn: null}}}}"),
+            layer("{nodes: {node-b: {platform: talos}}}"),
+        ];
+        let taken_away: Vec<&str> = taken_away.iter().map(String::as_str).collect();
+        let file = file(&taken_away).unwrap();
+        assert!(file.network().nodes["node-b"].routing.learn.is_empty());
+        let block_out = layer("{nodes: {node-b: {routing: null}}}");
+        let given_back = [taken_away.as_slice(), &[block_out.as_str()]].concat();
+        let file = super::tests::file(&given_back).unwrap();
+        assert_eq!(
+            file.network().nodes["node-b"].routing.learn,
+            file.network().routing.learn
+        );
+    }
+
+    #[test]
+    fn a_null_inside_a_links_block_stays_until_a_later_layer_takes_the_block_out() {
+        let with_defaults = network("{mesh: {amneziawg: {persistent_keepalive: 21-29}}}");
+        let taken_away = [
+            with_defaults,
+            layer("{mesh: {links: {a-b: {amneziawg: {persistent_keepalive: null}}}}}"),
+            layer("{mesh: {links: {a-b: {type: amneziawg}}}}"),
+        ];
+        let taken_away: Vec<&str> = taken_away.iter().map(String::as_str).collect();
+        let file = file(&taken_away).unwrap();
+        assert_eq!(amneziawg(&file, "a-b").persistent_keepalive, None);
+        let port = amneziawg(&file, "a-b").port;
+        let block_out = layer("{mesh: {links: {a-b: {amneziawg: null}}}}");
+        let block_again = layer(&format!(
+            "{{mesh: {{links: {{a-b: {{amneziawg: {{port: {port}}}}}}}}}}}"
+        ));
+        let given_back = [
+            taken_away.as_slice(),
+            &[block_out.as_str(), block_again.as_str()],
+        ]
+        .concat();
+        let file = super::tests::file(&given_back).unwrap();
+        assert_eq!(
+            amneziawg(&file, "a-b").persistent_keepalive,
+            Some(Range::new(21, 29).unwrap())
+        );
+    }
+
+    #[test]
+    fn a_key_written_null_outside_those_blocks_is_the_key_left_out_in_any_layer() {
+        for path in [
+            &["routing", "bfd"][..],
+            &["routing", "direct_interfaces"],
+            &["routing", "learn"],
+            &["routing", "announce"],
+            &["routing", "classes"],
+            &["mesh", "links"],
+            &["nodes", "router1", "routing"],
+        ] {
+            let edited = |null: bool| {
+                network_edited(BLOCK, |tree| {
+                    let (key, above) = path.split_last().unwrap();
+                    let parent = above.iter().fold(tree, |value, key| &mut value[*key]);
+                    let parent = parent.as_mapping_mut().unwrap();
+                    if null {
+                        parent.insert((*key).into(), Value::Null);
+                    } else {
+                        parent.shift_remove(*key).unwrap();
+                    }
+                })
+            };
+            let left_out = file(&[&edited(false)]).unwrap();
+            let written_null = file(&[&edited(true)]).unwrap();
+            assert_eq!(written_null.network(), left_out.network(), "{path:?}");
+            let overlay = path.iter().rev().fold("null".to_owned(), |inner, key| {
+                format!("{{{key}: {inner}}}")
+            });
+            let laid_null = file(&[&network("{}"), &layer(&overlay)]).unwrap();
+            assert_eq!(laid_null.network(), left_out.network(), "{path:?} laid");
+        }
+    }
+
+    #[test]
+    fn a_refusal_of_what_is_laid_names_the_file_and_line_of_the_layer_that_wrote_the_key() {
+        let node = "{platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}";
+        let network_block = format!("slipmesh: {BLOCK}\n");
+        for (overlay, line) in [
+            // Read by serde's derive.
+            (format!("{network_block}mesh:\n  colour: red\n"), 3),
+            // A range.
+            (
+                format!("{network_block}mesh:\n  amneziawg:\n    persistent_keepalive: 9-1\n"),
+                4,
+            ),
+            // A name, as a key.
+            (
+                format!("{network_block}nodes:\n  node-b: {node}\n  node x: {node}\n"),
+                4,
+            ),
+            // Two keys that read as one: the path stops at their mapping.
+            (
+                format!("{network_block}nodes:\n  1.0: {node}\n  1: {node}\n"),
+                2,
+            ),
+            // A link read in two steps: the path stops at the link.
+            (
+                format!(
+                    "{network_block}mesh:\n  links:\n    a-b:\n      ends:\n        node-b: null\n"
+                ),
+                4,
+            ),
+            // An obfuscation that refuses the keys its reader passes over: the path stops there.
+            (
+                format!(
+                    "{network_block}mesh:\n  links:\n    a-b:\n      amneziawg:\n        obfuscation:\n          colour: 1\n"
+                ),
+                6,
+            ),
+            // A required key missing: the path stops at what lacks it.
+            (
+                format!("{network_block}nodes:\n  node-x:\n    node_id: 0.0.0.9\n"),
+                3,
+            ),
+            // A group, read as a list or a mapping.
+            (
+                "slipmesh: {kind: groups}\ncore:\n- node-a\n- node a\n".to_owned(),
+                4,
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (base, laid) = (dir.path().join("a.yaml"), dir.path().join("b.yaml"));
+            std::fs::write(&base, network("{}")).unwrap();
+            std::fs::write(&laid, &overlay).unwrap();
+            let refusal = File::open(&[&base, &laid]).unwrap_err();
+            let laid = std::fs::canonicalize(&laid).unwrap();
+            assert!(
+                matches!(&refusal, Error::Laid { place, line: at, .. }
+                    if place.start().file() == Some(laid.as_path()) && *at == line),
+                "{overlay}: {refusal:?}"
+            );
+            assert!(
+                refusal.to_string().contains(&laid.display().to_string()),
+                "{refusal}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_example_reads_from_its_three_files_as_they_are() {
+        let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/example");
+        let file =
+            File::open(&["talos.yaml", "secrets.yaml", "mesh.yaml"].map(|name| example.join(name)))
+                .unwrap();
+        let network = file.network();
+        assert!(
+            network.nodes["node-a"]
+                .wireguard
+                .as_ref()
+                .unwrap()
+                .private_key
+                .is_some()
+        );
+        assert_eq!(network.mesh.links["a-b"].kind.obfuscation().jc, Some(4));
         let daemons: Vec<&str> = file
             .templates()
             .iter()
@@ -1267,11 +1713,11 @@ mod tests {
         let refusal = refusal(&[&network_edited("{kind: network, version: 2}", |_| {})]);
         assert!(
             matches!(
-                refusal,
+                &refusal,
                 Error::Block {
-                    line: 1,
+                    start,
                     source: BlockError::Malformed(_)
-                }
+                } if start.line() == 1
             ),
             "{refusal:?}"
         );
@@ -1284,41 +1730,13 @@ mod tests {
     }
 
     #[test]
-    fn a_second_network_or_groups_document_is_refused_by_their_lines_in_the_files() {
-        // The second is set first by its order; the lines come as they stand in the files.
-        let networks = [
-            network("{}"),
-            network_edited(
-                "{kind: network, version: 2, revision: 1, order: 10}",
-                |_| {},
-            ),
-        ];
-        let networks: Vec<&str> = networks.iter().map(String::as_str).collect();
-        let lines = (line(&networks, 0), line(&networks, 1));
-        let two_networks = refusal(&networks);
-        assert!(
-            matches!(two_networks, Error::Several { kind: NETWORK, count: 2, first, second } if (first, second) == lines),
-            "{two_networks:?}"
-        );
-        let groups = [
-            network("{}"),
-            "slipmesh: {kind: groups}\ncore: [node-a]\n".to_owned(),
-            "slipmesh: {kind: groups, order: 10}\ncore: [node-a]\n".to_owned(),
-        ];
-        let groups: Vec<&str> = groups.iter().map(String::as_str).collect();
-        let lines = (line(&groups, 1), line(&groups, 2));
-        let two_groups = refusal(&groups);
-        assert!(
-            matches!(two_groups, Error::Several { kind: GROUPS, count: 2, first, second } if (first, second) == lines),
-            "{two_groups:?}"
-        );
-    }
-
-    #[test]
     fn a_key_the_network_does_not_have_is_refused_by_its_line() {
-        let refusal = refusal(&[&network("{mesh: {colour: red}}")]);
+        let documents = [network("{mesh: {colour: red}}")];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let at = file_line(&documents, "colour: red");
+        let refusal = refusal(&documents);
         assert!(
-            matches!(&refusal, Error::Body { place, .. } if *place == Place::new(NETWORK, 1)),
+            matches!(&refusal, Error::Laid { place, line, .. } if *place == Place::new(NETWORK, 1) && *line == at),
             "{refusal:?}"
         );
     }
@@ -1477,10 +1895,13 @@ mod tests {
             "slipmesh: {kind: groups}\ncore: {include: [node-a], only: [node-b]}\n".to_owned(),
         ];
         let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
-        let at = place(GROUPS, &documents, 1);
+        let at = (
+            place(GROUPS, &documents, 1),
+            file_line(&documents, "core: {include: [node-a], only: [node-b]}"),
+        );
         let refusal = refusal(&documents);
         assert!(
-            matches!(&refusal, Error::Body { place, .. } if *place == at),
+            matches!(&refusal, Error::Laid { place, line, .. } if (place, *line) == (&at.0, at.1)),
             "{refusal:?}"
         );
     }
@@ -1638,17 +2059,19 @@ mod tests {
     }
 
     #[test]
-    fn a_second_platform_document_for_one_platform_is_refused_by_both_lines_in_the_files() {
-        // The second is set first by its order; the lines come as they stand in the files.
+    fn a_second_platform_document_for_one_platform_is_refused_naming_both_in_their_order() {
         let late = "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n";
         let early = "slipmesh: {kind: platform, platform: talos, order: 10}\nmetrics: {}\n";
         let documents = [network("{}").as_str(), late, early].map(str::to_owned);
         let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
-        let lines = (line(&documents, 1), line(&documents, 2));
+        let places = (
+            place(PLATFORM, &documents, 2),
+            place(PLATFORM, &documents, 1),
+        );
         let refusal = refusal(&documents);
         assert!(
-            matches!(refusal, Error::PlatformTwice { platform: Platform::Talos, first, second }
-                if (first, second) == lines),
+            matches!(&refusal, Error::PlatformTwice { platform: Platform::Talos, first, second }
+                if (first, second) == (&places.0, &places.1)),
             "{refusal:?}"
         );
     }

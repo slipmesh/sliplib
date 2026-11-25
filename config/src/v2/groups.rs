@@ -44,9 +44,9 @@ impl<'de> Deserialize<'de> for Group {
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Selection {
-    #[serde(default, deserialize_with = "super::absent_when_null")]
+    #[serde(default)]
     pub include: Include,
-    #[serde(default, deserialize_with = "super::absent_when_null")]
+    #[serde(default)]
     pub exclude: Exclude,
 }
 

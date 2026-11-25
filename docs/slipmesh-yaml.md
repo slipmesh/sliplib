@@ -14,11 +14,10 @@ does.
 
 ## The files
 
-A network is written in one file, which a tool takes with `--config`; [several
-files](#several-files) are **Planned**. A tool takes the file as plain text: a file kept encrypted
-is decrypted by whatever runs the tool, and the format knows nothing of how. The nodes' private keys
-are written in the clear, so the file that holds them is kept where such files are kept; with
-several files it could be a file of its own.
+A network is written in one file or in [several](#several-files), which a tool takes with `--in`.
+A tool takes each file as plain text: a file kept encrypted is decrypted by whatever runs the tool,
+and the format knows nothing of how. The nodes' private keys are written in the clear, so the file
+that holds them is kept where such files are kept, and can be a file of its own.
 
 People write the documents. Only [`slipmesh`](../README.md#slipmesh) writes values into them - the
 keys nobody can derive, and reference values - and it checks the files as a whole. Every other
@@ -53,8 +52,8 @@ The kinds:
 
 | kind | how many | `include`, `exclude` | `platform` | what it holds |
 | --- | --- | --- | --- | --- |
-| [`network`](#the-network-document) | one; **Planned:** several, laid over each other | not taken | not taken | The mesh: its addressing, routing, links and nodes. |
-| [`groups`](#groups) | at most one; **Planned:** several, laid over each other | not taken | not taken | Named sets of nodes, for documents to be aimed at. |
+| [`network`](#the-network-document) | at least one, laid over each other | not taken | not taken | The mesh: its addressing, routing, links and nodes. |
+| [`groups`](#groups) | any, laid over each other | not taken | not taken | Named sets of nodes, for documents to be aimed at. |
 | [`platform`](#platform) | at most one for a platform | not taken | required | Settings only that platform's tool reads. |
 | [`template`](#template) | any | optional | required | The template a daemon on the node makes its config from. |
 | [`patch`](#patch) | any | optional | required | A document in the platform's own format. |
@@ -64,18 +63,6 @@ misspelled `include` cannot aim a document at every node. A document without the
 error; one that holds nothing - empty, only comments, or `~` - is skipped.
 
 ### Several files
-
-A tool reads one file, given with `--config`. It holds one `network` document, which is required,
-and at most one `groups` document: a second of either is refused, naming the lines of the first two.
-Every `network` document carries `version` and `revision`.
-
-Before the body of any document is parsed, the documents are sorted by `order`, `1000` where it is
-left out; documents of one `order` keep the place they have in the file. That is "the order of the
-documents" below. Where documents are merged or chosen between for a node, their
-[rank](#aiming-a-document-at-nodes) puts one more rule between `order` and that place.
-
-**Planned:** several files, which the rest of this section describes as they will be read, and
-which the tools do not read yet.
 
 A tool takes its files with `--in`, which takes several values and may be repeated:
 `--in cfg/*.yaml` reads every such file of the directory. A command that writes also reads the file
@@ -87,17 +74,19 @@ yet is taken at the canonical path of its directory. Files in one directory ther
 name, and files in different directories by where the directories are, which differs between
 machines.
 
-The documents are then sorted by `order`, those of one `order` keeping the order they were read in,
-by file and then by place in the file. A document that has to come first or last whatever the
-paths say sets its `order`.
+Before the body of any document is parsed, the documents are sorted by `order`, `1000` where it is
+left out; those of one `order` keep the order they were read in, by file and then by place in the
+file. That is "the order of the documents" below. A document that has to come first or last
+whatever the paths say sets its `order`. Where documents are merged or chosen between for a node,
+their [rank](#aiming-a-document-at-nodes) puts one more rule between `order` and that place.
 
-The `network` documents, any number in one file or in several, are
-[laid over each other](#laying-one-value-over-another) in that order from an empty tree, and so
-are the `groups` documents. The result, one network and one set of groups, is what is checked: a
-single document need not be valid alone, so one file may hold the architecture of the mesh and
-another, laid over it, its secrets. The format does not know which keys are secret: a file of
-secrets is an ordinary layer. Documents of the other kinds are not laid over each other, only
-collected in the same order.
+Every `network` document carries `version` and `revision`. The `network` documents, any number in
+one file or in several, are [laid over each other](#laying-one-value-over-another) in that order
+from an empty tree, and so are the `groups` documents. The result, one network and one set of
+groups, is what is checked: a single document need not be valid alone, so one file may hold the
+architecture of the mesh and another, laid over it, its secrets. The format does not know which
+keys are secret: a file of secrets is an ordinary layer. Documents of the other kinds are not laid
+over each other, only collected in the same order.
 
 ### Laying one value over another
 
@@ -112,9 +101,11 @@ other.
 
 It is used in three places:
 
-- **Between documents, Planned with [several files](#several-files):** the `network` documents in
-  order over an empty tree, and the `groups` documents likewise, so a `null` in any of them, the
-  first included, means the key is absent, but for the two cases below.
+- **Between documents, with [several files](#several-files):** the `network` documents in order
+  over an empty tree, and the `groups` documents likewise, so a `null` in any of them, the first
+  included, means the key is absent, but for the two cases below. Inside a node's `routing` and a
+  link's block of its type, a `null` is kept as a value from one document to the next, and a
+  `null` at the block itself removes the block with every `null` in it.
 - **For a node:** `nodes.<name>.routing` over [`routing`](#routing), by
   [the same path](#a-nodes-routing). A `null` at one of its keys takes the network's value away
   for that node.
@@ -329,9 +320,8 @@ platforms there are.
 
 ## The network document
 
-The network is one tree, held whole by one `network` document; several, laid over each other, are
-[Planned](#several-files). It is about no node in particular, and the tool of every
-platform serves it.
+The network is one tree, held by one `network` document or [laid from several](#several-files). It
+is about no node in particular, and the tool of every platform serves it.
 
 ```yaml
 slipmesh:
@@ -888,10 +878,9 @@ no links, which has no interface to give it to.
 
 Named sets of nodes, for documents to be [aimed at](#aiming-a-document-at-nodes). They are not the
 architecture of the mesh but what other documents name, so they can be written beside those
-documents, in the same file or, once several files are read, in their own. The block of a `groups`
-document takes `kind` and `order` alone. One is read; several, laid over each other into one set of
-groups, are [Planned](#several-files). The loader turns a group into its nodes, so every tool
-understands it; a group configures nothing by itself.
+documents, in the same file or in their own. The block of a `groups` document takes `kind` and
+`order` alone. Several are [laid over each other](#several-files) into one set of groups. The loader
+turns a group into its nodes, so every tool understands it; a group configures nothing by itself.
 
 ```yaml
 slipmesh:
@@ -1086,8 +1075,7 @@ mesh as computed.
 
 ## Example
 
-[`example/`](example) holds a whole network in version 2, written in three files as it will be once
-[several files](#several-files) are read:
+[`example/`](example) holds a whole network in version 2, written in [three files](#several-files):
 
 - [`mesh.yaml`](example/mesh.yaml), the architecture: three `talos` nodes and a `routeros` one,
   three links and a route class;
@@ -1097,13 +1085,8 @@ mesh as computed.
   patches, and two groups: `workers`, which one patch is aimed with, and `core`, which `workers` is
   made of.
 
-**Planned:** the three given to a tool as one file, their documents in that order, which is what
-laying `secrets.yaml` over `mesh.yaml` comes to.
-
-A tool refuses the second `network` document of a file today, so what it takes is one file holding
-the `network` document of `mesh.yaml` with that of `secrets.yaml` laid over it, then the documents
-of `talos.yaml`. The three hold no Planned part, since a file with one is refused. One link has a
-header, a timer and its [keepalive](#keepalive) written as ranges.
+The three hold no Planned part, since a file with one is refused. One link has a header, a timer
+and its [keepalive](#keepalive) written as ranges.
 
 Their networks and addresses are from the ranges reserved for documentation, but for the
 link-local `fe80::` of the links; a `node_id` is an identity, not an address. Their AS number is
