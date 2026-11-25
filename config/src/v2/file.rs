@@ -189,7 +189,7 @@ pub enum Error {
     },
 }
 
-/// One file named once.
+/// A file named once where both starts are in it.
 fn both(first: &Start, second: &Start) -> String {
     match (&first.file, &second.file) {
         (Some(one), Some(other)) if one != other => format!("{first} and {second}"),
@@ -1101,7 +1101,6 @@ mod tests {
             "{err:?}"
         );
         let settings = "slipmesh: {kind: platform, platform: talos}\nmetrics: {}\n";
-        // An aim at an unknown name, one left with no node, two platform documents.
         for extra in [
             patch("platform: talos, include: [nogroup]", "one"),
             patch(
@@ -1113,6 +1112,25 @@ mod tests {
             std::fs::write(&path, format!("{}---\n{extra}", network("{}"))).unwrap();
             named_once(File::open(&[&path]).unwrap_err());
         }
+        // Of no document: wrapped in the files read.
+        let groups = format!(
+            "{}---\nslipmesh: {{kind: groups}}\nnode-a: [node-b]\n",
+            network("{}")
+        );
+        std::fs::write(&path, groups).unwrap();
+        let err = named_once(File::open(&[&path]).unwrap_err());
+        assert!(
+            matches!(&err, Error::Files { source, .. }
+                if matches!(**source, Error::Groups(GroupsError::NamedLikeANode(_)))),
+            "{err:?}"
+        );
+        std::fs::write(&path, network("{nodes: {node-b: {node_id: 0.0.0.1}}}")).unwrap();
+        let err = named_once(File::open(&[&path]).unwrap_err());
+        assert!(
+            matches!(&err, Error::Files { source, .. }
+                if matches!(**source, Error::Invalid(Invalid::NodeIdTwice { .. }))),
+            "{err:?}"
+        );
         let other = dir.path().join("talos.yaml");
         std::fs::write(&path, format!("{}---\n{settings}", network("{}"))).unwrap();
         std::fs::write(&other, settings).unwrap();
