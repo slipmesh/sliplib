@@ -116,9 +116,10 @@ It is used in three places:
   one field of `mesh.amneziawg.obfuscation`. A `null` at a field `slipmesh mint` writes leaves the
   link without it, and the link is refused as any link that lacks the field is; `slipmesh mint`
   then writes that field over the `null`, as it writes into any link that lacks it once the
-  defaults are laid under. Where the link's whole `obfuscation` is `null`, which takes away every
-  field laid under it, `mint` writes the fields it mints and a `null` at each other field of
-  `mesh.amneziawg.obfuscation`, so the link goes without those still.
+  defaults are laid under; with several files, where its `--edit` file is laid over the `null`.
+  Where the link's whole `obfuscation` is `null`, which takes away every field laid under it, `mint`
+  writes the fields it mints and a `null` at each other field of `mesh.amneziawg.obfuscation`, so
+  the link goes without those still.
 
 Every key of these two places takes `null`, besides the type its table gives.
 
@@ -1118,7 +1119,13 @@ Refused:
   would not know which to write into;
 - a change to a value already set, as `rekey` makes, where the value lies in a file other than the
   `--edit` one. The refusal names that file: written into the `--edit` file, the new value would lie
-  under or over the old one by the order of the documents, not by the intent of the command.
+  under or over the old one by the order of the documents, not by the intent of the command;
+- a value written that the files laid together do not hold, since a file laid over the `--edit` one
+  takes it away, with a `null` at its key or above it. The refusal names that file;
+- a write that changes the order of the nodes or the links: a key stands where it first appears
+  among the documents, so an `--edit` file laid before the files that name them would move them to
+  the front. A node's peers and interfaces follow that order: give the `--edit` file a name that
+  sorts after those files, or a later `order`.
 
 The commands are described [with the tool](../README.md#slipmesh). Everything else - nodes, links,
 groups, templates, every document - is written by hand.

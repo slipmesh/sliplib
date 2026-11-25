@@ -14,6 +14,10 @@ pub struct Edit {
     at: usize,
     network: DocumentId,
     path: PathBuf,
+    /// Each path written, with its value.
+    written: Vec<(Vec<Value>, Value)>,
+    /// The nodes and the links as read, in order.
+    order: (Vec<String>, Vec<String>),
 }
 
 impl Edit {
@@ -42,12 +46,15 @@ impl Edit {
                 networks.len()
             );
         };
+        let order = order(&file);
         Ok(Self {
             sources,
             file,
             at,
             network,
             path: edit.to_owned(),
+            written: Vec::new(),
+            order,
         })
     }
 
@@ -56,7 +63,7 @@ impl Edit {
         &self.path
     }
 
-    /// Into the `--edit` file's network document, where no other file holds the key: written
+    /// Into the `--edit` file's network document, where no other file sets the key: written
     /// there, the value would lie under or over the other by the order of the documents.
     pub fn write(&mut self, path: &[Value], value: Value) -> Result<()> {
         let elsewhere = self
@@ -64,15 +71,13 @@ impl Edit {
             .network_documents()
             .iter()
             .filter(|id| id.file != self.at)
-            .find(|id| held(self.document(**id), path));
+            .find(|id| at(self.document(**id), path).is_some_and(|value| !value.is_null()));
         if let Some(id) = elsewhere {
-            let shown = self.sources.files()[id.file]
-                .path()
-                .map_or_else(String::new, |path| path.display().to_string());
             anyhow::bail!(
-                "`{}` is set in {shown}, and this write goes into {} alone - give that file to \
+                "`{}` is set in {}, and this write goes into {} alone - give that file to \
                  `--edit`, or move the value into this one",
                 dotted(path),
+                self.shown(id.file),
                 self.path.display()
             );
         }
@@ -80,7 +85,28 @@ impl Edit {
             .yaml_mut()
             .document_mut(self.network.document)
             .context("the network document to write into is gone")?;
-        set(network, path, value)
+        set(network, path, value.clone())?;
+        self.written.push((path.to_vec(), value));
+        Ok(())
+    }
+
+    fn shown(&self, file: usize) -> String {
+        self.sources.files()[file]
+            .path()
+            .map_or_else(String::new, |path| path.display().to_string())
+    }
+
+    /// Of the layers laid over the `--edit` file's, the last holding the deepest part of `path`.
+    fn laid_over(&self, path: &[Value]) -> Option<usize> {
+        let layers = self.file.network_documents();
+        let after = layers.iter().position(|id| *id == self.network)? + 1;
+        (1..=path.len()).rev().find_map(|depth| {
+            layers[after..]
+                .iter()
+                .rev()
+                .find(|id| at(self.document(**id), &path[..depth]).is_some())
+                .map(|id| id.file)
+        })
     }
 
     fn document(&self, id: DocumentId) -> Option<&Value> {
@@ -92,9 +118,31 @@ impl Edit {
             .map(|document| &document.value)
     }
 
-    /// With what is written so far.
+    /// With what is written so far, which the files laid together have to keep as written, and
+    /// the nodes and links in their order.
     pub fn reread(&self) -> Result<File> {
-        Ok(File::read(&self.sources)?)
+        let file = File::read(&self.sources)?;
+        for (path, value) in &self.written {
+            if at(Some(file.laid()), path) != Some(value) {
+                let over = self
+                    .laid_over(path)
+                    .map_or_else(|| "a file laid over it".to_owned(), |file| self.shown(file));
+                anyhow::bail!(
+                    "`{}` written into {} is taken away by {over} - write it there, or give \
+                     `--edit` a file laid after it, by its name or by `order`",
+                    dotted(path),
+                    self.path.display()
+                );
+            }
+        }
+        anyhow::ensure!(
+            order(&file) == self.order,
+            "written into {}, laid before the files that name them, the nodes or the links would \
+             change their order, and with it every node's peers and interfaces - give it a name \
+             that sorts after those files, or a later `order`",
+            self.path.display()
+        );
+        Ok(file)
     }
 
     /// Once its text reads back, with the other files, as a network.
@@ -121,18 +169,28 @@ fn create_private(path: &Path, text: &str) -> Result<()> {
     let mut file = options
         .open(path)
         .with_context(|| format!("creating {}", path.display()))?;
-    file.write_all(text.as_bytes())
-        .and_then(|()| file.sync_all())
-        .with_context(|| format!("writing {}", path.display()))
+    let written = file
+        .write_all(text.as_bytes())
+        .and_then(|()| file.sync_all());
+    if written.is_err() {
+        // Cut short, it would hold part of the keys.
+        let _ = std::fs::remove_file(path);
+    }
+    written.with_context(|| format!("writing {}", path.display()))
 }
 
-/// A key there, `null` or not.
-fn held(document: Option<&Value>, path: &[Value]) -> bool {
-    path.iter()
-        .fold(document, |value, key| {
-            value.and_then(|value| value.get(key))
-        })
-        .is_some()
+fn at<'a>(document: Option<&'a Value>, path: &[Value]) -> Option<&'a Value> {
+    path.iter().fold(document, |value, key| {
+        value.and_then(|value| value.get(key))
+    })
+}
+
+fn order(file: &File) -> (Vec<String>, Vec<String>) {
+    let network = file.network();
+    (
+        network.nodes.keys().map(ToString::to_string).collect(),
+        network.mesh.links.keys().map(ToString::to_string).collect(),
+    )
 }
 
 fn dotted(path: &[Value]) -> String {

@@ -16,6 +16,7 @@ use crate::error::{Error, Result};
 /// Written back without its comments and documents of only comments.
 pub struct MultiDoc {
     documents: Vec<Document>,
+    source: Arc<str>,
 }
 
 impl MultiDoc {
@@ -40,11 +41,16 @@ impl MultiDoc {
                 taken: Vec::new(),
             });
         }
-        Ok(Self { documents })
+        Ok(Self { documents, source })
     }
 
     pub fn read(path: &Path) -> Result<Self> {
         crate::file::reading(path, Self::parse)
+    }
+
+    /// As read, whatever was edited since.
+    pub fn source(&self) -> &str {
+        &self.source
     }
 
     /// Those that hold more than comments, in file order.

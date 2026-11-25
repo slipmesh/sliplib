@@ -104,6 +104,14 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
+    #[error("{} names no file", path.display())]
+    NoFileName { path: PathBuf },
+    #[error(
+        "{} is a link to {}, which is not there - create the target, or give its path instead",
+        path.display(),
+        target.display()
+    )]
+    Dangling { path: PathBuf, target: PathBuf },
     #[error("reading {}", shown(paths))]
     Files {
         paths: Vec<PathBuf>,
@@ -224,36 +232,41 @@ struct Given<'a> {
     new: bool,
 }
 
-fn canonical(path: &Path) -> Result<PathBuf, Error> {
-    std::fs::canonicalize(path).map_err(|source| Error::Reading {
+/// Where a file not there yet would stand: its name in its directory's canonical path.
+fn not_there(path: &Path) -> Result<PathBuf, Error> {
+    let name = path.file_name().ok_or_else(|| Error::NoFileName {
         path: path.to_owned(),
-        source,
-    })
+    })?;
+    if let Ok(target) = std::fs::read_link(path) {
+        return Err(Error::Dangling {
+            path: path.to_owned(),
+            target,
+        });
+    }
+    let directory = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    let directory =
+        std::fs::canonicalize(directory.unwrap_or(Path::new("."))).map_err(|source| {
+            Error::Reading {
+                path: path.to_owned(),
+                source,
+            }
+        })?;
+    Ok(directory.join(name))
 }
 
-/// One not there yet stands where its directory is.
 fn given_edit(path: &Path) -> Result<Given<'_>, Error> {
-    let (canonical, new) =
-        match std::fs::canonicalize(path) {
-            Ok(canonical) => (canonical, false),
-            Err(missing) if missing.kind() == std::io::ErrorKind::NotFound => {
-                let directory = path
-                    .parent()
-                    .filter(|parent| !parent.as_os_str().is_empty());
-                let directory = std::fs::canonicalize(directory.unwrap_or(Path::new(".")))
-                    .map_err(|source| Error::Reading {
-                        path: path.to_owned(),
-                        source,
-                    })?;
-                (directory.join(path.file_name().unwrap_or_default()), true)
-            }
-            Err(source) => {
-                return Err(Error::Reading {
-                    path: path.to_owned(),
-                    source,
-                });
-            }
-        };
+    let (canonical, new) = match std::fs::canonicalize(path) {
+        Ok(canonical) => (canonical, false),
+        Err(missing) if missing.kind() == std::io::ErrorKind::NotFound => (not_there(path)?, true),
+        Err(source) => {
+            return Err(Error::Reading {
+                path: path.to_owned(),
+                source,
+            });
+        }
+    };
     Ok(Given {
         canonical,
         path,
@@ -262,25 +275,48 @@ fn given_edit(path: &Path) -> Result<Given<'_>, Error> {
     })
 }
 
+/// One not there is refused unless it is the `edit` file not there yet.
+fn given_input<'a>(path: &'a Path, edit: Option<&Given>) -> Result<Given<'a>, Error> {
+    let canonical = match std::fs::canonicalize(path) {
+        Ok(canonical) => canonical,
+        Err(source) => {
+            let new_edit = edit.filter(|edit| edit.new).map(|edit| &edit.canonical);
+            match not_there(path) {
+                Ok(canonical) if Some(&canonical) == new_edit => {
+                    return Ok(Given {
+                        canonical,
+                        path,
+                        edit: false,
+                        new: true,
+                    });
+                }
+                _ => {
+                    return Err(Error::Reading {
+                        path: path.to_owned(),
+                        source,
+                    });
+                }
+            }
+        }
+    };
+    Ok(Given {
+        canonical,
+        path,
+        edit: false,
+        new: false,
+    })
+}
+
 impl Sources {
     /// Each file once, whatever the path it is reached by, in the byte order of the canonical paths;
     /// `edit` among them, read too if it is there.
     pub fn read<P: AsRef<Path>>(inputs: &[P], edit: Option<&Path>) -> Result<Self, Error> {
+        let edit = edit.map(given_edit).transpose()?;
         let mut given = inputs
             .iter()
-            .map(|input| {
-                let path = input.as_ref();
-                Ok(Given {
-                    canonical: canonical(path)?,
-                    path,
-                    edit: false,
-                    new: false,
-                })
-            })
+            .map(|input| given_input(input.as_ref(), edit.as_ref()))
             .collect::<Result<Vec<Given>, Error>>()?;
-        if let Some(edit) = edit {
-            given.push(given_edit(edit)?);
-        }
+        given.extend(edit);
         // `Path` compares by components, so `a/b` would come before `a-b`. Stable, so a file is
         // named as it was first given.
         given.sort_by(|a, b| {
@@ -1585,6 +1621,21 @@ mod tests {
         let sources = Sources::read(&[&a, &c], Some(&given)).unwrap();
         assert_eq!((sources.files().len(), sources.edit()), (2, Some(1)));
         assert!(!sources.files()[1].is_new());
+        let named_twice = Sources::read(&[&a, &dir.path().join("b.yaml"), &c], Some(&new)).unwrap();
+        assert_eq!(
+            (named_twice.files().len(), named_twice.edit()),
+            (3, Some(1))
+        );
+        assert!(named_twice.files()[1].is_new());
+        let other = dir.path().join("d.yaml");
+        assert!(matches!(
+            Sources::read(&[&a, &other], Some(&new)),
+            Err(Error::Reading { path, .. }) if path == other
+        ));
+        assert!(matches!(
+            Sources::read(&[&a], Some(Path::new(""))),
+            Err(Error::NoFileName { .. })
+        ));
         assert_eq!(Sources::read(&[&c], Some(&a)).unwrap().edit(), Some(0));
         assert_eq!(Sources::read(&[&a], None).unwrap().edit(), None);
         // Under a directory that is not there, or under a file.
@@ -1597,6 +1648,21 @@ mod tests {
                 "{nowhere:?}"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_edit_file_that_is_a_link_to_nothing_is_refused_naming_both() {
+        let dir = tempfile::tempdir().unwrap();
+        let (link, target) = (
+            dir.path().join("secrets.yaml"),
+            dir.path().join("gone.yaml"),
+        );
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(matches!(
+            Sources::read::<&Path>(&[], Some(&link)),
+            Err(Error::Dangling { path, target: to }) if path == link && to == target
+        ));
     }
 
     #[test]
@@ -1627,11 +1693,9 @@ mod tests {
         ];
         let layers: Vec<&str> = layers.iter().map(String::as_str).collect();
         let file = file(&layers).unwrap();
-        assert!(file.laid()["nodes"]["node-b"]["routing"]["learn"].is_null());
-        assert!(
-            file.laid()["nodes"]["node-b"]["routing"]
-                .get("learn")
-                .is_some()
+        assert_eq!(
+            file.laid()["nodes"]["node-b"]["routing"].get("learn"),
+            Some(&Value::Null)
         );
     }
 

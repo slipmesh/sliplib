@@ -13,13 +13,12 @@ fn holds_the_values_of(rewritten: &str, original: &MultiDoc) -> Result<bool> {
 
 /// Each file alone, laying nothing: none is written unless every one may be.
 pub fn run(paths: &[PathBuf]) -> Result<()> {
+    let sources = Sources::read(paths, None)?;
+    check_blocks(&sources)?;
     let mut rewrites = Vec::new();
-    for path in paths {
-        let original =
-            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        let sources = Sources::read(&[path], None)?;
-        check_blocks(&sources)?;
-        let yaml = sources.files()[0].yaml();
+    for file in sources.files() {
+        let path = file.path().context("a file without a path")?;
+        let yaml = file.yaml();
         let rewritten = yaml.text()?;
         // Its one promise, checked on the text written.
         anyhow::ensure!(
@@ -27,7 +26,7 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
             "{}: rewriting it would change a value - not written",
             path.display()
         );
-        rewrites.push((path, rewritten == original, rewritten));
+        rewrites.push((path, rewritten == yaml.source(), rewritten));
     }
     for (path, unchanged, rewritten) in rewrites {
         if unchanged {

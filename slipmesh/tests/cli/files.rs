@@ -1,7 +1,6 @@
 use crate::common::{MESH, Ran, TALOS, slipmesh};
 use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{MultiDoc, Value};
-use std::path::Path;
 
 /// Files by name in a directory of their own, the tool run there.
 struct Dir(tempfile::TempDir);
@@ -35,10 +34,6 @@ impl Dir {
             .unwrap()
             .into()
     }
-}
-
-fn exists(path: &Path) -> bool {
-    std::fs::exists(path).unwrap()
 }
 
 #[test]
@@ -161,15 +156,6 @@ fn a_change_to_a_value_set_in_another_file_is_refused_naming_that_file() {
 }
 
 #[test]
-fn an_edit_file_in_a_directory_that_is_not_there_is_refused_and_creates_nothing() {
-    let dir = Dir::holding(&[("mesh.yaml", MESH)]);
-    let ran = dir.run(&["mint", "--in", "mesh.yaml", "--edit", "no/secrets.yaml"]);
-    assert_eq!(ran.code, Some(1), "{}", ran.stdout);
-    assert!(ran.stderr.contains("no/secrets.yaml"), "{}", ran.stderr);
-    assert!(!exists(&dir.path("no")));
-}
-
-#[test]
 fn fmt_rewrites_each_file_alone_and_none_where_one_is_refused() {
     let key = PrivateKey::generate();
     let secrets = format!(
@@ -192,8 +178,9 @@ fn fmt_rewrites_each_file_alone_and_none_where_one_is_refused() {
         (secrets.clone(), groups.to_owned())
     );
 
-    let ran = dir.run(&["fmt", "secrets.yaml", "groups.yaml"]);
+    let ran = dir.run(&["fmt", "secrets.yaml", "./secrets.yaml", "groups.yaml"]);
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    assert_eq!(ran.stdout.lines().count(), 2, "{}", ran.stdout);
     for (name, before) in [("secrets.yaml", secrets.as_str()), ("groups.yaml", groups)] {
         assert_ne!(dir.text(name), before, "{name}");
         assert_eq!(
@@ -202,4 +189,85 @@ fn fmt_rewrites_each_file_alone_and_none_where_one_is_refused() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn a_write_another_file_takes_away_is_refused_naming_that_file() {
+    let dir = Dir::holding(&[("mesh.yaml", MESH)]);
+    assert_eq!(
+        dir.run(&["mint", "--in", "mesh.yaml", "--edit", "secrets.yaml"])
+            .code,
+        Some(0)
+    );
+    let mask =
+        "slipmesh: {kind: network, version: 2, revision: 1}\nnodes: {node-a: {wireguard: null}}\n";
+    std::fs::write(dir.path("z-mask.yaml"), mask).unwrap();
+    let secrets = dir.text("secrets.yaml");
+    let ran = dir.run(&[
+        "rekey",
+        "--node",
+        "node-a",
+        "--in",
+        "mesh.yaml",
+        "z-mask.yaml",
+        "--edit",
+        "secrets.yaml",
+    ]);
+    assert_eq!(ran.code, Some(1), "{}", ran.stdout);
+    assert!(
+        ran.stderr.contains("z-mask.yaml")
+            && ran.stderr.contains("nodes.node-a.wireguard.private_key"),
+        "{}",
+        ran.stderr
+    );
+    assert_eq!(dir.text("secrets.yaml"), secrets);
+}
+
+#[test]
+fn a_null_inside_a_links_block_is_written_over_from_a_file_laid_after_it_alone() {
+    let nulled = MESH.replace(
+        "      amneziawg:\n        port: 51830\n",
+        "      amneziawg:\n        port: 51830\n        obfuscation: {jc: null}\n",
+    );
+    assert_ne!(nulled, MESH);
+    let dir = Dir::holding(&[("mesh.yaml", &nulled)]);
+    let ran = dir.run(&["mint", "--in", "mesh.yaml", "--edit", "z-secrets.yaml"]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    let [secrets] = &dir.documents("z-secrets.yaml")[..] else {
+        panic!("{}", dir.text("z-secrets.yaml"));
+    };
+    assert!(secrets["mesh"]["links"]["a-b"]["amneziawg"]["obfuscation"]["jc"].is_number());
+
+    let ran = dir.run(&["mint", "--in", "mesh.yaml", "--edit", "a-secrets.yaml"]);
+    assert_eq!(ran.code, Some(1), "{}", ran.stdout);
+    assert!(
+        ran.stderr.contains("mesh.yaml")
+            && ran
+                .stderr
+                .contains("mesh.links.a-b.amneziawg.obfuscation.jc"),
+        "{}",
+        ran.stderr
+    );
+    assert!(!dir.path("a-secrets.yaml").exists());
+}
+
+#[test]
+fn a_write_that_would_move_the_nodes_is_refused() {
+    let dir = Dir::holding(&[("mesh.yaml", MESH)]);
+    let ran = dir.run(&[
+        "rekey",
+        "--node",
+        "node-b",
+        "--in",
+        "mesh.yaml",
+        "--edit",
+        "keys.yaml",
+    ]);
+    assert_eq!(ran.code, Some(1), "{}", ran.stdout);
+    assert!(
+        ran.stderr.contains("keys.yaml") && ran.stderr.contains("change their order"),
+        "{}",
+        ran.stderr
+    );
+    assert!(!dir.path("keys.yaml").exists());
 }

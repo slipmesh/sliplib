@@ -36,8 +36,9 @@ slipmesh rekey --node node-a --in mesh.yaml talos.yaml --edit secrets.yaml
 `--in` takes several files and may be repeated. A command that writes reads the file of `--edit`
 too, given in `--in` or not, and writes into it alone, replacing it in place; one that is not there
 yet is created, its owner's alone, holding one `network` document. It refuses an `--edit` file
-that does not hold exactly one `network` document, and a change to a value another file holds,
-naming that file.
+that does not hold exactly one `network` document, a change to a value another file holds, a value
+a file laid over the `--edit` one takes away, and a write that moves the nodes or the links, naming
+the file.
 
 Writing anything rewrites the whole file from its values, in the layout of the YAML serializer.
 Comments outside block scalars are not kept; a document that holds nothing - only comments, empty,
@@ -75,7 +76,7 @@ would otherwise fill in by hand: the `wireguard.private_key` of every node on a 
 fields `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4` of the `obfuscation` of every link of type
 `amneziawg` that leaves them unset, once `mesh.amneziawg.obfuscation` is laid under its own. A
 link of type `wireguard` gets no obfuscation, and a node on no link no key. It writes the reference
-value of `mesh.interface_prefix`, `mesh-`, where the file leaves it out, and prints each entry it
+value of `mesh.interface_prefix`, `mesh-`, where the files leave it out, and prints each entry it
 wrote into - `nodes.node-a.wireguard.private_key`, `mesh.links.a-b.amneziawg.obfuscation` - never a
 value.
 
@@ -90,9 +91,9 @@ with `random_trailers` on and no `header_protection_key`, and either can be swit
 offsets are written. They are also created so that `s2` is not `s1` + 56, which would give the
 two handshake messages one length, whichever of the two the link already holds.
 
-Before it writes, `mint` checks every node on the file as it would become, as `check` does, and
+Before it writes, `mint` checks every node on the files as they would become, as `check` does, and
 writes nothing when one would be refused: a value that is written is never minted again. Where a
-setting of the file's own narrows what fits beside it, a further run draws again.
+setting of the files' own narrows what fits beside it, a further run draws again.
 
 Written, a value is the operator's like any other: `mint` never replaces one, and deleting one
 gives that node or link a new identity on the next run, and every peer of it a config that changes
@@ -118,7 +119,7 @@ it is, and then no file is written. One line says whether each file was rewritte
 writing its `wireguard` block where the node has none. Every peer of the node dials it by the
 public half of that key, so the config of each of them changes with it and has to reach its node in
 the same pass. It refuses a node on no link, which nothing dials, and checks, as `mint` does, that
-the file with the new key still gives a network before it writes it.
+the files with the new key still give a network before it writes it.
 
 ### Installing
 
