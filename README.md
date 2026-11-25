@@ -209,7 +209,9 @@ chain prints the whole message, each part once.
     refuse, as `v2::Error`; a file of version 1 as `VersionOne`, naming the conversion document. A
     refusal of a document names its file and line; one of the network or the groups as laid
     (`Laid`) names the key's line in the last document that wrote it, or, where the refusal is of a
-    mapping as a whole, the mapping's; one about no document (`Files`) names the files read.
+    mapping as a whole, the mapping's; one about no document (`Files`) names the files read. Each
+    names a file once: a document's `include` and `exclude` are refused as `Reach`, naming the
+    document, and the groups' own definitions as `Groups`.
   - `network()` gives what is in force under each node's `routing` and in each link's block;
     `laid()` the `network` documents laid over each other, for a write.
   - A node gives its `underlay` and `private_key`; a `Link` whether a node is an end (`has_end`)
