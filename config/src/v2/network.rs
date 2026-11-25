@@ -108,14 +108,8 @@ pub struct Class {
     /// Absent, `main`.
     #[serde(default)]
     pub table: Option<u8>,
-    #[serde(default = "both_families")]
-    pub families: Vec<Family>,
     #[serde(default, deserialize_with = "unique_keys")]
     pub rules: Map<Name, Rule>,
-}
-
-fn both_families() -> Vec<Family> {
-    vec![Family::Ipv4, Family::Ipv6]
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -173,8 +167,7 @@ pub struct Underlay {
     pub mtu: Option<u32>,
 }
 
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Family {
     Ipv4,
     Ipv6,
@@ -529,7 +522,6 @@ mod tests {
             Class {
                 protocol: 152,
                 table: Some(152),
-                families: vec![Family::Ipv4],
                 rules: Map::from_iter([
                     (
                         Name::try_from("uplink-replies".to_owned()).unwrap(),
@@ -658,7 +650,6 @@ mod tests {
             "{routing: {classes: {egress: {protocol: 256}}}}",
             "{routing: {classes: {-egress: {protocol: 7}}}}",
             "{routing: {classes: {egress: {table: 256}}}}",
-            "{routing: {classes: {egress: {families: [ipv5]}}}}",
             "{routing: {classes: {egress: {rules: {egress: {priority: 4294967296}}}}}}",
             "{routing: {classes: {egress: {rules: {egress: {lookup: local}}}}}}",
             "{routing: {direct_interfaces: [\"lan?\"]}}",

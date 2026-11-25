@@ -217,11 +217,8 @@ comes from the conversion.
        own name is free. `fwMark` and `fwMask` become its `mark`, in hexadecimal,
        `0x100000/0x100000` for `1048576` and `1048576`, the mask left out where it was absent or
        every bit. `table: main` becomes `lookup: main`, and the class's own table is left out. The
-       `dst` of the rules of one class gives the class its `families`: `[ipv4]` for `0.0.0.0/0`,
-       `[ipv6]` for `::/0`, the key left out for none. Rules of one class that differ in `dst`
-       cannot share it. Delete the `patch`. A `RoutingRuleConfig` with any other key, reaching some
-       nodes of `talos` only, or differing in `dst` from the other rules of its class, stays a
-       `patch`.
+       `dst` is dropped. Delete the `patch`. A `RoutingRuleConfig` with any other key, a `dst` of
+       its own, or reaching some nodes of `talos` only, stays a `patch`.
    14. Give every remaining `patch` its `platform`, drop the `exclude` that kept it from the nodes of
        other platforms, take a node of another platform out of its `include`, and delete the
        `mikrotik` document.
@@ -267,7 +264,7 @@ comes from the conversion.
      and the peer's keepalive is 25 where an obfuscated link gave it `20-30`;
    - where step 4.13 turned a `patch` into a rule, its `RoutingRuleConfig` document stands after the
      generated documents of the node's patch file, not among the documents of the `patch`es, with
-     the same contents;
+     the same contents but `dst`: it holds for IPv6 too, beside the IPv4 rule it was;
    - where step 4.11 turned a `patch` of `router` or `nftables` into a template, the files of that
      document come in the generator's order and not the `patch`'s: the generator's config, then the
      template, then the files the `patch` adds, so a file the `patch` listed before the template

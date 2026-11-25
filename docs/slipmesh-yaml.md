@@ -452,7 +452,6 @@ routing:
     egress:
       protocol: 152
       table: 152
-      families: [ipv4]
       rules:
         uplink-replies:
           priority: 1000
@@ -466,7 +465,6 @@ routing:
 | --- | --- | --- | --- | --- |
 | `protocol` | integer, 0 to 255 | yes | | The protocol number of the class's routes in a node's kernel. |
 | `table` | integer, 1 to 252 | no | `main` | The kernel routing table the class's rules send to. |
-| `families` | list of `ipv4` and `ipv6` | no | both | The address families the class's rules are made for. |
 | `rules` | mapping | no | none | [Routing rules](#routingclassesnamerules), by name. |
 
 A class takes any [name](#names). On `talos` a node is told each class's number as the annotation
@@ -474,17 +472,17 @@ A class takes any [name](#names). On `talos` a node is told each class's number 
 class there is no such annotation. Refused, over all classes together: two classes with the same
 number; `0` to `4`, the kernel's own; `200`, which the routes to the clients of roadwarriors pools
 carry. A `table` of `0`, `253`, `254` or `255` is refused too: the kernel keeps those for itself,
-`254` being `main`, which a class without the key gets. So is `families: []`, which would leave the
-class no rule; a family written twice counts once.
+`254` being `main`, which a class without the key gets.
 
 **Planned:** the router carrying a class's routes over the mesh to the other nodes, telling them
-from its other kernel routes by the number, into the class's `table` and for its `families`.
+from its other kernel routes by the number, into the class's `table`.
 
 ##### `routing.classes.<name>.rules`
 
 A rule tells the kernel which table a packet's route is looked up in, before `main`. Each rule of
-a class is made on every `talos` node, in each of the class's families; `routeros` does not serve
-them. The name of a rule appears in messages and configures nothing.
+a class is made on every `talos` node and holds for both address families alike, with the same
+table and the same mark; `routeros` does not serve them. The name of a rule appears in messages and
+configures nothing.
 
 | key | type | required | default | what it is |
 | --- | --- | --- | --- | --- |
@@ -501,9 +499,8 @@ packets than the text says. A mark without a mask is written in quotes, `"0x1000
 is a number.
 
 On `talos` each rule is a `RoutingRuleConfig` document of the node's machine configuration, named
-by its priority. Talos makes a rule for both families unless it names a destination, so a class of
-one family gives its rules `dst: 0.0.0.0/0` or `dst: ::/0`. A `patch` holding a `RoutingRuleConfig`
-of a rule's priority is refused by the generator.
+by its priority and naming no destination, which Talos makes into a rule of each family. A `patch`
+holding a `RoutingRuleConfig` of a rule's priority is refused by the generator.
 
 ### `nodes`
 

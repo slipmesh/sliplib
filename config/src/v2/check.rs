@@ -102,10 +102,6 @@ pub enum Invalid {
     )]
     KernelTable { class: ClassName, table: u8 },
     #[error(
-        "the route class {0:?} has `families: []`, which leaves it no rule - name a family, or leave the key out for both"
-    )]
-    NoFamily(ClassName),
-    #[error(
         "the rule {:?} of the route class {:?} and the rule {:?} of the route class {:?} both have priority {priority} - give each rule its own",
         .first.1, .first.0, .second.1, .second.0
     )]
@@ -287,9 +283,6 @@ fn classes(classes: &Map<ClassName, Class>) -> Result<(), Invalid> {
                 class: name.clone(),
                 table,
             });
-        }
-        if class.families.is_empty() {
-            return Err(Invalid::NoFamily(name.clone()));
         }
         for (rule, Rule { priority, .. }) in &class.rules {
             if let Some((first_class, first)) = priorities.insert(*priority, (name, rule)) {
@@ -673,14 +666,6 @@ mod tests {
             .unwrap();
             assert_eq!(check(&network), Ok(()));
         }
-    }
-
-    #[test]
-    fn a_class_of_no_family_is_refused() {
-        assert_eq!(
-            refusal("{routing: {classes: {egress: {families: []}}}}"),
-            Invalid::NoFamily(class("egress"))
-        );
     }
 
     #[test]

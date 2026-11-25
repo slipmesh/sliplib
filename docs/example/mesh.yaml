@@ -32,7 +32,6 @@ routing:
     egress:
       protocol: 152
       table: 152
-      families: [ipv4]
       rules:
         # Replies to connections that came in through a node's uplink leave through it, past
         # table 152: the firewall template marks those connections.
