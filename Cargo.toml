@@ -36,8 +36,8 @@ tempfile = "3.27.0"
 nix = { version = "0.32.0", default-features = false, features = ["signal"] }
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
-# The keys a derived reader passes over: a link's obfuscation refuses them, the daemons' does not.
-serde_ignored = "0.1.14"
+# The path of the key a value read whole was refused at, which a laid tree has no line for.
+serde_path_to_error = "0.1.20"
 sliplib-config = { path = "config" }
 sliplib-fs = { path = "fs" }
 sliplib-mesh = { path = "mesh" }

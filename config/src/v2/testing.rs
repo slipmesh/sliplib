@@ -33,12 +33,3 @@ pub(super) fn left_out(path: &[&str]) -> Result<Network, String> {
     parent.shift_remove(key).unwrap();
     network(value)
 }
-
-/// Read from the text: laid over a value, `null` would take the key out.
-pub(super) fn written_null(path: &[&str]) -> Result<Network, String> {
-    let mut value = example();
-    let (parent, key) = parent(&mut value, path);
-    *parent.get_mut(key).unwrap() = Value::Null;
-    let text = sliplib_yaml::to_string(&value).unwrap();
-    sliplib_yaml::from_str(&text).map_err(|error| error.to_string())
-}

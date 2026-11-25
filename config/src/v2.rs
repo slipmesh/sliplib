@@ -15,8 +15,8 @@ pub use block::{
 };
 pub use check::Invalid;
 pub use file::{
-    Aim, AimedDocument, BlockError, Error, File, META_KEY, Place, PlatformDocument, REVISION,
-    VERSION,
+    Aim, AimedDocument, BlockError, DocumentId, Error, File, META_KEY, Place, PlatformDocument,
+    REVISION, SourceFile, Sources, Start, VERSION,
 };
 pub(crate) use name::is_name_character;
 pub use name::{ClassName, Name, NameError};
@@ -31,8 +31,8 @@ use std::marker::PhantomData;
 /// In the order written, which reaches the nodes' configs.
 pub type Map<K, V> = indexmap::IndexMap<K, V>;
 
-/// An entry written `null` is left out, and a key twice refused: YAML reads `1.0` and `1`, or `True`
-/// and `true`, as one, and the later would replace the earlier.
+/// A key twice refused: YAML reads `1.0` and `1`, or `True` and `true`, as one, and the later
+/// would replace the earlier.
 pub(crate) fn unique_keys<'de, D, K, V>(deserializer: D) -> Result<Map<K, V>, D::Error>
 where
     D: Deserializer<'de>,
@@ -53,44 +53,19 @@ where
         }
 
         fn visit_map<A: MapAccess<'de>>(self, mut entries: A) -> Result<Map<K, V>, A::Error> {
-            let mut map: Map<K, Option<V>> = Map::new();
-            while let Some((key, value)) = entries.next_entry::<K, Option<V>>()? {
+            let mut map = Map::new();
+            while let Some((key, value)) = entries.next_entry::<K, V>()? {
                 if map.contains_key(&key) {
                     let name: &str = key.borrow();
                     return Err(de::Error::custom(NameError::Twice(name.to_owned())));
                 }
                 map.insert(key, value);
             }
-            Ok(map
-                .into_iter()
-                .filter_map(|(key, value)| Some((key, value?)))
-                .collect())
+            Ok(map)
         }
     }
 
     deserializer.deserialize_map(Entries(PhantomData))
-}
-
-/// `null` reads as the key left out.
-pub(crate) fn absent_when_null<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de> + Default,
-{
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
-}
-
-/// Through [`unique_keys`], for a field that also takes `null` as left out.
-pub(crate) struct UniqueKeys<K, V>(pub Map<K, V>);
-
-impl<'de, K, V> Deserialize<'de> for UniqueKeys<K, V>
-where
-    K: Deserialize<'de> + Hash + Eq + Borrow<str>,
-    V: Deserialize<'de>,
-{
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        unique_keys(deserializer).map(Self)
-    }
 }
 
 #[cfg(test)]

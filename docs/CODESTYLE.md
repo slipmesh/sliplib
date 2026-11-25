@@ -37,9 +37,12 @@
 - A type read from text has no `serde(flatten)`, `untagged` or internal `tag`: serde reads them
   through a buffer, and the refusal loses its key and line. Where one text holds several types'
   keys, each type is read from the text on its own: `sliplib_yaml::read` for a file,
-  `Document::deserialize` for a document. A value put together in memory, such as merged patches,
-  has no text, so each part is read from its own text before the parts are put together. Writing
-  through `flatten` loses nothing and stays allowed.
+  `Document::deserialize` for a document. A value put together in memory has no text. Merged
+  patches are read part by part, each from its own text, before the parts are put together. A
+  value laid from several texts, such as the network, is read whole, since one layer alone need not
+  be valid: `sliplib_yaml::from_value_at` gives the path of the key it is refused at, and the
+  refusal goes back to the text of the last layer that wrote it (`written_by`,
+  `Document::line_at`). Writing through `flatten` loses nothing and stays allowed.
 - `sliplib-yaml` refuses a YAML tag in what it reads, so no type takes one.
 
 ## Tests

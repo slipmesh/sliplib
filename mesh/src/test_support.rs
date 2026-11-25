@@ -21,14 +21,20 @@ pub fn minted_obfuscation() -> Obfuscation {
 pub const EXAMPLE_MESH: &str = include_str!("../../docs/example/mesh.yaml");
 pub const EXAMPLE_SECRETS: &str = include_str!("../../docs/example/secrets.yaml");
 
-/// In order, as one file.
+/// Laid by the loader in order; one without a `slipmesh:` block is a `network` document.
 pub fn laid(layers: &[&str]) -> sliplib_config::v2::File {
-    let tree = layers
+    let documents: Vec<String> = layers
         .iter()
-        .fold(sliplib_yaml::Value::Null, |tree, layer| {
-            sliplib_yaml::merge(tree, &sliplib_yaml::from_str(layer).unwrap())
-        });
-    sliplib_config::v2::File::parse(&sliplib_yaml::to_string(&tree).unwrap()).unwrap()
+        .map(|layer| {
+            let mut document: sliplib_yaml::Value = sliplib_yaml::from_str(layer).unwrap();
+            if document.get(sliplib_config::v2::META_KEY).is_none() {
+                document[sliplib_config::v2::META_KEY] =
+                    sliplib_yaml::from_str("{kind: network, version: 2, revision: 1}").unwrap();
+            }
+            sliplib_yaml::to_string(&document).unwrap()
+        })
+        .collect();
+    sliplib_config::v2::File::parse(&sliplib_yaml::join(&documents)).unwrap()
 }
 
 /// The secrets over the mesh, `overlay` over both.
