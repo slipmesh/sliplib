@@ -102,12 +102,29 @@ impl Edit {
         *self.sources.files_mut()[self.at].yaml_mut() = MultiDoc::parse(&text)?;
         File::read(&self.sources).context("the edited files do not read back - not written")?;
         if self.sources.files()[self.at].is_new() {
-            sliplib_fs::write_if_changed(&self.path, &text)?;
+            create_private(&self.path)?;
+            if let Err(failed) = sliplib_fs::replace_file(&self.path, &text) {
+                // Left empty, the file would be refused as holding no network document.
+                let _ = std::fs::remove_file(&self.path);
+                return Err(failed.into());
+            }
         } else {
             sliplib_fs::replace_file(&self.path, &text)?;
         }
         Ok(())
     }
+}
+
+/// Its owner's alone, as it may hold private keys; refused if it appeared since it was read.
+fn create_private(path: &Path) -> Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options
+        .open(path)
+        .with_context(|| format!("creating {}", path.display()))?;
+    Ok(())
 }
 
 /// A key there, `null` or not.

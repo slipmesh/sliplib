@@ -1147,4 +1147,5 @@ comment said has to move elsewhere first, for instance into a README beside the 
 
 A command with nothing to write leaves the file as it is. Before it replaces the file, a command
 other than `fmt` checks that the files, with the result in its place, still read as a valid
-network. Every command replaces the file in one step, keeping its permissions.
+network. Every command replaces the file in one step, keeping its permissions; a file it creates is
+its owner's alone.

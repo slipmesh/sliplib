@@ -35,8 +35,9 @@ slipmesh rekey --node node-a --in mesh.yaml talos.yaml --edit secrets.yaml
 
 `--in` takes several files and may be repeated. A command that writes reads the file of `--edit`
 too, given in `--in` or not, and writes into it alone, replacing it in place; one that is not there
-yet is created, holding one `network` document. It refuses an `--edit` file that does not hold
-exactly one `network` document, and a change to a value another file holds, naming that file.
+yet is created, its owner's alone, holding one `network` document. It refuses an `--edit` file
+that does not hold exactly one `network` document, and a change to a value another file holds,
+naming that file.
 
 Writing anything rewrites the whole file from its values, in the layout of the YAML serializer.
 Comments outside block scalars are not kept; a document that holds nothing - only comments, empty,

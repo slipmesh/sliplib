@@ -82,6 +82,20 @@ fn mint_writes_into_the_edit_file_alone_and_creates_it_with_one_network_document
     assert_eq!(dir.text("secrets.yaml"), written);
 }
 
+#[cfg(unix)]
+#[test]
+fn an_edit_file_mint_creates_is_its_owners_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = Dir::holding(&[("mesh.yaml", MESH)]);
+    let ran = dir.run(&["mint", "--in", "mesh.yaml", "--edit", "secrets.yaml"]);
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+    let mode = std::fs::metadata(dir.path("secrets.yaml"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+}
+
 #[test]
 fn a_write_into_a_file_without_exactly_one_network_document_is_refused_and_writes_nothing() {
     let laid = "slipmesh: {kind: network, version: 2, revision: 1}\nmesh: {mtu: 1300}\n";
