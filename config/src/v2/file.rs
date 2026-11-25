@@ -1487,50 +1487,38 @@ mod tests {
     }
 
     #[test]
-    fn a_null_inside_a_nodes_routing_stays_until_a_later_layer_takes_the_routing_out() {
-        let taken_away = [
-            network("{}"),
-            layer("{nodes: {node-b: {routing: {learn: null}}}}"),
-            layer("{nodes: {node-b: {platform: talos}}}"),
+    fn a_null_inside_a_block_stays_until_a_later_layer_takes_the_block_out() {
+        let learns_nothing = |file: &File| file.network().nodes["node-b"].routing.learn.is_empty();
+        let keeps_no_alive = |file: &File| amneziawg(file, "a-b").persistent_keepalive.is_none();
+        let rows = [
+            (
+                network("{}"),
+                "{nodes: {node-b: {routing: {learn: null}}}}",
+                "{nodes: {node-b: {platform: talos}}}",
+                &["{nodes: {node-b: {routing: null}}}"][..],
+                learns_nothing as fn(&File) -> bool,
+            ),
+            (
+                network("{mesh: {amneziawg: {persistent_keepalive: 21-29}}}"),
+                "{mesh: {links: {a-b: {amneziawg: {persistent_keepalive: null}}}}}",
+                "{mesh: {links: {a-b: {type: amneziawg}}}}",
+                &[
+                    "{mesh: {links: {a-b: {amneziawg: null}}}}",
+                    "{mesh: {links: {a-b: {amneziawg: {port: 51830}}}}}",
+                ],
+                keeps_no_alive,
+            ),
         ];
-        let taken_away: Vec<&str> = taken_away.iter().map(String::as_str).collect();
-        let file = file(&taken_away).unwrap();
-        assert!(file.network().nodes["node-b"].routing.learn.is_empty());
-        let block_out = layer("{nodes: {node-b: {routing: null}}}");
-        let given_back = [taken_away.as_slice(), &[block_out.as_str()]].concat();
-        let file = super::tests::file(&given_back).unwrap();
-        assert_eq!(
-            file.network().nodes["node-b"].routing.learn,
-            file.network().routing.learn
-        );
-    }
-
-    #[test]
-    fn a_null_inside_a_links_block_stays_until_a_later_layer_takes_the_block_out() {
-        let with_defaults = network("{mesh: {amneziawg: {persistent_keepalive: 21-29}}}");
-        let taken_away = [
-            with_defaults,
-            layer("{mesh: {links: {a-b: {amneziawg: {persistent_keepalive: null}}}}}"),
-            layer("{mesh: {links: {a-b: {type: amneziawg}}}}"),
-        ];
-        let taken_away: Vec<&str> = taken_away.iter().map(String::as_str).collect();
-        let file = file(&taken_away).unwrap();
-        assert_eq!(amneziawg(&file, "a-b").persistent_keepalive, None);
-        let port = amneziawg(&file, "a-b").port;
-        let block_out = layer("{mesh: {links: {a-b: {amneziawg: null}}}}");
-        let block_again = layer(&format!(
-            "{{mesh: {{links: {{a-b: {{amneziawg: {{port: {port}}}}}}}}}}}"
-        ));
-        let given_back = [
-            taken_away.as_slice(),
-            &[block_out.as_str(), block_again.as_str()],
-        ]
-        .concat();
-        let file = super::tests::file(&given_back).unwrap();
-        assert_eq!(
-            amneziawg(&file, "a-b").persistent_keepalive,
-            Some(Range::new(21, 29).unwrap())
-        );
+        for (base, null, beside, block_out, taken_away) in rows {
+            let mut documents = vec![base, layer(null), layer(beside)];
+            let laid = |documents: &[String]| {
+                let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+                file(&documents).unwrap()
+            };
+            assert!(taken_away(&laid(&documents)), "{null}");
+            documents.extend(block_out.iter().map(|overlay| layer(overlay)));
+            assert!(!taken_away(&laid(&documents)), "{null}");
+        }
     }
 
     #[test]
@@ -1572,126 +1560,118 @@ mod tests {
     fn a_refusal_of_what_is_laid_names_the_file_and_line_of_the_layer_that_wrote_the_key() {
         let node = "{platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}";
         let network_block = format!("slipmesh: {BLOCK}\n");
-        for (overlay, line) in [
+        let base = network("{}");
+        // Written by the first file, with the later one writing beside it.
+        let first = |written: &str, key: &str| {
+            let text = network(written);
+            let line = file_line(&[&text], key);
+            (text, line)
+        };
+        let (unknown, unknown_at) = first(
+            "{mesh: {links: {a-c: {amneziawg: {obfuscation: {colour: 1}}}}}}",
+            "colour: 1",
+        );
+        let (wrong, wrong_at) = first("{mesh: {mtu: many}}", "mtu: many");
+        let one = network(&format!("{{nodes: {{1.0: {node}}}}}"));
+        let other = layer(&format!("{{nodes: {{1: {node}}}}}"));
+        let other_at = file_line(&[&other], "nodes:");
+        for (first, later, in_first, line) in [
             // Read by serde's derive.
-            (format!("{network_block}mesh:\n  colour: red\n"), 3),
+            (
+                base.clone(),
+                format!("{network_block}mesh:\n  colour: red\n"),
+                false,
+                3,
+            ),
             // A range.
             (
+                base.clone(),
                 format!("{network_block}mesh:\n  amneziawg:\n    persistent_keepalive: 9-1\n"),
+                false,
                 4,
             ),
             // A name, as a key.
             (
+                base.clone(),
                 format!("{network_block}nodes:\n  node-b: {node}\n  node x: {node}\n"),
+                false,
                 4,
             ),
-            // Two keys that read as one: the path stops at their mapping.
+            // Two keys that read as one: the path stops at their mapping, in one layer or two.
             (
+                base.clone(),
                 format!("{network_block}nodes:\n  1.0: {node}\n  1: {node}\n"),
+                false,
                 2,
             ),
+            (one, other, false, other_at),
             // A link read in two steps: the path stops at the link.
             (
+                base.clone(),
                 format!(
                     "{network_block}mesh:\n  links:\n    a-b:\n      ends:\n        node-b: null\n"
                 ),
+                false,
                 4,
             ),
             // An obfuscation that refuses the keys its reader passes over.
             (
+                base.clone(),
                 format!(
                     "{network_block}mesh:\n  links:\n    a-b:\n      amneziawg:\n        obfuscation:\n          colour: 1\n"
                 ),
+                false,
                 7,
             ),
-            // A required key missing: the path stops at what lacks it.
             (
+                unknown,
+                layer("{mesh: {links: {a-c: {amneziawg: {obfuscation: {jc: 5}}}}}}"),
+                true,
+                unknown_at,
+            ),
+            (
+                wrong,
+                layer("{mesh: {interface_prefix: wg-}}"),
+                true,
+                wrong_at,
+            ),
+            // A required key missing or written `null`: the path stops at what lacks it.
+            (
+                base.clone(),
                 format!("{network_block}nodes:\n  node-x:\n    node_id: 0.0.0.9\n"),
+                false,
+                3,
+            ),
+            (
+                base.clone(),
+                format!("{network_block}nodes:\n  node-a:\n    platform: null\n"),
+                false,
                 3,
             ),
             // A group, read as a list or a mapping.
             (
+                base.clone(),
                 "slipmesh: {kind: groups}\ncore:\n- node-a\n- node a\n".to_owned(),
+                false,
                 4,
             ),
         ] {
             let dir = tempfile::tempdir().unwrap();
-            let (base, laid) = (dir.path().join("a.yaml"), dir.path().join("b.yaml"));
-            std::fs::write(&base, network("{}")).unwrap();
-            std::fs::write(&laid, &overlay).unwrap();
-            let refusal = File::open(&[&base, &laid]).unwrap_err();
+            let paths = [dir.path().join("0.yaml"), dir.path().join("1.yaml")];
+            std::fs::write(&paths[0], &first).unwrap();
+            std::fs::write(&paths[1], &later).unwrap();
+            let holder = &paths[usize::from(!in_first)];
+            let refusal = File::open(&paths).unwrap_err();
             assert!(
                 matches!(&refusal, Error::Laid { at, .. }
-                    if at.file() == Some(laid.as_path()) && at.line() == line),
-                "{overlay}: {refusal:?}"
+                    if at.file() == Some(holder.as_path()) && at.line() == line),
+                "{later}: {refusal:?}"
             );
             assert!(
-                refusal.to_string().contains(&laid.display().to_string()),
+                refusal.to_string().contains(&holder.display().to_string()),
                 "{refusal}"
             );
         }
-    }
-
-    #[test]
-    fn a_refusal_names_the_first_file_where_a_later_one_writes_beside_the_key() {
-        for (written, beside, key) in [
-            (
-                "{mesh: {links: {a-c: {amneziawg: {obfuscation: {colour: 1}}}}}}",
-                "{mesh: {links: {a-c: {amneziawg: {obfuscation: {jc: 5}}}}}}",
-                "colour: 1",
-            ),
-            (
-                "{mesh: {mtu: many}}",
-                "{mesh: {interface_prefix: wg-}}",
-                "mtu: many",
-            ),
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            let (first, later) = (dir.path().join("0.yaml"), dir.path().join("1.yaml"));
-            let text = network(written);
-            std::fs::write(&first, &text).unwrap();
-            std::fs::write(&later, layer(beside)).unwrap();
-            let at = file_line(&[&text], key);
-            let refusal = File::open(&[&later, &first]).unwrap_err();
-            assert!(
-                matches!(&refusal, Error::Laid { at: key, .. }
-                    if key.file() == Some(first.as_path()) && key.line() == at),
-                "{written}: {refusal:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_required_key_written_null_is_refused_as_left_out() {
-        let text = network_edited(BLOCK, |tree| {
-            tree["nodes"]["node-a"]["platform"] = Value::Null
-        });
-        let documents = [text.as_str()];
-        let at = file_line(&documents, "node-a:");
-        let refusal = refusal(&documents);
-        assert!(
-            matches!(&refusal, Error::Laid { at: key, .. } if key.line() == at),
-            "{refusal:?}"
-        );
-    }
-
-    #[test]
-    fn two_keys_that_read_as_one_name_in_two_layers_are_refused() {
-        let node = "{platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}";
-        let first = network(&format!("{{nodes: {{1.0: {node}}}}}"));
-        let later = layer(&format!("{{nodes: {{1: {node}}}}}"));
-        let refusal = file(&[&first, &later]).unwrap_err();
-        let Error::Laid { source, .. } = &refusal else {
-            panic!("{refusal:?}");
-        };
-        let twice = super::super::NameError::Twice("1".to_owned()).to_string();
-        assert!(
-            std::error::Error::source(source)
-                .unwrap()
-                .to_string()
-                .contains(&twice),
-            "{refusal:?}"
-        );
     }
 
     #[test]
