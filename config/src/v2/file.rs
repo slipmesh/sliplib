@@ -665,7 +665,7 @@ impl fmt::Display for Aim {
     }
 }
 
-/// The block of a `template` or a `patch` is one of a `vars` whose platform is written.
+/// With its platform written.
 impl From<Aimed> for VarsBlock {
     fn from(aimed: Aimed) -> Self {
         Self {
@@ -677,7 +677,6 @@ impl From<Aimed> for VarsBlock {
     }
 }
 
-/// Which list of the file an aimed document goes to.
 enum AimedKind {
     Template,
     Patch,
@@ -722,7 +721,7 @@ impl VarsBlock {
     }
 }
 
-/// A `template` or `patch`, whose body is its platform's tool's, or a `vars`.
+/// A `template`, `patch` or `vars` document with its aim.
 pub struct AimedDocument {
     aim: Aim,
     body: Document,
@@ -997,8 +996,7 @@ impl File {
         &self.patches
     }
 
-    /// The `vars` documents that reach `node`, laid over each other by rank: a mapping, empty
-    /// where none reaches.
+    /// The `vars` documents reaching `node`, laid by rank; empty where none does.
     pub fn vars_for(&self, node: &str) -> Value {
         reaching(&self.vars, node)
             .into_iter()

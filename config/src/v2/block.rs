@@ -269,7 +269,7 @@ pub struct Aimed {
     pub order: Order,
 }
 
-/// Of a `vars` document: without `platform`, for the nodes of every platform.
+/// Without `platform`, for the nodes of every platform.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct VarsBlock {
@@ -304,8 +304,7 @@ enum Scope {
     Nodes,
 }
 
-/// Of two documents of one kind reaching one node, the greater is laid over or chosen, of equal
-/// ones the later read: `order` first, then the narrower scope.
+/// The greater is laid over or chosen, ties to the later read: `order`, then the narrower scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Rank {
     order: Order,
