@@ -11,6 +11,9 @@ const LINK_LOCAL: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0xfe80, 0, 0, 0, 0
 /// The kernel's own.
 const KERNEL_PROTOCOLS: std::ops::RangeInclusive<u8> = 0..=4;
 
+/// The kernel's own: unspecified, `default`, `main` and `local`.
+const KERNEL_TABLES: [u8; 4] = [0, 253, 254, 255];
+
 /// The routes to pool clients'.
 const POOL_PROTOCOL: u8 = 200;
 
@@ -98,7 +101,7 @@ pub enum Invalid {
         second: ClassName,
     },
     #[error(
-        "the route class {class:?} has table {table}, one the kernel keeps for itself (0 unspecified, 253 default, 254 main, 255 local) - give it another from 1 to 252, or leave the key out for main"
+        "the route class {class:?} has `table` {table}, one the kernel keeps for itself (0 unspecified, 253 default, 254 main, 255 local) - give it another from 1 to 252, or leave the key out for main"
     )]
     KernelTable { class: ClassName, table: u8 },
     #[error(
@@ -268,9 +271,6 @@ fn links(network: &Network) -> Result<(), Invalid> {
     }
     Ok(())
 }
-
-/// The kernel's own: unspecified, `default`, `main` and `local`.
-const KERNEL_TABLES: [u8; 4] = [0, 253, 254, 255];
 
 fn classes(classes: &Map<ClassName, Class>) -> Result<(), Invalid> {
     let mut numbers: Map<u8, &ClassName> = Map::new();
@@ -648,7 +648,7 @@ mod tests {
 
     #[test]
     fn a_class_takes_no_table_the_kernel_keeps() {
-        for table in [0, 253, 255] {
+        for table in [0, 253, 254, 255] {
             assert_eq!(
                 refusal(&format!(
                     "{{routing: {{classes: {{egress: {{table: {table}}}}}}}}}"

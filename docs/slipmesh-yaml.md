@@ -9,8 +9,8 @@ file](slipmesh-yaml-v1-to-v2.md#what-leaves-the-file) says where the two such pa
 This is the specification of the format. A part no tool serves yet is marked **Planned** where it
 will stand, as [Planned](#planned) explains. sliplib v0.19 and the releases before it read version
 1, which [Differences from version 1](slipmesh-yaml-v1-to-v2.md#differences-from-version-1) starts
-from; from v0.20.0 on, the tools read version 2 alone. What this document says a tool does, v0.20.0
-does.
+from; from v0.20.0 on, the tools read version 2 alone. What this document says a tool does, a tool
+built on the sliplib release that holds this text does.
 
 ## The files
 
@@ -170,10 +170,10 @@ error. The old name leaves with the next `version`.
 
 Nodes, groups, links, a node's underlay entries, route classes and their rules are named by the
 keys of the mappings that hold them, under one rule: ASCII letters, digits, `-`, `_` and `.`, with a
-letter or a digit first and last. Names become parts of interface names, of names in a node's routing
-configuration and of annotation keys, which take no more. A class name is at most 48 characters,
-since it ends the key of a node annotation, which takes 63, and a node's name is bounded by the
-[interface names](#nodes) it becomes part of. No other name has a limit.
+letter or a digit first and last. Names become parts of interface names, of names in a node's
+routing configuration and of annotation keys, which take no more. A class name is at most 48
+characters, since it ends the key of a node annotation, which takes 63, and a node's name is bounded
+by the [interface names](#nodes) it becomes part of. No other name has a limit.
 
 Nodes and groups share one namespace, so a group named like a node is an error. `all` and `none`
 are reserved: no node or group takes either. Every other kind of name is unique within its own

@@ -15,7 +15,7 @@ pub struct Mark {
 
 fn hex(text: &str) -> Option<u32> {
     let digits = text.strip_prefix("0x")?;
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
     u32::from_str_radix(digits, 16).ok()
@@ -43,7 +43,6 @@ impl Visitor<'_> for MarkText {
         };
         match (NonZeroU32::new(value), NonZeroU32::new(mask)) {
             (Some(value), Some(mask)) => Ok(Mark { value, mask }),
-            // Talos writes neither a mark nor a mask of 0, so the rule would differ from the text.
             _ => Err(E::custom(format_args!(
                 "the mark {text:?} has a mark or a mask of 0, which Talos takes as none written - \
                  leave the key out for a rule on every packet, or write the bits to compare"

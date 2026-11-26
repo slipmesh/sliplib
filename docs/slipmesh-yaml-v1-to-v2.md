@@ -129,10 +129,11 @@ version 1 file, once.
 No command converts a file. It is edited by hand, and the tools then show that nothing changed that
 was not meant to. Step 1 runs the tools of the last release that reads version 1, built on sliplib
 v0.19, on the file as it is; steps 5 to 7 run those built on v0.20.0 or later, on the converted
-file. Every node of a network converted this way gets the configs version 1 gave it, but for the
-differences step 6 lists. [`mesh/tests/golden.rs`](../mesh/tests/golden.rs) pins that for two
-networks, all but the metrics listeners, which the Talos generator writes: what else step 6 shows
-comes from the conversion.
+file, and on v0.25.0 or later where step 4 wrote a route class's `table` or `rules`. Every node of
+a network converted this way gets the configs version 1 gave it, but for the differences step 6
+lists. [`mesh/tests/golden.rs`](../mesh/tests/golden.rs) pins that for two networks, all but the
+metrics listeners, which the Talos generator writes: what else step 6 shows comes from the
+conversion.
 
 1. Before editing, leave nothing pending: `slipmesh-taloscfg generate --diff` prints no change to a
    patch file, and `slipmesh-routeros --node <name> --check --diff` plans none on its device.
@@ -161,10 +162,9 @@ comes from the conversion.
       `enable` was `false` or absent, delete the block. `classes.egress.protocol` is
       `cluster.route_proto_id.egress`, which a file that passes step 1 always has, and its `table`
       the table the `RoutingRuleConfig` patches look up other than `main`, if there is one. An
-      entry of a
-      `direct_interfaces`, here or a node's, that is a CIDR or holds a character other than ASCII
-      letters, digits, `-`, `_` and `.` before a trailing `*`, as `?` is, does not load: rewrite it
-      as interface names, or prefixes and `*`.
+      entry of a `direct_interfaces`, here or a node's, that is a CIDR or holds a character other
+      than ASCII letters, digits, `-`, `_` and `.` before a trailing `*`, as `?` is, does not load:
+      rewrite it as interface names, or prefixes and `*`.
    4. Write `mesh`: `interface_prefix` is `cluster.interface_prefix.mesh`, `mtu` is
       `cluster.mesh_mtu`, and `amneziawg.obfuscation` is the network's `obfuscation`.
    5. Move `awg_metrics_port` and `router_metrics_port` into a new `platform` document for `talos`,
@@ -216,9 +216,10 @@ comes from the conversion.
        it lets packets past, `egress` for the reference setup. Its `priority` is the `name`; its
        own name is free. `fwMark` and `fwMask` become its `mark`, in hexadecimal,
        `0x100000/0x100000` for `1048576` and `1048576`, the mask left out where it was absent or
-       every bit. `table: main` becomes `lookup: main`, and the class's own table is left out. The
-       `dst` is dropped. Delete the `patch`. A `RoutingRuleConfig` with any other key, a `dst` of
-       its own, or reaching some nodes of `talos` only, stays a `patch`.
+       every bit, and then the mark quoted, as `"0x100000"`. `table: main` becomes `lookup: main`,
+       and the class's own table is left out. The `dst` is dropped. Delete the `patch`. A
+       `RoutingRuleConfig` with any other key, a `dst` of its own, or reaching some nodes of
+       `talos` only, stays a `patch`.
    14. Give every remaining `patch` its `platform`, drop the `exclude` that kept it from the nodes of
        other platforms, take a node of another platform out of its `include`, and delete the
        `mikrotik` document.
@@ -234,7 +235,7 @@ comes from the conversion.
 5. Run `slipmesh check`. It parses every document strictly, but the bodies of `platform`,
    `template` and `patch` documents, which the platform's tool checks, and it checks every node's
    configs.
-6. Run the two commands of step 1 again, with the tools built on v0.20.0 or later, and compare the
+6. Run the two commands of step 1 again, with the tools of step 5, and compare the
    patch files, and the plan `slipmesh-routeros` shows, with what step 1 left. Nothing of the mesh
    changes of itself: not the addresses, the keys, the link-local addresses of the tunnels, the MTU,
    OSPF, BFD or the iBGP sessions to the routers. The differences are of two kinds, and of no
@@ -262,15 +263,19 @@ comes from the conversion.
    - where step 4.9 made a link to a `routeros` node, which version 1 could have marked as
      obfuscated, a link of type `wireguard`, the interface of its `talos` end has no obfuscation,
      and the peer's keepalive is 25 where an obfuscated link gave it `20-30`;
-   - where step 4.13 turned a `patch` into a rule, its `RoutingRuleConfig` document stands after the
-     generated documents of the node's patch file, not among the documents of the `patch`es, with
-     the same contents but `dst`: it holds for IPv6 too, beside the IPv4 rule it was;
    - where step 4.11 turned a `patch` of `router` or `nftables` into a template, the files of that
      document come in the generator's order and not the `patch`'s: the generator's config, then the
      template, then the files the `patch` adds, so a file the `patch` listed before the template
      stands after it now. The `nftables` document of a node's patch file stands after the `router`
      document, not among the documents of the `patch`es, and has none of the keys besides
      `configFiles` that step 4.12 dropped, `environment` for one;
+   - where step 4.13 turned a `patch` into a rule, its `RoutingRuleConfig` document stands after the
+     generated documents of the node's patch file, not among the documents of the `patch`es. It has
+     no `dst`, so it holds for both families where it held for one. Where the firewall marks no
+     IPv6 packet and the class's table holds no IPv6 route, as in the reference setup, that changes
+     no packet: an IPv6 lookup falls through to `main`. A rule that had `fwMark` without `fwMask`
+     gains `fwMask: 4294967295`: the kernel gives such a mark every bit, and Talos, finding no mask
+     in its document, would replace the rule on every pass;
    - where the pattern of the links' interfaces stood before other entries of a `direct_interfaces`
      and step 4 took it out, it stands last, and the node's routing configuration changes with it.
 
