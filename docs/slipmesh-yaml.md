@@ -1026,14 +1026,14 @@ What the Talos generator refuses:
 - a body with a key the table does not have or without one it requires, a `daemon` other than
   `router` or `firewall`, a `content` that is not a string, and a `base` that is not `sha256:` and
   64 hexadecimal digits;
-- a `talos` node that no `router` template reaches, since the routing daemon does not run without
-  one;
-- files in which no document is a `firewall` template. A node that none of them reaches is not an
-  error: the generator writes no `nftables` document for it, and the node gets no ruleset;
 - a template its daemon would fail on: one that does not compile, or that reads a variable the
   daemon does not supply, in any branch and not only in those a node takes. A `router` template is
-  also filled in with the config of every node it reaches; a `firewall` template is not, since its
-  values exist only on the node.
+  also filled in with the config of every node it reaches, and a `firewall` template with the values
+  of every node it reaches and stand-in interface names;
+- an empty `content`.
+
+A node that no template of a daemon reaches gets the generator's reference template of that daemon,
+checked like a template in the files.
 
 Those checks of the text are the generator's, `slipmesh-taloscfg generate --check`.
 `slipmesh check` reads the block, not the body.
@@ -1071,15 +1071,12 @@ or a list, in place of a string. The node gets that YAML's text, and each of its
 of `slipmesh.yaml` like any other.
 
 The generator makes some documents of a node itself: the `ExtensionServiceConfig` documents `awg`,
-`router` and, where a `firewall` template reaches the node, `nftables`, written in that order after
-the `patch` documents, and the annotations under `slipmesh.net/` in the node's `KubeNodeConfig`.
-A `patch` may add files to those three, and annotations of its own to the `KubeNodeConfig`. The
-generator refuses:
+`router` and `nftables`, written in that order after the `patch` documents, and the annotations
+under `slipmesh.net/` in the node's `KubeNodeConfig`. A `patch` may add files to those three, and
+annotations of its own to the `KubeNodeConfig`. The generator refuses:
 
 - a `patch` of one of the three that sets anything but `configFiles`, or a file at a path the
   generator writes there;
-- a `patch` that adds files to `nftables` on a node no `firewall` template reaches, which gets no
-  `nftables` document to carry them;
 - an annotation under `slipmesh.net/`.
 
 `slipmesh check` reads the block of a `patch` and not its body. What the body means is the
