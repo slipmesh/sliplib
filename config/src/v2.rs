@@ -11,7 +11,7 @@ mod testing;
 
 pub use block::{
     ALL, Aimed, Block, Exclude, GroupsBlock, Include, NONE, NetworkBlock, Order, Platform,
-    PlatformBlock, Rank,
+    PlatformBlock, Rank, VarsBlock,
 };
 pub use check::Invalid;
 pub use file::{

@@ -44,7 +44,7 @@ The keys of the block:
 | --- | --- | --- | --- |
 | `kind` | string | every document | What the document is: one of the kinds below. |
 | `version`, `revision` | integer | `network` | [The format's version and revision](#version-and-revision). |
-| `platform` | `talos` or `routeros` | the kinds for one platform | [The platform](#aiming-a-document-at-nodes) whose tool serves the document. One value. |
+| `platform` | `talos` or `routeros` | the kinds for one platform, and optional in `vars` | [The platform](#aiming-a-document-at-nodes) whose tool serves the document. One value. |
 | `include`, `exclude` | list of names, or `all` and `none` | the kinds aimed at nodes | [The nodes the document reaches](#aiming-a-document-at-nodes). |
 | `order` | integer, 0 to 65535 | every document, optional, `1000` when left out | [Where the document stands](#several-files) among all the documents read. |
 
@@ -57,6 +57,7 @@ The kinds:
 | [`platform`](#platform) | at most one for a platform | not taken | required | Settings only that platform's tool reads. |
 | [`template`](#template) | any | optional | required | The template a daemon on the node makes its config from. |
 | [`patch`](#patch) | any | optional | required | A document in the platform's own format. |
+| [`vars`](#vars) | any | optional | optional | Values for templates. |
 
 The block is strict: a key it does not know, or one its kind does not take, is an error, so a
 misspelled `include` cannot aim a document at every node. A document without the block is an
@@ -197,16 +198,18 @@ Where several documents of one kind reach a node and are merged or chosen betwee
 three things, each breaking the ties the one before leaves:
 
 1. `order`, lower first;
-2. the documents for all before the others. A document is for all when its `include` is left out,
-   is `all`, or is a list whose only name is `all`; any other list is narrower. `exclude` leaves
-   the rank as it is;
+2. how far they reach, the widest first: the network, then a platform, then some nodes. A document
+   is for all when its `include` is left out, is `all`, or is a list whose only name is `all`; any
+   other list is narrower, and the document is for some nodes. One for all is for the network
+   without `platform`, which only `vars` may leave out, and for its platform with it. `exclude`
+   leaves the rank as it is;
 3. the order they were read in.
 
 The last by rank wins. Among documents of one `order`, one aimed at some nodes therefore comes after
 the one for all wherever it stands, and an `order` set on purpose moves either past the other.
 
-Only `template` and `patch` take the two keys, both optional. The other kinds are about no node in
-particular, and there the keys are an error.
+Only `template`, `patch` and `vars` take the two keys, all optional. The other kinds are about no
+node in particular, and there the keys are an error.
 
 A document written in the terms of one platform names it with `platform`, one value: a [platform of
 the nodes](#who-serves-a-document). Its `all`, wherever it stands in its own `include` or `exclude`,
@@ -215,7 +218,9 @@ as aimed at some nodes, since its `include` is not `all` alone, and `exclude: [a
 document reaching no node, which is refused. Every node the document is left reaching once `exclude`
 is taken out has to be of that platform, and a node of another makes the document an error, not
 something passed over. Inside a group there is no platform, and `all` there is every node: a group
-that names it holds nodes of every platform, and makes such a document an error in the same way.
+that names it holds nodes of every platform, and makes such a document an error in the same way. A
+`vars` document without `platform` is of no platform: its `all` is every node, and it may reach
+nodes of any platform.
 
 ### Strict parsing
 
@@ -481,8 +486,8 @@ from its other kernel routes by the number, into the class's `table`.
 
 A rule tells the kernel which table a packet's route is looked up in, before `main`. Each rule of
 a class is made on every `talos` node and holds for both address families alike, with the same
-table and the same mark; `routeros` does not serve them. The name of a rule appears in messages and
-configures nothing.
+table and the same mark; `routeros` does not serve them. The name of a rule appears in messages,
+and a [template](#template) reads the rule by it.
 
 | key | type | required | default | what it is |
 | --- | --- | --- | --- | --- |
@@ -943,8 +948,8 @@ way to remove. A link's `ends` name nodes, never a group.
 The documents of a platform are written in its terms and name it in their `slipmesh:` block. They
 may stand in the files of the network or in files of their own. Today the one such platform is
 `talos`: `routeros` has no settings, templates or documents of its own and needs no `platform`
-document. One is taken, and the RouterOS tool refuses any key in its body; a `template` or a
-`patch` that names `routeros` is refused.
+document. One is taken, and the RouterOS tool refuses any key in its body; a `template`, a `patch`
+or a `vars` that names `routeros` is refused.
 
 ### `platform`
 
@@ -1081,14 +1086,45 @@ platform's, and the generator checks what it knows of it.
 
 ### `vars`
 
-**Planned:** a kind of document holding values for templates - what differs between networks or
-between nodes while the text of a template stays the same - aimed at nodes with `include` and
-`exclude`, and read by a template by name.
+Values for templates: what differs between networks or between nodes while the text of a template
+stays the same. A template reads them as `vars`, a mapping: `vars.example_source` below, or
+`vars["a-key"]` for a key a name cannot be.
+
+```yaml
+slipmesh:
+  kind: vars
+example_source: 203.0.113.0/26
+---
+slipmesh:
+  kind: vars
+  include: [node-b]
+example_source: 203.0.113.64/26
+```
+
+| key | where | type | required | what it is |
+| --- | --- | --- | --- | --- |
+| `platform` | block | `talos` | no | The platform whose nodes the values are for. Left out, the nodes of every platform. |
+| `include`, `exclude` | block | lists of names | no | The nodes the values are for. Left out, every node, or every node of `platform`. |
+| the rest | body | | | The values, by key. |
+
+The body is passed on as written: any key, any value, at any depth. Nothing in it is checked, and a
+key is as YAML reads it, so `1:` is the number `1`, read as `vars[1]`.
+
+For a node, the `vars` documents that reach it are laid over each other in the order of their
+[rank](#aiming-a-document-at-nodes), from an empty mapping, by [the one
+rule](#laying-one-value-over-another): the network's, then its platform's, then those aimed at some
+nodes, each `order` before the next. A mapping is laid key by key at every depth, a `null` takes a
+key away, and a node no document reaches gets an empty mapping. The documents of all the files are
+collected and laid for each node alone; they are not laid into one tree as the network is.
+
+A template that reads a key a node does not have fails for that node; the platform's tool says what
+it checks of that. A `vars` document is the loader's to read, so every tool and `slipmesh check`
+check its block.
 
 ## Who serves what
 
 What each tool does with each part of the files under revision 1. `slipmesh check` checks all of it
-but the bodies of `platform`, `template` and `patch` documents; the column of `slipmesh` says what
+but the bodies of `platform`, `template`, `patch` and `vars` documents; the column of `slipmesh` says what
 it writes. How each tool is run, and what it writes or changes, is in its own documentation.
 
 | part | `slipmesh` writes | on `talos`, `slipmesh-taloscfg` | on `routeros`, `slipmesh-routeros` |
@@ -1102,6 +1138,7 @@ it writes. How each tool is run, and what it writes or changes, is in its own do
 | `platform` | | The metrics listeners. | No settings. |
 | `template` | | Checked, and given to the node's daemon. | Refused. |
 | `patch` | | Merged, and carried into the node's machine configuration. | Refused. |
+| `vars` | | Laid for each node, and given to its router and firewall daemons. | Refused with `platform: routeros`; not served without it. |
 
 On `talos` the generator tells a node these values as annotations under `slipmesh.net/`:
 `interface_prefix.mesh`; `route_proto_id.<name>` for each route class; `endpoint`, the address or
@@ -1117,8 +1154,8 @@ mesh as computed.
 - [`secrets.yaml`](example/secrets.yaml), laid over it: the nodes' keys and what `slipmesh mint`
   wrote into the links' obfuscation, with a header protection key written by hand;
 - [`talos.yaml`](example/talos.yaml), the documents of `talos`: its settings, two templates, two
-  patches, and two groups: `workers`, which one patch is aimed with, and `core`, which `workers` is
-  made of.
+  patches, two `vars`, and two groups: `workers`, which one patch is aimed with, and `core`, which
+  `workers` is made of.
 
 A tool takes the three with `--in`. They hold no Planned part, since a file with one is refused. One
 link has a header, a timer and its [keepalive](#keepalive) written as ranges.

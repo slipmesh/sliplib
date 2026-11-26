@@ -1,7 +1,7 @@
 //! The files read as a whole: the blocks, the network in force, the groups as nodes, and each
 //! platform document with its aim.
 
-use super::block::{Aimed, Block, PlatformBlock, Rank};
+use super::block::{Aimed, Block, Exclude, Include, Order, PlatformBlock, Rank, VarsBlock};
 use super::check::Invalid;
 use super::groups::{Groups, GroupsError, Resolved, Selection};
 use super::network::{AMNEZIAWG, Network, WIREGUARD};
@@ -23,6 +23,7 @@ const GROUPS: &str = "groups";
 const PLATFORM: &str = "platform";
 const TEMPLATE: &str = "template";
 const PATCH: &str = "patch";
+const VARS: &str = "vars";
 
 /// The key of every document's block.
 pub const META_KEY: &str = "slipmesh";
@@ -664,43 +665,75 @@ impl fmt::Display for Aim {
     }
 }
 
-impl Aimed {
+/// The block of a document aimed at nodes; without `platform`, at those of every platform.
+struct Aiming {
+    platform: Option<Platform>,
+    include: Include,
+    exclude: Exclude,
+    order: Order,
+}
+
+impl From<Aimed> for Aiming {
+    fn from(aimed: Aimed) -> Self {
+        Self {
+            platform: Some(aimed.platform),
+            include: aimed.include,
+            exclude: aimed.exclude,
+            order: aimed.order,
+        }
+    }
+}
+
+impl From<VarsBlock> for Aiming {
+    fn from(vars: VarsBlock) -> Self {
+        Self {
+            platform: vars.platform,
+            include: vars.include,
+            exclude: vars.exclude,
+            order: vars.order,
+        }
+    }
+}
+
+impl Aiming {
     fn aim(self, place: Place, network: &Network, groups: &Resolved) -> Result<Aim, Error> {
         let platform = self.platform;
-        if platform == Platform::Routeros {
+        if let Some(platform @ Platform::Routeros) = platform {
             return Err(Error::NotTaken { place, platform });
         }
-        let of_the_platform: Vec<Name> = network
+        let all: Vec<Name> = network
             .nodes
             .iter()
-            .filter(|(_, node)| node.platform == platform)
+            .filter(|(_, node)| platform.is_none_or(|platform| node.platform == platform))
             .map(|(name, _)| name.clone())
             .collect();
-        let rank = Rank::of(self.order, &self.include);
+        let rank = Rank::of(self.order, platform, &self.include);
         let selection = Selection {
             include: self.include,
             exclude: self.exclude,
         };
         let reach = groups
-            .reach(&selection, &of_the_platform, &place.to_string())
+            .reach(&selection, &all, &place.to_string())
             .map_err(Error::Reach)?;
-        let of_another = reach
-            .iter()
-            .map(|node| (node, network.nodes[node].platform))
-            .find(|(_, other)| *other != platform);
-        if let Some((node, other)) = of_another {
-            return Err(Error::OtherPlatform {
-                place,
-                platform,
-                node: node.clone(),
-                other,
-            });
+        if let Some(platform) = platform {
+            let of_another = reach
+                .iter()
+                .map(|node| (node, network.nodes[node].platform))
+                .find(|(_, other)| *other != platform);
+            if let Some((node, other)) = of_another {
+                return Err(Error::OtherPlatform {
+                    place,
+                    platform,
+                    node: node.clone(),
+                    other,
+                });
+            }
         }
         Ok(Aim { place, rank, reach })
     }
 }
 
-/// A `template` or `patch`, whose body is its platform's tool's.
+/// A `template` or `patch`, whose body is its platform's tool's, or a `vars`.
 pub struct AimedDocument {
     aim: Aim,
     body: Document,
@@ -802,6 +835,7 @@ pub struct File {
     platforms: Vec<(Platform, PlatformDocument)>,
     templates: Vec<AimedDocument>,
     patches: Vec<AimedDocument>,
+    vars: Vec<AimedDocument>,
 }
 
 impl fmt::Debug for File {
@@ -811,6 +845,7 @@ impl fmt::Debug for File {
             .field("platforms", &self.platforms)
             .field("templates", &self.templates)
             .field("patches", &self.patches)
+            .field("vars", &self.vars)
             .finish()
     }
 }
@@ -853,7 +888,7 @@ impl File {
         let mut networks = Vec::new();
         let mut groups = Vec::new();
         let mut platforms: Vec<(Platform, PlatformDocument)> = Vec::new();
-        let mut aimed_documents = Vec::new();
+        let mut aimed_documents: Vec<(Place, Aiming, Document)> = Vec::new();
         for Read { block, document } in documents {
             match block {
                 Block::Network(_) => networks.push(document),
@@ -871,10 +906,13 @@ impl File {
                     platforms.push((platform, PlatformDocument { place, body }));
                 }
                 Block::Template(aimed) => {
-                    aimed_documents.push((document.place(TEMPLATE), aimed, document.body));
+                    aimed_documents.push((document.place(TEMPLATE), aimed.into(), document.body));
                 }
                 Block::Patch(aimed) => {
-                    aimed_documents.push((document.place(PATCH), aimed, document.body));
+                    aimed_documents.push((document.place(PATCH), aimed.into(), document.body));
+                }
+                Block::Vars(block) => {
+                    aimed_documents.push((document.place(VARS), block.into(), document.body));
                 }
             }
         }
@@ -902,14 +940,15 @@ impl File {
 
         let mut templates = Vec::new();
         let mut patches = Vec::new();
-        for (place, aimed, body) in aimed_documents {
+        let mut vars = Vec::new();
+        for (place, aiming, body) in aimed_documents {
             let kind = place.kind;
-            let aim = aimed.aim(place, &network, &groups)?;
+            let aim = aiming.aim(place, &network, &groups)?;
             let document = AimedDocument { aim, body };
-            if kind == TEMPLATE {
-                templates.push(document);
-            } else {
-                patches.push(document);
+            match kind {
+                TEMPLATE => templates.push(document),
+                PATCH => patches.push(document),
+                _ => vars.push(document),
             }
         }
         Ok(Self {
@@ -919,6 +958,7 @@ impl File {
             platforms,
             templates,
             patches,
+            vars,
         })
     }
 
@@ -958,6 +998,16 @@ impl File {
     /// In the order of the documents.
     pub fn patches(&self) -> &[AimedDocument] {
         &self.patches
+    }
+
+    /// The `vars` documents that reach `node`, laid over each other by rank: a mapping, empty
+    /// where none reaches.
+    pub fn vars_for(&self, node: &str) -> Value {
+        reaching(&self.vars, node)
+            .into_iter()
+            .fold(Value::Mapping(Mapping::new()), |laid, document| {
+                merge(laid, &document.body.value)
+            })
     }
 }
 
@@ -1038,6 +1088,11 @@ mod tests {
     /// A `patch` named `name`, with `block` as the keys of its block besides the kind.
     fn patch(block: &str, name: &str) -> String {
         format!("slipmesh: {{kind: patch, {block}}}\nkind: Example\nname: {name}\n")
+    }
+
+    /// A `vars` document, with `block` as the keys of its block besides the kind.
+    fn vars(block: &str, body: &str) -> String {
+        format!("slipmesh: {{kind: vars{block}}}\n{body}\n")
     }
 
     /// The nodes `aim` reaches, in the order of the network.
@@ -2270,10 +2325,11 @@ mod tests {
     }
 
     #[test]
-    fn a_template_or_a_patch_for_routeros_is_refused() {
+    fn a_template_a_patch_or_vars_for_routeros_is_refused() {
         for (kind, document) in [
             (TEMPLATE, template("platform: routeros")),
             (PATCH, patch("platform: routeros", "one")),
+            (VARS, vars(", platform: routeros", "a: 1")),
         ] {
             let documents = [network("{}"), document];
             let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
@@ -2344,6 +2400,68 @@ mod tests {
                 "for-all-last",
                 "narrow-last"
             ]
+        );
+    }
+
+    #[test]
+    fn vars_for_a_platform_reach_only_its_nodes() {
+        let documents = [
+            network("{}"),
+            vars(", platform: talos, include: [node-a, router1]", "a: 1"),
+        ];
+        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
+        let at = place(VARS, &documents, 1);
+        let refusal = refusal(&documents);
+        assert!(
+            matches!(&refusal, Error::OtherPlatform { place, node, .. }
+                if *place == at && node.as_str() == "router1"),
+            "{refusal:?}"
+        );
+        let file = file(&[&network("{}"), &vars(", platform: talos", "a: 1")]).unwrap();
+        assert_eq!(file.vars_for("node-a"), yaml("{a: 1}"));
+        assert_eq!(file.vars_for("router1"), yaml("{}"));
+    }
+
+    #[test]
+    fn vars_without_a_platform_reach_every_node() {
+        let file = file(&[
+            &network("{}"),
+            &vars("", "a: 1"),
+            &vars(", include: [node-b, router1]", "b: 2"),
+        ])
+        .unwrap();
+        assert_eq!(file.vars_for("router1"), yaml("{a: 1, b: 2}"));
+        assert_eq!(file.vars_for("node-a"), yaml("{a: 1}"));
+    }
+
+    #[test]
+    fn vars_are_laid_by_order_then_network_platform_nodes_then_as_read() {
+        let file = file(&[
+            &network("{}"),
+            &vars(", include: [node-a]", "x: {nodes: 1}\nkept: {nodes: 1}"),
+            &vars(
+                ", platform: talos",
+                "x: {platform: 1, nodes: 0}\nwho: platform",
+            ),
+            &vars("", "x: {network: 1, platform: 0}\nwho: network\ngone: 1"),
+            &vars("", "who: network-later\ngone: null"),
+            &vars(
+                ", include: [node-a], order: 999",
+                "who: first\nkept: {early: 1}",
+            ),
+            &vars(", order: 1001", "who: last"),
+        ])
+        .unwrap();
+        assert_eq!(
+            file.vars_for("node-a"),
+            yaml(
+                "{kept: {early: 1, nodes: 1}, who: last, \
+                 x: {network: 1, platform: 1, nodes: 1}}"
+            )
+        );
+        assert_eq!(
+            file.vars_for("node-b")["x"],
+            yaml("{network: 1, platform: 1, nodes: 0}")
         );
     }
 

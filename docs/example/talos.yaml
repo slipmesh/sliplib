@@ -1,5 +1,5 @@
-# The documents of the Talos platform for the example network of mesh.yaml, and two groups:
-# workers, which a patch is aimed with, and core, which workers is made of.
+# The documents of the Talos platform for the example network of mesh.yaml, values for templates,
+# and two groups: workers, which a patch is aimed with, and core, which workers is made of.
 
 slipmesh:
   kind: groups
@@ -42,6 +42,16 @@ content: |
           oifname "{{ defaultroute_interface_ipv4 }}" ip saddr 203.0.113.0/26 masquerade
       }
   }
+---
+# Values for templates, for every node of every platform; node-b has its own.
+slipmesh:
+  kind: vars
+example_source: 203.0.113.0/26
+---
+slipmesh:
+  kind: vars
+  include: [node-b]
+example_source: 203.0.113.64/26
 ---
 # For every node of the platform.
 slipmesh:
