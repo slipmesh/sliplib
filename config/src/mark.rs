@@ -1,7 +1,7 @@
 //! A firewall mark: `0x` and hex digits, with `/` and a mask in the same form.
 
 use serde::de::{self, Unexpected, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::num::NonZeroU32;
 
@@ -47,6 +47,23 @@ impl Visitor<'_> for MarkText {
                  leave the key out for a rule on every packet, or write the bits to compare"
             ))),
         }
+    }
+}
+
+/// As it is read: without the mask where every bit is compared.
+impl fmt::Display for Mark {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:#x}", self.value)?;
+        if self.mask.get() != u32::MAX {
+            write!(f, "/{:#x}", self.mask)?;
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for Mark {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
     }
 }
 
