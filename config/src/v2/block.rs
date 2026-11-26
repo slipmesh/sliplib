@@ -137,6 +137,7 @@ pub enum Block {
     Platform(PlatformBlock),
     Template(Aimed),
     Patch(Aimed),
+    Vars(VarsBlock),
 }
 
 /// The loader checks `version` and `revision` against its own.
@@ -172,6 +173,7 @@ enum Kind {
     Platform,
     Template,
     Patch,
+    Vars,
 }
 
 impl Block {
@@ -185,6 +187,7 @@ impl Block {
             Kind::Platform => Self::Platform(read_as(document)?),
             Kind::Template => Self::Template(read_as(document)?),
             Kind::Patch => Self::Patch(read_as(document)?),
+            Kind::Vars => Self::Vars(read_as(document)?),
         })
     }
 }
@@ -266,6 +269,20 @@ pub struct Aimed {
     pub order: Order,
 }
 
+/// Without `platform`, for the nodes of every platform.
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct VarsBlock {
+    #[serde(default)]
+    pub platform: Option<Platform>,
+    #[serde(default)]
+    pub include: Include,
+    #[serde(default)]
+    pub exclude: Exclude,
+    #[serde(default)]
+    pub order: Order,
+}
+
 impl Block {
     pub fn order(&self) -> Order {
         match self {
@@ -273,25 +290,35 @@ impl Block {
             | Self::Groups(GroupsBlock { order })
             | Self::Platform(PlatformBlock { order, .. })
             | Self::Template(Aimed { order, .. })
-            | Self::Patch(Aimed { order, .. }) => *order,
+            | Self::Patch(Aimed { order, .. })
+            | Self::Vars(VarsBlock { order, .. }) => *order,
         }
     }
 }
 
-/// Of two documents of one kind reaching one node, the greater is laid over or chosen, of equal
-/// ones the later read: `order` first, then one aimed at some nodes above one for all.
+/// How far a document reaches, the widest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Scope {
+    Network,
+    Platform,
+    Nodes,
+}
+
+/// The greater is laid over or chosen, ties to the later read: `order`, then the narrower scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Rank {
     order: Order,
-    narrower: bool,
+    scope: Scope,
 }
 
 impl Rank {
-    pub fn of(order: Order, include: &Include) -> Self {
-        Self {
-            order,
-            narrower: !include.is_all(),
-        }
+    pub fn of(order: Order, platform: Option<Platform>, include: &Include) -> Self {
+        let scope = match (platform, include.is_all()) {
+            (_, false) => Scope::Nodes,
+            (Some(_), true) => Scope::Platform,
+            (None, true) => Scope::Network,
+        };
+        Self { order, scope }
     }
 }
 
@@ -330,6 +357,23 @@ mod tests {
                 order: Order(1000)
             })
         );
+        assert_eq!(
+            block("{kind: vars}").unwrap(),
+            Block::Vars(VarsBlock {
+                platform: None,
+                include: Include::default(),
+                exclude: Exclude::default(),
+                order: Order(1000)
+            })
+        );
+        let Block::Vars(VarsBlock {
+            platform, include, ..
+        }) = block("{kind: vars, platform: talos, include: [workers]}").unwrap()
+        else {
+            panic!("not vars");
+        };
+        assert_eq!(platform, Some(Platform::Talos));
+        assert_eq!(names(include.names()), ["workers"]);
         for kind in ["template", "patch"] {
             let read = block(&format!(
                 "{{kind: {kind}, platform: talos, include: [workers], exclude: [node-c]}}"
@@ -366,6 +410,7 @@ mod tests {
             ("{kind: patch, platform: talos, revision: 1}", "revision"),
             ("{kind: template, platform: talos, inculde: [a]}", "inculde"),
             ("{kind: groups, platform: talos}", "platform"),
+            ("{kind: vars, version: 2}", "version"),
             (
                 "{kind: network, version: 2, revision: 1, exclude: [a]}",
                 "exclude",
@@ -574,9 +619,15 @@ mod tests {
     fn order_ranks_before_how_narrowly_a_document_is_aimed() {
         let (all, _) = aim("");
         let (some, _) = aim(", include: [node-a]");
-        let rank = |order, include| Rank::of(Order(order), include);
-        assert!(rank(1000, &some) > rank(1000, &all));
-        assert!(rank(1000, &all) > rank(999, &some));
-        assert_eq!(rank(7, &all), rank(7, &aim(", include: [all]").0));
+        let talos = Some(Platform::Talos);
+        let rank = |order, platform, include| Rank::of(Order(order), platform, include);
+        assert!(rank(1000, talos, &some) > rank(1000, talos, &all));
+        assert!(rank(1000, talos, &all) > rank(1000, None, &all));
+        assert_eq!(rank(1000, talos, &some), rank(1000, None, &some));
+        assert!(rank(1000, None, &all) > rank(999, talos, &some));
+        assert_eq!(
+            rank(7, talos, &all),
+            rank(7, talos, &aim(", include: [all]").0)
+        );
     }
 }

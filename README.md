@@ -66,8 +66,9 @@ is a range, with the share of data packets dropped at most where the bytes read 
 the link has no `header_protection_key` while one of `s1` to `s3` stands 1 to 15 bytes above `s4`.
 A file with a refusal gets none: what a link loses is counted from settings that pass the checks.
 
-It reads the block of a `platform`, `template` or `patch` document and not its body: that is the
-platform's tool's own check, such as the Talos generator's `--check`.
+It reads the block of a `platform`, `template`, `patch` or `vars` document and not its body: that
+of the first three is the platform's tool's own check, such as the Talos generator's `--check`, and
+that of `vars` is passed on as written.
 
 ### `mint`
 
@@ -221,7 +222,8 @@ chain prints the whole message, each part once.
     `InterfacePrefix::REFERENCE` is what `slipmesh mint` writes where `mesh.interface_prefix` is
     unset.
   - `templates`, `templates_for` and `patches` give `AimedDocument`s with their `Aim`: what each
-    reaches and its rank. `platform` gives a `PlatformDocument`.
+    reaches and its rank. `platform` gives a `PlatformDocument`. `vars_for` gives the `vars` that
+    reach a node, laid over each other by rank.
   - A body is its platform's tool's: `read` gives it as the tool's type, a refusal naming the
     document and the line. A template or patch also gives its `value`.
 - `awg`: `AwgConfig` and `validate`. `InterfaceEntry::keepalive_of` is a peer's keepalive: none
