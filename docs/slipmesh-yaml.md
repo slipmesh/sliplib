@@ -1016,10 +1016,10 @@ slipmesh-taloscfg template firewall
 ```
 
 The text in the files is the one a node gets, and a newer reference does not replace it there;
-`base` is how that is noticed. The generator holds one reference text for each daemon, its current one. When
-the hash of that text is not the one `base` names, it warns and prints the difference between the
-text in the files and the current reference, which the text can then be brought up to, with `base`
-set to the hash the command above prints. The warning stops nothing.
+`base` is how that is noticed. The generator holds one reference text for each daemon, its current
+one. When the hash of that text is not the one `base` names, it warns and prints the difference
+between the text in the files and the current reference, which the text can then be brought up to,
+with `base` set to the hash the command above prints. The warning stops nothing.
 
 What the Talos generator refuses:
 

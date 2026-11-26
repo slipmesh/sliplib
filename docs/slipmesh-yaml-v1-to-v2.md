@@ -248,7 +248,7 @@ conversion.
 
    What version 2 gives a node version 1 left without:
    - a `talos` node that no `nftables` patch reached gets an `nftables` document with the reference
-     ruleset and `firewall.yaml`, and the reference ruleset on the node.
+     firewall template and `firewall.yaml`, and loads the reference ruleset.
 
    What step 4 changed on purpose:
    - a node given `learn: []` in step 4.8 no longer announces what it held inside the pod range,
