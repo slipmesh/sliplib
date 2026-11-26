@@ -24,7 +24,7 @@ slipmesh: {{kind: network, version: 2, revision: 1}}
 addressing:
   loopback: {{ipv4: "198.51.100.0/25", ipv6: "3fff::/64"}}
 routing:
-  bgp: {{as: 64512}}   # a private one
+  bgp: {{as: 64496}}
 mesh:
   interface_prefix: mesh-
   links:
