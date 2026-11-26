@@ -1015,8 +1015,8 @@ slipmesh-taloscfg template router
 slipmesh-taloscfg template firewall
 ```
 
-The text in the files is the one a node gets, and a newer reference does not replace it; `base` is
-how that is noticed. The generator holds one reference text for each daemon, its current one. When
+The text in the files is the one a node gets, and a newer reference does not replace it there;
+`base` is how that is noticed. The generator holds one reference text for each daemon, its current one. When
 the hash of that text is not the one `base` names, it warns and prints the difference between the
 text in the files and the current reference, which the text can then be brought up to, with `base`
 set to the hash the command above prints. The warning stops nothing.
@@ -1027,13 +1027,17 @@ What the Talos generator refuses:
   `router` or `firewall`, a `content` that is not a string, and a `base` that is not `sha256:` and
   64 hexadecimal digits;
 - a template its daemon would fail on: one that does not compile, or that reads a variable the
-  daemon does not supply, in any branch and not only in those a node takes. A `router` template is
-  also filled in with the config of every node it reaches, and a `firewall` template with the values
-  of every node it reaches and stand-in interface names;
+  daemon does not supply, in any branch and not only in those a node takes. It is also filled in
+  for every node that gets it: a `router` template with that node's config and values, a
+  `firewall` template with its values and stand-in interface names;
 - an empty `content`.
 
-A node that no template of a daemon reaches gets the generator's reference template of that daemon,
-checked like a template in the files.
+Only the template a node gets is checked so: one overridden on every node it reaches is not.
+
+A node that no template of a daemon reaches gets the reference of the generator release that runs
+`generate`, the one `slipmesh-taloscfg template <daemon>` prints, checked like a template in the
+files. A newer generator gives such a node its newer reference with no warning: `base` is only on
+documents in the files.
 
 Those checks of the text are the generator's, `slipmesh-taloscfg generate --check`.
 `slipmesh check` reads the block, not the body.
@@ -1137,7 +1141,7 @@ documentation.
 | `routing.classes` | | Each class's `protocol` as an annotation, and each of its rules as a `RoutingRuleConfig` document. | Not served. |
 | `groups` | | Understood, as by every tool. | The same. |
 | `platform` | | The metrics listeners. | No settings. |
-| `template` | | Checked, and given to the node's daemon. | Refused. |
+| `template` | | Checked, and given to the node's daemon. A node none reaches gets the generator's reference. | Refused. |
 | `patch` | | Merged, and carried into the node's machine configuration. | Refused. |
 | `vars` | | Laid for each node, and given to its router and firewall daemons. | Refused with `platform: routeros`; not served without it. |
 

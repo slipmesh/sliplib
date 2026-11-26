@@ -34,7 +34,8 @@ routing:
       table: 152
       rules:
         # Replies to connections that came in through a node's uplink leave through it, past
-        # table 152: the firewall template marks those connections.
+        # table 152. The reference firewall template marks those connections; this example's
+        # does not.
         uplink-replies:
           priority: 1000
           mark: 0x100000/0x100000
