@@ -1,5 +1,4 @@
-//! A firewall mark written as `0x` and hexadecimal digits, with `/` and a mask in the same form
-//! after it if it has one.
+//! A firewall mark: `0x` and hex digits, with `/` and a mask in the same form.
 
 use serde::de::{self, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -9,7 +8,7 @@ use std::num::NonZeroU32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Mark {
     pub value: NonZeroU32,
-    /// Every bit where none is written, as the kernel compares then.
+    /// Every bit where none is written, as the kernel compares.
     pub mask: NonZeroU32,
 }
 
@@ -61,7 +60,7 @@ impl<'de> Deserialize<'de> for Mark {
 mod tests {
     use super::*;
 
-    /// As the loader reads it: from a value, where an unquoted `0x…` is a number.
+    /// Through a value, as the loader reads.
     fn read(text: &str) -> Result<Mark, String> {
         let value: sliplib_yaml::Value = sliplib_yaml::from_str(text).unwrap();
         sliplib_yaml::from_value(value).map_err(|error| error.to_string())

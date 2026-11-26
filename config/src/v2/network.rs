@@ -99,8 +99,7 @@ pub struct Bfd {
     pub multiplier: NonZeroU8,
 }
 
-/// The protocol number of routes something other than the router installs, and the routing rules
-/// that lead to its table.
+/// A class of routes: their kernel protocol number, table and rules.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Class {
