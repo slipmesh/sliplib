@@ -238,13 +238,17 @@ conversion.
 6. Run the two commands of step 1 again, with the tools of step 5, and compare the
    patch files, and the plan `slipmesh-routeros` shows, with what step 1 left. Nothing of the mesh
    changes of itself: not the addresses, the keys, the link-local addresses of the tunnels, the MTU,
-   OSPF, BFD or the iBGP sessions to the routers. The differences are of two kinds, and of no
+   OSPF, BFD or the iBGP sessions to the routers. The differences are of three kinds, and of no
    other.
 
    What version 2 does not carry over, as [What leaves the file](#what-leaves-the-file) says:
    - in the patch file of every `talos` node, the `awg` config holds no pool interfaces,
      `router.yaml` holds no `bypass`, and its `announce` holds no label, so the node's routing
      configuration loses the comment the label made.
+
+   What version 2 gives a node version 1 left without:
+   - a `talos` node that no `nftables` patch reached gets an `nftables` document with the reference
+     firewall template and `firewall.yaml`, and loads the reference ruleset.
 
    What step 4 changed on purpose:
    - a node given `learn: []` in step 4.8 no longer announces what it held inside the pod range,

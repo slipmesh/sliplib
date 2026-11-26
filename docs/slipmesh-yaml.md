@@ -1015,25 +1015,29 @@ slipmesh-taloscfg template router
 slipmesh-taloscfg template firewall
 ```
 
-The text in the files is the one a node gets, and a newer reference does not replace it; `base` is
-how that is noticed. The generator holds one reference text for each daemon, its current one. When
-the hash of that text is not the one `base` names, it warns and prints the difference between the
-text in the files and the current reference, which the text can then be brought up to, with `base`
-set to the hash the command above prints. The warning stops nothing.
+The text in the files is the one a node gets, and a newer reference does not replace it there;
+`base` is how that is noticed. The generator holds one reference text for each daemon, its current
+one. When the hash of that text is not the one `base` names, it warns and prints the difference
+between the text in the files and the current reference, which the text can then be brought up to,
+with `base` set to the hash the command above prints. The warning stops nothing.
 
 What the Talos generator refuses:
 
 - a body with a key the table does not have or without one it requires, a `daemon` other than
   `router` or `firewall`, a `content` that is not a string, and a `base` that is not `sha256:` and
   64 hexadecimal digits;
-- a `talos` node that no `router` template reaches, since the routing daemon does not run without
-  one;
-- files in which no document is a `firewall` template. A node that none of them reaches is not an
-  error: the generator writes no `nftables` document for it, and the node gets no ruleset;
 - a template its daemon would fail on: one that does not compile, or that reads a variable the
-  daemon does not supply, in any branch and not only in those a node takes. A `router` template is
-  also filled in with the config of every node it reaches; a `firewall` template is not, since its
-  values exist only on the node.
+  daemon does not supply, in any branch and not only in those a node takes. It is also filled in
+  for every node that gets it: a `router` template with that node's config and values, a
+  `firewall` template with its values and stand-in interface names;
+- an empty `content`.
+
+Only the template a node gets is checked so: one overridden on every node it reaches is not.
+
+A node that no template of a daemon reaches gets the reference of the generator release that runs
+`generate`, the one `slipmesh-taloscfg template <daemon>` prints, checked like a template in the
+files. A newer generator gives such a node its newer reference with no warning: `base` is only on
+documents in the files.
 
 Those checks of the text are the generator's, `slipmesh-taloscfg generate --check`.
 `slipmesh check` reads the block, not the body.
@@ -1071,15 +1075,12 @@ or a list, in place of a string. The node gets that YAML's text, and each of its
 of `slipmesh.yaml` like any other.
 
 The generator makes some documents of a node itself: the `ExtensionServiceConfig` documents `awg`,
-`router` and, where a `firewall` template reaches the node, `nftables`, written in that order after
-the `patch` documents, and the annotations under `slipmesh.net/` in the node's `KubeNodeConfig`.
-A `patch` may add files to those three, and annotations of its own to the `KubeNodeConfig`. The
-generator refuses:
+`router` and `nftables`, written in that order after the `patch` documents, and the annotations
+under `slipmesh.net/` in the node's `KubeNodeConfig`. A `patch` may add files to those three, and
+annotations of its own to the `KubeNodeConfig`. The generator refuses:
 
 - a `patch` of one of the three that sets anything but `configFiles`, or a file at a path the
   generator writes there;
-- a `patch` that adds files to `nftables` on a node no `firewall` template reaches, which gets no
-  `nftables` document to carry them;
 - an annotation under `slipmesh.net/`.
 
 `slipmesh check` reads the block of a `patch` and not its body. What the body means is the
@@ -1140,7 +1141,7 @@ documentation.
 | `routing.classes` | | Each class's `protocol` as an annotation, and each of its rules as a `RoutingRuleConfig` document. | Not served. |
 | `groups` | | Understood, as by every tool. | The same. |
 | `platform` | | The metrics listeners. | No settings. |
-| `template` | | Checked, and given to the node's daemon. | Refused. |
+| `template` | | Checked, and given to the node's daemon. A node none reaches gets the generator's reference. | Refused. |
 | `patch` | | Merged, and carried into the node's machine configuration. | Refused. |
 | `vars` | | Laid for each node, and given to its router and firewall daemons. | Refused with `platform: routeros`; not served without it. |
 
