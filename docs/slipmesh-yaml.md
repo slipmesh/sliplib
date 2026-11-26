@@ -236,8 +236,9 @@ depends on whose the document is:
 - **A tool, in a document of another platform:** the block alone, so a key added to the body does
   not concern it.
 - **`slipmesh check`, in all of it:** every block, and the bodies of `network` and `groups`; the
-  body of a `platform`, `template` or `patch` it leaves to the platform's tool. With that tool's own
-  check, such as the Talos generator's `--check`, it is the one to run after an edit by hand.
+  body of a `platform`, `template` or `patch` it leaves to the platform's tool, and that of a `vars`
+  is not checked. With that tool's own check, such as the Talos generator's `--check`, it is the
+  one to run after an edit by hand.
 
 A YAML tag such as `!name` is refused anywhere in a file, by every tool; the core tags such as
 `!!str` read as the plain value.
@@ -1107,15 +1108,17 @@ example_source: 203.0.113.64/26
 | `include`, `exclude` | block | lists of names | no | The nodes the values are for. Left out, every node, or every node of `platform`. |
 | the rest | body | | | The values, by key. |
 
-The body is passed on as written: any key, any value, at any depth. Nothing in it is checked, and a
-key is as YAML reads it, so `1:` is the number `1`, read as `vars[1]`.
+The body is passed on as YAML reads it: any key, any value, at any depth. Nothing in it is checked.
+A key or a value is what YAML reads, not the text: `1:` is the number `1`, read as `vars[1]`, and
+`0x10` arrives as `16`; a value that has to keep its spelling is quoted.
 
 For a node, the `vars` documents that reach it are laid over each other in the order of their
 [rank](#aiming-a-document-at-nodes), from an empty mapping, by [the one
-rule](#laying-one-value-over-another): the network's, then its platform's, then those aimed at some
-nodes, each `order` before the next. A mapping is laid key by key at every depth, a `null` takes a
-key away, and a node no document reaches gets an empty mapping. The documents of all the files are
-collected and laid for each node alone; they are not laid into one tree as the network is.
+rule](#laying-one-value-over-another): a lower `order` first, and within one `order` the network's,
+then its platform's, then those aimed at some nodes. A mapping is laid key by key at every depth, a
+`null` takes a key away, and a node no document reaches gets an empty mapping. The documents of all
+the files are collected and laid for each node alone; they are not laid into one tree as the network
+is.
 
 A template that reads a key a node does not have fails for that node; the platform's tool says what
 it checks of that. A `vars` document is the loader's to read, so every tool and `slipmesh check`
@@ -1124,8 +1127,9 @@ check its block.
 ## Who serves what
 
 What each tool does with each part of the files under revision 1. `slipmesh check` checks all of it
-but the bodies of `platform`, `template`, `patch` and `vars` documents; the column of `slipmesh` says what
-it writes. How each tool is run, and what it writes or changes, is in its own documentation.
+but the bodies of `platform`, `template`, `patch` and `vars` documents; the column of `slipmesh`
+says what it writes. How each tool is run, and what it writes or changes, is in its own
+documentation.
 
 | part | `slipmesh` writes | on `talos`, `slipmesh-taloscfg` | on `routeros`, `slipmesh-routeros` |
 | --- | --- | --- | --- |

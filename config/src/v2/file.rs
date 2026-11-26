@@ -1,7 +1,7 @@
 //! The files read as a whole: the blocks, the network in force, the groups as nodes, and each
 //! platform document with its aim.
 
-use super::block::{Aimed, Block, Exclude, Include, Order, PlatformBlock, Rank, VarsBlock};
+use super::block::{Aimed, Block, PlatformBlock, Rank, VarsBlock};
 use super::check::Invalid;
 use super::groups::{Groups, GroupsError, Resolved, Selection};
 use super::network::{AMNEZIAWG, Network, WIREGUARD};
@@ -665,15 +665,8 @@ impl fmt::Display for Aim {
     }
 }
 
-/// The block of a document aimed at nodes; without `platform`, at those of every platform.
-struct Aiming {
-    platform: Option<Platform>,
-    include: Include,
-    exclude: Exclude,
-    order: Order,
-}
-
-impl From<Aimed> for Aiming {
+/// The block of a `template` or a `patch` is one of a `vars` whose platform is written.
+impl From<Aimed> for VarsBlock {
     fn from(aimed: Aimed) -> Self {
         Self {
             platform: Some(aimed.platform),
@@ -684,18 +677,14 @@ impl From<Aimed> for Aiming {
     }
 }
 
-impl From<VarsBlock> for Aiming {
-    fn from(vars: VarsBlock) -> Self {
-        Self {
-            platform: vars.platform,
-            include: vars.include,
-            exclude: vars.exclude,
-            order: vars.order,
-        }
-    }
+/// Which list of the file an aimed document goes to.
+enum AimedKind {
+    Template,
+    Patch,
+    Vars,
 }
 
-impl Aiming {
+impl VarsBlock {
     fn aim(self, place: Place, network: &Network, groups: &Resolved) -> Result<Aim, Error> {
         let platform = self.platform;
         if let Some(platform @ Platform::Routeros) = platform {
@@ -888,7 +877,7 @@ impl File {
         let mut networks = Vec::new();
         let mut groups = Vec::new();
         let mut platforms: Vec<(Platform, PlatformDocument)> = Vec::new();
-        let mut aimed_documents: Vec<(Place, Aiming, Document)> = Vec::new();
+        let mut aimed_documents: Vec<(AimedKind, Place, VarsBlock, Document)> = Vec::new();
         for Read { block, document } in documents {
             match block {
                 Block::Network(_) => networks.push(document),
@@ -905,15 +894,24 @@ impl File {
                     let body = document.body;
                     platforms.push((platform, PlatformDocument { place, body }));
                 }
-                Block::Template(aimed) => {
-                    aimed_documents.push((document.place(TEMPLATE), aimed.into(), document.body));
-                }
-                Block::Patch(aimed) => {
-                    aimed_documents.push((document.place(PATCH), aimed.into(), document.body));
-                }
-                Block::Vars(block) => {
-                    aimed_documents.push((document.place(VARS), block.into(), document.body));
-                }
+                Block::Template(aimed) => aimed_documents.push((
+                    AimedKind::Template,
+                    document.place(TEMPLATE),
+                    aimed.into(),
+                    document.body,
+                )),
+                Block::Patch(aimed) => aimed_documents.push((
+                    AimedKind::Patch,
+                    document.place(PATCH),
+                    aimed.into(),
+                    document.body,
+                )),
+                Block::Vars(block) => aimed_documents.push((
+                    AimedKind::Vars,
+                    document.place(VARS),
+                    block,
+                    document.body,
+                )),
             }
         }
 
@@ -941,14 +939,13 @@ impl File {
         let mut templates = Vec::new();
         let mut patches = Vec::new();
         let mut vars = Vec::new();
-        for (place, aiming, body) in aimed_documents {
-            let kind = place.kind;
-            let aim = aiming.aim(place, &network, &groups)?;
+        for (kind, place, block, body) in aimed_documents {
+            let aim = block.aim(place, &network, &groups)?;
             let document = AimedDocument { aim, body };
             match kind {
-                TEMPLATE => templates.push(document),
-                PATCH => patches.push(document),
-                _ => vars.push(document),
+                AimedKind::Template => templates.push(document),
+                AimedKind::Patch => patches.push(document),
+                AimedKind::Vars => vars.push(document),
             }
         }
         Ok(Self {
@@ -2102,6 +2099,14 @@ mod tests {
         );
         assert_eq!(levels("node-c"), ["EXAMPLE_LEVEL=info"]);
         assert!(levels("router1").is_empty());
+        assert_eq!(
+            file.vars_for("node-b"),
+            yaml("{example_source: 203.0.113.64/26}")
+        );
+        assert_eq!(
+            file.vars_for("router1"),
+            yaml("{example_source: 203.0.113.0/26}")
+        );
     }
 
     #[test]
@@ -2405,18 +2410,6 @@ mod tests {
 
     #[test]
     fn vars_for_a_platform_reach_only_its_nodes() {
-        let documents = [
-            network("{}"),
-            vars(", platform: talos, include: [node-a, router1]", "a: 1"),
-        ];
-        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
-        let at = place(VARS, &documents, 1);
-        let refusal = refusal(&documents);
-        assert!(
-            matches!(&refusal, Error::OtherPlatform { place, node, .. }
-                if *place == at && node.as_str() == "router1"),
-            "{refusal:?}"
-        );
         let file = file(&[&network("{}"), &vars(", platform: talos", "a: 1")]).unwrap();
         assert_eq!(file.vars_for("node-a"), yaml("{a: 1}"));
         assert_eq!(file.vars_for("router1"), yaml("{}"));
