@@ -1,6 +1,6 @@
 //! What no one key of a network refuses by itself.
 
-use super::network::{Addressing, Class, LinkKind, Mesh, Network, Node};
+use super::network::{Addressing, Class, LinkKind, Mesh, Network, Node, Rule};
 use super::{ClassName, Map, Name, Platform};
 use crate::Range;
 use sliplib_net::Ipv6Net;
@@ -10,6 +10,9 @@ const LINK_LOCAL: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0xfe80, 0, 0, 0, 0
 
 /// The kernel's own.
 const KERNEL_PROTOCOLS: std::ops::RangeInclusive<u8> = 0..=4;
+
+/// The kernel's own: unspecified, `default`, `main` and `local`.
+const KERNEL_TABLES: [u8; 4] = [0, 253, 254, 255];
 
 /// The routes to pool clients'.
 const POOL_PROTOCOL: u8 = 200;
@@ -96,6 +99,19 @@ pub enum Invalid {
         protocol: u8,
         first: ClassName,
         second: ClassName,
+    },
+    #[error(
+        "the route class {class:?} has `table` {table}, one the kernel keeps for itself (0 unspecified, 253 default, 254 main, 255 local) - give it another from 1 to 252, or leave the key out for main"
+    )]
+    KernelTable { class: ClassName, table: u8 },
+    #[error(
+        "the rule {:?} of the route class {:?} and the rule {:?} of the route class {:?} both have priority {priority} - give each rule its own",
+        .first.1, .first.0, .second.1, .second.0
+    )]
+    PriorityTwice {
+        priority: u32,
+        first: (ClassName, Name),
+        second: (ClassName, Name),
     },
     #[error(
         "{key}: the range {range} of `persistent_keepalive` starts at 0, and an interval drawn as 0 sends at once - start it at 1, or write `0` alone to send none"
@@ -258,7 +274,25 @@ fn links(network: &Network) -> Result<(), Invalid> {
 
 fn classes(classes: &Map<ClassName, Class>) -> Result<(), Invalid> {
     let mut numbers: Map<u8, &ClassName> = Map::new();
+    let mut priorities: Map<u32, (&ClassName, &Name)> = Map::new();
     for (name, class) in classes {
+        if let Some(table) = class.table
+            && KERNEL_TABLES.contains(&table)
+        {
+            return Err(Invalid::KernelTable {
+                class: name.clone(),
+                table,
+            });
+        }
+        for (rule, Rule { priority, .. }) in &class.rules {
+            if let Some((first_class, first)) = priorities.insert(*priority, (name, rule)) {
+                return Err(Invalid::PriorityTwice {
+                    priority: *priority,
+                    first: (first_class.clone(), first.clone()),
+                    second: (name.clone(), rule.clone()),
+                });
+            }
+        }
         let protocol = class.protocol;
         if KERNEL_PROTOCOLS.contains(&protocol) {
             return Err(Invalid::KernelProtocol {
@@ -608,6 +642,50 @@ mod tests {
                 protocol: 152,
                 first: class("egress"),
                 second: class("transit"),
+            }
+        );
+    }
+
+    #[test]
+    fn a_class_takes_no_table_the_kernel_keeps() {
+        for table in [0, 253, 254, 255] {
+            assert_eq!(
+                refusal(&format!(
+                    "{{routing: {{classes: {{egress: {{table: {table}}}}}}}}}"
+                )),
+                Invalid::KernelTable {
+                    class: class("egress"),
+                    table
+                }
+            );
+        }
+        for table in [1, 252] {
+            let network = with(&format!(
+                "{{routing: {{classes: {{egress: {{table: {table}}}}}}}}}"
+            ))
+            .unwrap();
+            assert_eq!(check(&network), Ok(()));
+        }
+    }
+
+    #[test]
+    fn two_rules_of_one_priority_are_refused_naming_both_in_any_classes() {
+        assert_eq!(
+            refusal("{routing: {classes: {egress: {rules: {again: {priority: 1000}}}}}}"),
+            Invalid::PriorityTwice {
+                priority: 1000,
+                first: (class("egress"), name("uplink-replies")),
+                second: (class("egress"), name("again")),
+            }
+        );
+        assert_eq!(
+            refusal(
+                "{routing: {classes: {transit: {protocol: 153, rules: {back: {priority: 1001}}}}}}"
+            ),
+            Invalid::PriorityTwice {
+                priority: 1001,
+                first: (class("egress"), name("egress")),
+                second: (class("transit"), name("back")),
             }
         );
     }

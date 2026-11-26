@@ -31,6 +31,16 @@ routing:
   classes:
     egress:
       protocol: 152
+      table: 152
+      rules:
+        # Replies to connections that came in through a node's uplink leave through it, past
+        # table 152: the firewall template marks those connections.
+        uplink-replies:
+          priority: 1000
+          mark: 0x100000/0x100000
+          lookup: main
+        egress:
+          priority: 1001
 mesh:
   interface_prefix: mesh-
   # Below the least limit of the links, which is 1344 here.

@@ -1,12 +1,14 @@
 //! `slipmesh.yaml`, and what every platform's daemons share of their configs.
 
 pub mod awg;
+mod mark;
 mod obfuscation;
 mod prefix;
 mod range;
 pub mod router;
 pub mod v2;
 
+pub use mark::Mark;
 pub use obfuscation::{
     DEFAULT_MAGIC_HEADERS, HEADER_PROTECTION_NONCE_SIZE, Obfuscation, ObfuscationError, TrailerLoss,
 };

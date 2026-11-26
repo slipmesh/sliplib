@@ -1,5 +1,5 @@
-//! Names of nodes, groups, links, underlay entries and route classes. A name becomes part of an
-//! interface name, a routing configuration and an annotation key, which take no more than this.
+//! Names of nodes, groups, links, underlay entries, route classes and rules. A name becomes part of
+//! an interface name, a routing configuration and an annotation key, which take no more.
 
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer};

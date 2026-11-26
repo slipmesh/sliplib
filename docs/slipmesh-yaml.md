@@ -9,8 +9,8 @@ file](slipmesh-yaml-v1-to-v2.md#what-leaves-the-file) says where the two such pa
 This is the specification of the format. A part no tool serves yet is marked **Planned** where it
 will stand, as [Planned](#planned) explains. sliplib v0.19 and the releases before it read version
 1, which [Differences from version 1](slipmesh-yaml-v1-to-v2.md#differences-from-version-1) starts
-from; from v0.20.0 on, the tools read version 2 alone. What this document says a tool does, v0.20.0
-does.
+from; from v0.20.0 on, the tools read version 2 alone. What this document says a tool does, a tool
+built on the sliplib release that holds this text does.
 
 ## The files
 
@@ -168,12 +168,12 @@ error. The old name leaves with the next `version`.
 
 ### Names
 
-Nodes, groups, links, a node's underlay entries and route classes are named by the keys of the
-mappings that hold them, under one rule: ASCII letters, digits, `-`, `_` and `.`, with a letter or
-a digit first and last. Names become parts of interface names, of names in a node's routing
-configuration and of annotation keys, which take no more. A class name is at most 48 characters,
-since it ends the key of a node annotation, which takes 63, and a node's name is bounded by the
-[interface names](#nodes) it becomes part of. No other name has a limit.
+Nodes, groups, links, a node's underlay entries, route classes and their rules are named by the
+keys of the mappings that hold them, under one rule: ASCII letters, digits, `-`, `_` and `.`, with a
+letter or a digit first and last. Names become parts of interface names, of names in a node's
+routing configuration and of annotation keys, which take no more. A class name is at most 48
+characters, since it ends the key of a node annotation, which takes 63, and a node's name is bounded
+by the [interface names](#nodes) it becomes part of. No other name has a limit.
 
 Nodes and groups share one namespace, so a group named like a node is an error. `all` and `none`
 are reserved: no node or group takes either. Every other kind of name is unique within its own
@@ -388,7 +388,7 @@ The routing over the mesh. A node holds its own value for some of these keys und
 | `direct_interfaces` | list of strings | no | empty | The interfaces whose connected IPv4 networks a node announces. |
 | `learn` | list of strings | no | empty | IPv4 prefixes: a node announces the routes its kernel holds inside them. |
 | `announce` | list of strings | no | empty | IPv4 prefixes a node announces as its own. |
-| `classes` | mapping | no | none | [Classes of routes](#routingclasses): named protocol numbers of routes that something other than the router installs. |
+| `classes` | mapping | no | none | [Classes of routes](#routingclasses): named protocol numbers of routes that something other than the router installs, with their table and the rules that lead there. |
 
 Besides its own loopback, a node comes to announce an IPv4 prefix in three ways:
 
@@ -442,31 +442,65 @@ of a link are always configured alike.
 #### `routing.classes`
 
 A class is a named protocol number, `proto` in `ip route`, for a set of routes that something
-other than the router installs in a node's kernel, such as the routes that lead out through a node.
-The router does not read it today.
+other than the router installs in a node's kernel, such as the routes that lead out through a node,
+with the kernel table they go into and the routing rules that lead there. The router does not read
+it today.
 
 ```yaml
 routing:
   classes:
     egress:
       protocol: 152
+      table: 152
+      rules:
+        uplink-replies:
+          priority: 1000
+          mark: 0x100000/0x100000
+          lookup: main
+        egress:
+          priority: 1001
 ```
 
-| key | type | required | what it is |
-| --- | --- | --- | --- |
-| `protocol` | integer, 0 to 255 | yes | The protocol number of the class's routes in a node's kernel. |
+| key | type | required | default | what it is |
+| --- | --- | --- | --- | --- |
+| `protocol` | integer, 0 to 255 | yes | | The protocol number of the class's routes in a node's kernel. |
+| `table` | integer, 1 to 252 | no | `main` | The kernel routing table the class's rules send to. |
+| `rules` | mapping | no | none | [Routing rules](#routingclassesnamerules), by name. |
 
 A class takes any [name](#names). On `talos` a node is told each class's number as the annotation
 `slipmesh.net/route_proto_id.<name>`, for whatever installs that class's routes there; without the
 class there is no such annotation. Refused, over all classes together: two classes with the same
 number; `0` to `4`, the kernel's own; `200`, which the routes to the clients of roadwarriors pools
-carry.
+carry. A `table` of `0`, `253`, `254` or `255` is refused too: the kernel keeps those for itself,
+`254` being `main`, which a class without the key gets.
 
 **Planned:** the router carrying a class's routes over the mesh to the other nodes, telling them
-from its other kernel routes by the number; a class's own `table`, the kernel routing table its
-routes go into on the receiving nodes; its `families`; and `rules`, a mapping of named routing
-rules, each with a priority, a mark, which is a string of `0x` and hexadecimal digits, and where it
-sends. A class without a table puts its routes in `main`.
+from its other kernel routes by the number, into the class's `table`.
+
+##### `routing.classes.<name>.rules`
+
+A rule tells the kernel which table a packet's route is looked up in, before `main`. Each rule of
+a class is made on every `talos` node and holds for both address families alike, with the same
+table and the same mark; `routeros` does not serve them. The name of a rule appears in messages and
+configures nothing.
+
+| key | type | required | default | what it is |
+| --- | --- | --- | --- | --- |
+| `priority` | integer, 0 to 4294967295 | yes | | Where the rule stands among the node's rules: the lowest is read first. |
+| `mark` | string | no | none: every packet | The firewall mark of the packets the rule takes, `0x` and hexadecimal digits, then `/` and a mask in the same form where only some bits are compared. |
+| `lookup` | `main` | no | the class's table | Where the rule sends. |
+
+Two rules of one priority are refused, in one class or in two. Which priorities Talos takes is
+Talos's to check: a node refuses one it does not when its configuration is applied.
+
+A mark and its mask fit 32 bits. Without the mask every bit is compared, as `ip rule` does. A mark
+or a mask of `0` is refused, since Talos takes either as none written and the rule would take other
+packets than the text says. A mark without a mask is written in quotes, `"0x100000"`: unquoted, it
+is a number.
+
+On `talos` each rule is a `RoutingRuleConfig` document of the node's machine configuration, named
+by its priority and naming no destination, which Talos makes into a rule of each family. A `patch`
+holding a `RoutingRuleConfig` of a rule's priority is refused by the generator.
 
 ### `nodes`
 
@@ -1063,7 +1097,7 @@ it writes. How each tool is run, and what it writes or changes, is in its own do
 | `routing.bgp` | | OSPFv3 and iBGP. | The same. |
 | `routing.direct_interfaces`, `learn`, `announce` | | As the router template has it. The reference one announces the connected networks of the interfaces, the kernel routes inside `learn`, and `announce` as written. | The connected networks of matching interfaces, the connected networks inside `learn`, and `announce` as written. |
 | `routing.bfd` | | A BFD session on every link. | The same. |
-| `routing.classes` | | Each class's `protocol` as an annotation. | Not served. |
+| `routing.classes` | | Each class's `protocol` as an annotation, and each of its rules as a `RoutingRuleConfig` document. | Not served. |
 | `groups` | | Understood, as by every tool. | The same. |
 | `platform` | | The metrics listeners. | No settings. |
 | `template` | | Checked, and given to the node's daemon. | Refused. |
@@ -1079,7 +1113,7 @@ mesh as computed.
 [`example/`](example) holds a whole network in version 2, written in [three files](#several-files):
 
 - [`mesh.yaml`](example/mesh.yaml), the architecture: three `talos` nodes and a `routeros` one,
-  three links and a route class;
+  three links and a route class with two rules;
 - [`secrets.yaml`](example/secrets.yaml), laid over it: the nodes' keys and what `slipmesh mint`
   wrote into the links' obfuscation, with a header protection key written by hand;
 - [`talos.yaml`](example/talos.yaml), the documents of `talos`: its settings, two templates, two
