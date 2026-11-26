@@ -135,7 +135,7 @@ mod tests {
     fn mesh_of(mesh_and_nodes: &str) -> Mesh<'static> {
         let text = format!(
             "slipmesh: {{kind: network, version: 2, revision: 1}}\naddressing: {{loopback: \
-             {{ipv4: 198.51.100.0/25, ipv6: '3fff::/64'}}}}\nrouting: {{bgp: {{as: 64512}}}}\n\
+             {{ipv4: 198.51.100.0/25, ipv6: '3fff::/64'}}}}\nrouting: {{bgp: {{as: 64496}}}}\n\
              {mesh_and_nodes}"
         );
         crate::test_support::mesh(sliplib_config::v2::File::parse(&text).unwrap())

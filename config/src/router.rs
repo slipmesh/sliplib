@@ -363,7 +363,7 @@ mod tests {
         r#"
 node:
   loopback_addresses: ["198.51.100.1/32", "3fff::1/128"]
-bgp_as: 64512
+bgp_as: 64496
 "#
     }
 
@@ -397,7 +397,7 @@ bgp_as: 64512
     #[test]
     fn parses_a_minimal_config() {
         let cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        assert_eq!(cfg.bgp_as, 64512);
+        assert_eq!(cfg.bgp_as, 64496);
         assert!(cfg.bgp_peers.is_empty());
         assert!(cfg.bypass.is_none());
         validate(&cfg).unwrap();
@@ -408,7 +408,7 @@ bgp_as: 64512
         let yaml = r#"
 node:
   loopback_addresses: ["198.51.100.1/32", "3fff::1/128"]
-bgp_as: 64512
+bgp_as: 64496
 bgp_peers:
   - name: east
     address: 3fff::2
@@ -453,7 +453,7 @@ bypass:
 
     fn with_loopbacks(list: &str) -> Result<RouterConfig, String> {
         sliplib_yaml::from_str(&format!(
-            "node:\n  loopback_addresses: {list}\nbgp_as: 64512\n"
+            "node:\n  loopback_addresses: {list}\nbgp_as: 64496\n"
         ))
         .map_err(|error| error.to_string())
     }

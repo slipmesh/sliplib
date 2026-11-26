@@ -286,7 +286,7 @@ fn rekey_refuses_files_that_give_no_network_and_writes_nothing() {
 #[test]
 fn every_command_refuses_a_file_of_version_1_naming_how_to_convert_it_and_writes_nothing() {
     // The network document starts at line 3.
-    let version_1 = "# version 1\n\nslipmesh: {kind: network}\ncluster:\n  bgp_as: 64512\n  \
+    let version_1 = "# version 1\n\nslipmesh: {kind: network}\ncluster:\n  bgp_as: 64496\n  \
         loopback_networks: {ipv4: 198.51.100.0/25, ipv6: '3fff::/32'}\n  \
         interface_prefix: {mesh: mesh-}\n  route_proto_id: {egress: 152}\nnodes:\n  - \
         {name: a, node_id: 198.51.100.1}\n";
