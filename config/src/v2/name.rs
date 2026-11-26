@@ -2,13 +2,14 @@
 //! an interface name, a routing configuration and an annotation key, which take no more.
 
 use serde::de::{self, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
 /// ASCII letters, digits, `-`, `_` and `.`, a letter or digit first and last. One YAML reads as a
 /// number or a boolean is the name it prints as: `1.0` is `1`, `True` is `true`; quoted, it keeps
 /// its spelling.
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
 pub struct Name(String);
 
 impl<'de> Deserialize<'de> for Name {
@@ -129,8 +130,8 @@ impl fmt::Display for Name {
 }
 
 /// It ends an annotation key, which takes 63 characters: 48.
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
-#[serde(try_from = "Name")]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(try_from = "Name", into = "Name")]
 pub struct ClassName(Name);
 
 impl fmt::Debug for ClassName {
@@ -166,6 +167,12 @@ impl TryFrom<Name> for ClassName {
             });
         }
         Ok(Self(name))
+    }
+}
+
+impl From<ClassName> for Name {
+    fn from(class: ClassName) -> Self {
+        class.0
     }
 }
 

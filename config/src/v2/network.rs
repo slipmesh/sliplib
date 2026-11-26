@@ -7,7 +7,7 @@ use crate::router::{
     BFD_DEFAULT_MIN_RX_MS, BFD_DEFAULT_MIN_TX_MS, BFD_DEFAULT_MULTIPLIER, InterfacePattern,
 };
 use crate::{Mark, Obfuscation, Prefix4, Prefix6, Range};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32};
@@ -100,30 +100,34 @@ pub struct Bfd {
 }
 
 /// A class of routes: their kernel protocol number, table and rules.
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Class {
     pub protocol: u8,
     /// Absent, `main`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub table: Option<u8>,
-    #[serde(default, deserialize_with = "unique_keys")]
+    #[serde(
+        default,
+        deserialize_with = "unique_keys",
+        skip_serializing_if = "Map::is_empty"
+    )]
     pub rules: Map<Name, Rule>,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     pub priority: u32,
     /// Absent, every packet.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mark: Option<Mark>,
     /// Absent, the class's table.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lookup: Option<Lookup>,
 }
 
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Lookup {
     Main,
@@ -881,6 +885,29 @@ mod tests {
             let read: Result<StrictObfuscation, _> = sliplib_yaml::from_value(value);
             assert!(read.is_err(), "{yaml} from a value");
         }
+    }
+
+    #[test]
+    fn classes_are_written_as_the_format_reads_them_and_without_what_is_left_out() {
+        let text = "\
+egress:
+  protocol: 152
+  table: 152
+  rules:
+    uplink-replies:
+      priority: 1000
+      mark: 0x100000/0x100000
+      lookup: main
+    marked:
+      priority: 1002
+      mark: '0xff'
+    egress:
+      priority: 1001
+transit:
+  protocol: 153
+";
+        let classes: Map<ClassName, Class> = sliplib_yaml::from_str(text).unwrap();
+        assert_eq!(sliplib_yaml::to_string(&classes).unwrap(), text);
     }
 
     /// To be laid into the example under a name.
