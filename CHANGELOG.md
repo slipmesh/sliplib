@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.25.0] - 2026-11-26
+
+### Breaking changes 💥
+
+- Route classes gain a table and rules (#98)
+
 ## [0.24.1] - 2026-11-25
 
 ### Fixed 🐛
