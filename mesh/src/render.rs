@@ -528,15 +528,18 @@ mod tests {
         );
     }
 
-    fn peer_keepalive(network: &Mesh<'_>, node: &str, peer: &str) -> Option<Range<u16>> {
-        let configs = node_configs(network, node).unwrap();
-        let interface = configs
+    fn mesh_interface(network: &Mesh<'_>, node: &str, peer: &str) -> InterfaceEntry {
+        node_configs(network, node)
+            .unwrap()
             .awg
             .interfaces
             .into_iter()
             .find(|interface| interface.name == format!("mesh-{peer}"))
-            .unwrap();
-        interface.peers[0].persistent_keepalive
+            .unwrap()
+    }
+
+    fn peer_keepalive(network: &Mesh<'_>, node: &str, peer: &str) -> Option<Range<u16>> {
+        mesh_interface(network, node, peer).peers[0].persistent_keepalive
     }
 
     #[test]
@@ -628,25 +631,12 @@ mod tests {
             "{{mesh: {{links: {{a-b: {{amneziawg: {{obfuscation: {every_field}}}}}}}}}}}"
         ));
         for (node, peer) in [("node-a", "node-b"), ("node-b", "node-a")] {
-            let configs = node_configs(&network, node).unwrap();
-            let interface = configs
-                .awg
-                .interfaces
-                .iter()
-                .find(|interface| interface.name == format!("mesh-{peer}"))
-                .unwrap();
-            assert_eq!(interface.obfuscation, written, "{node}");
+            assert_eq!(
+                mesh_interface(&network, node, peer).obfuscation,
+                written,
+                "{node}"
+            );
         }
-    }
-
-    fn mesh_interface(network: &Mesh<'_>, node: &str, peer: &str) -> InterfaceEntry {
-        node_configs(network, node)
-            .unwrap()
-            .awg
-            .interfaces
-            .into_iter()
-            .find(|interface| interface.name == format!("mesh-{peer}"))
-            .unwrap()
     }
 
     #[test]

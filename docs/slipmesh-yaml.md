@@ -737,9 +737,10 @@ optional, and one left out leaves that part of the tunnel as WireGuard has it.
 | `random_trailers` | boolean | A trailer of random length on outgoing packets. Both ends of a tunnel set it, or neither. |
 | `disable_cookies` | boolean | No cookie replies. |
 
-The generator writes every field of a link of type `amneziawg` into the config of both its ends:
-one the file leaves out as `0`, the module's "not set", and a switch as `false`. The decoys and
-`header_protection_key` it writes only where they are set.
+The generator writes every field of a link of type `amneziawg` into the config of both its ends,
+each one the file leaves out as what the kernel module gets for it: `s3` and `s4` as `0`, no junk
+bytes; a timing or padding value as `0`, the module's "not set"; a switch as `false`. The decoys
+and `header_protection_key` it writes only where they are set.
 
 An obfuscation the kernel module would refuse is refused when the configs of the link's two nodes
 are computed. One in `mesh.amneziawg.obfuscation` therefore stops every node with a link of type
