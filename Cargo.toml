@@ -32,6 +32,8 @@ k8s-openapi = "0.29.0"
 kube = { version = "5.2.0", default-features = false }
 prometheus-client = "0.26.0"
 rand = "0.10.4"
+# Re-exports the netlink-packet-route it is built on, so no second copy is depended on.
+rtnetlink = "0.24.0"
 # IP_FREEBIND, which tokio has no API for.
 socket2 = { version = "0.6.5", features = ["all"] }
 tracing = "0.1.44"

@@ -4,6 +4,8 @@ all_features = true
 # Error messages are wording, which no test pins; their mutants would only ever be missed.
 exclude_re = [
     "impl fmt::Display for KeyError",
+    # A route's text appears only in error messages.
+    "impl fmt::Display for Route",
     # A test's request head arrives in one read, so the fake API never reads a second time.
     "replace == with != in head_complete",
     "Visitor.*::expecting",
@@ -15,6 +17,8 @@ exclude_re = [
     "replace < with <= in <impl fmt::Display for TrailerLoss>::fmt",
     # The network and node_id halves of a derived address share no bit, so `|` and `^` agree.
     "replace \\| with \\^ in ipv[46]_in",
+    # Tentative and Dadfailed are two bits of their own, so `|` and `^` agree.
+    "replace \\| with \\^ in source_address",
     # A cut wholly below a network leaves it whole: starting the run of cuts earlier costs time
     # alone.
     "replace < with == in subtract",

@@ -6,7 +6,27 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "CIDR parsing and arithmetic for the slipmesh components, on ipnet's types, and the mesh MTU's floor and annotation"
+description = "CIDR parsing and arithmetic for the slipmesh components, on ipnet's types, the mesh MTU's floor and annotation, and routes by protocol tag"
+
+[features]
+# Linux alone has netlink, and the tools that read slipmesh.yaml build anywhere: elsewhere the
+# feature builds nothing.
+netlink = ["dep:futures", "dep:rtnetlink", "dep:thiserror", "dep:tokio"]
 
 [dependencies]
 ipnet.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+futures = { workspace = true, optional = true }
+rtnetlink = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt", "sync"] }
+
+[dev-dependencies]
+futures.workspace = true
+nix = { workspace = true, features = ["sched"] }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
+
+[[test]]
+name = "netns"
+required-features = ["netlink"]
