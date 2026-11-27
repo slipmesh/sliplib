@@ -229,30 +229,24 @@ mod tests {
         "{core: [node-a, node-b, node-c], workers: {include: [core], exclude: [node-a]}}";
 
     #[test]
-    fn a_group_holds_its_nodes_in_the_order_of_the_network_whatever_the_order_written() {
-        assert_eq!(
-            group("{back: [router1, node-c, node-a]}", "back"),
-            ["node-a", "node-c", "router1"]
-        );
-    }
-
-    #[test]
-    fn groups_nest_and_exclude_groups_and_all_stands_for_every_node() {
-        let yaml = "{inner: [node-a, node-b], outer: [inner, node-c], \
-                    rest: {exclude: [outer]}, others: {include: all, exclude: [inner]}, \
-                    again: [outer, inner, node-a]}";
-        assert_eq!(group(yaml, "outer"), ["node-a", "node-b", "node-c"]);
-        assert_eq!(group(yaml, "rest"), ["router1"]);
-        assert_eq!(group(yaml, "others"), ["node-c", "router1"]);
-        assert_eq!(group(yaml, "again"), ["node-a", "node-b", "node-c"]);
-    }
-
-    #[test]
-    fn a_group_written_before_the_one_it_names_still_reads() {
-        assert_eq!(
-            group("{outer: [inner], inner: [node-b]}", "outer"),
-            ["node-b"]
-        );
+    fn a_group_is_the_nodes_it_reaches_in_the_order_of_the_network() {
+        let nested = "{inner: [node-a, node-b], outer: [inner, node-c], \
+                      rest: {exclude: [outer]}, others: {include: all, exclude: [inner]}, \
+                      again: [outer, inner, node-a]}";
+        for (yaml, name, members) in [
+            (
+                "{back: [router1, node-c, node-a]}",
+                "back",
+                &["node-a", "node-c", "router1"][..],
+            ),
+            (nested, "outer", &["node-a", "node-b", "node-c"]),
+            (nested, "rest", &["router1"]),
+            (nested, "others", &["node-c", "router1"]),
+            (nested, "again", &["node-a", "node-b", "node-c"]),
+            ("{outer: [inner], inner: [node-b]}", "outer", &["node-b"]),
+        ] {
+            assert_eq!(group(yaml, name), members, "{name} of {yaml}");
+        }
     }
 
     #[test]
@@ -292,6 +286,8 @@ mod tests {
                 "{a: [node-a], b: {include: all, exclude: [c]}, c: [b]}",
                 "b, c, b",
             ),
+            // `x` leads into the cycle and is not on it.
+            ("{x: [a], a: [b], b: [a]}", "a, b, a"),
         ] {
             match resolved(yaml) {
                 Err(GroupsError::Cycle(group, told)) => {
@@ -301,18 +297,6 @@ mod tests {
                 other => panic!("{yaml}: {other:?}"),
             }
         }
-    }
-
-    // `x` leads into the cycle and is not on it.
-    #[test]
-    fn a_cycle_reached_through_another_group_is_told_from_where_it_closes() {
-        assert_eq!(
-            resolved("{x: [a], a: [b], b: [a]}"),
-            Err(GroupsError::Cycle(
-                names(&["a"]).remove(0),
-                "a, b, a".to_owned()
-            ))
-        );
     }
 
     #[test]

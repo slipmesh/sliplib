@@ -188,16 +188,14 @@ mod tests {
             (taking(&["1-5", "7-2147483647"]), 6),
             (taking(&["5-2147483645", "2147483647"]), 2_147_483_646),
             (taking(&["5-10", "10-20", "22-2147483647"]), 21),
+            // Beside the values a header is drawn from, taking nothing.
+            (
+                taking(&["1-4", "2147483648-4294967295", "5-2147483646"]),
+                2_147_483_647,
+            ),
         ] {
             assert_eq!(draw_outside(&mut rng, &taken), Some(left), "{taken:?}");
         }
-    }
-
-    #[test]
-    fn ranges_beside_the_values_a_header_is_drawn_from_take_nothing() {
-        let mut rng = rand::rng();
-        let taken = taking(&["1-4", "2147483648-4294967295", "5-2147483646"]);
-        assert_eq!(draw_outside(&mut rng, &taken), Some(2_147_483_647));
     }
 
     #[test]

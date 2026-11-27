@@ -176,6 +176,8 @@ pub fn validate(cfg: &AwgConfig) -> Result<(), Invalid> {
 mod tests {
     use super::*;
 
+    type IsTheRefusal = fn(&Invalid) -> bool;
+
     fn iface(name: &str) -> InterfaceEntry {
         InterfaceEntry {
             name: name.to_string(),
@@ -201,21 +203,30 @@ mod tests {
     }
 
     #[test]
-    fn an_interface_carrying_ipv6_takes_an_mtu_of_at_least_1280() {
-        validate(&with_mtu(&["fe80::1/64", "198.51.100.193/32"], 1280)).unwrap();
-        let err = validate(&with_mtu(&["fe80::1/64"], 1279))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("\"mesh-a\"") && err.contains("1280"), "{err}");
-    }
-
-    #[test]
-    fn an_ipv4_only_interface_takes_an_mtu_of_at_least_68() {
-        validate(&with_mtu(&["198.51.100.193/32"], 68)).unwrap();
-        let err = validate(&with_mtu(&["198.51.100.193/32"], 67))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("\"mesh-a\"") && err.contains("68"), "{err}");
+    fn an_interface_takes_an_mtu_of_at_least_1280_with_ipv6_and_of_68_without() {
+        for (addresses, mtu, floor) in [
+            (&["fe80::1/64", "198.51.100.193/32"][..], 1280, None),
+            (&["fe80::1/64"], 1279, Some(1280)),
+            (&["198.51.100.193/32"], 68, None),
+            (&["198.51.100.193/32"], 67, Some(68)),
+        ] {
+            let checked = validate(&with_mtu(addresses, mtu));
+            let Some(floor) = floor else {
+                checked.unwrap_or_else(|refused| panic!("{addresses:?} {mtu}: {refused}"));
+                continue;
+            };
+            let refused = checked.expect_err(&format!("{addresses:?} {mtu}"));
+            assert!(
+                matches!(&refused, Invalid::MtuTooSmall { interface, mtu: refused_mtu, floor: least }
+                    if interface == "mesh-a" && *refused_mtu == mtu && *least == floor),
+                "{addresses:?} {mtu}: {refused:?}"
+            );
+            let message = refused.to_string();
+            assert!(
+                message.contains("\"mesh-a\"") && message.contains(&floor.to_string()),
+                "{message}"
+            );
+        }
     }
 
     #[test]
@@ -325,50 +336,46 @@ interfaces:
     }
 
     #[test]
-    fn rejects_duplicate_interface_names() {
-        let cfg = AwgConfig {
-            interfaces: vec![iface("dup"), iface("dup")],
+    fn rejects_a_second_interface_of_one_name_and_a_second_peer_of_one_key() {
+        let peer = |allowed: &str| PeerEntry {
+            public_key: "k".to_string(),
+            name: None,
+            endpoint: None,
+            allowed_ips: Some(vec![Prefix::try_from(allowed.to_owned()).unwrap()]),
+            persistent_keepalive: None,
         };
-        assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
-    fn rejects_a_name_longer_than_ifnamsiz() {
-        let cfg = AwgConfig {
-            interfaces: vec![iface("this-name-is-way-too-long")],
-        };
-        assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
-    fn accepts_a_name_that_fills_ifnamsiz() {
-        let cfg = AwgConfig {
-            interfaces: vec![iface("fifteen-bytes-1")],
-        };
-        validate(&cfg).unwrap();
-    }
-
-    #[test]
-    fn rejects_duplicate_peer_public_key_within_one_interface() {
         let mut a = iface("a");
-        a.peers.push(PeerEntry {
-            public_key: "k".to_string(),
-            name: None,
-            endpoint: None,
-            allowed_ips: Some(vec![Prefix::try_from("203.0.113.1/32".to_owned()).unwrap()]),
-            persistent_keepalive: None,
-        });
-        a.peers.push(PeerEntry {
-            public_key: "k".to_string(),
-            name: None,
-            endpoint: None,
-            allowed_ips: Some(vec![Prefix::try_from("203.0.113.2/32".to_owned()).unwrap()]),
-            persistent_keepalive: None,
-        });
-        let cfg = AwgConfig {
-            interfaces: vec![a],
+        a.peers = vec![peer("203.0.113.1/32"), peer("203.0.113.2/32")];
+        let cases: [(&str, Vec<InterfaceEntry>, IsTheRefusal); 2] = [
+            (
+                "two interfaces named dup",
+                vec![iface("dup"), iface("dup")],
+                |refused| matches!(refused, Invalid::DuplicateInterface(name) if name == "dup"),
+            ),
+            ("two peers of the key k", vec![a], |refused| {
+                matches!(refused, Invalid::DuplicatePeer { interface, public_key }
+                    if interface == "a" && public_key == "k")
+            }),
+        ];
+        for (case, interfaces, is_the_refusal) in cases {
+            let refused = validate(&AwgConfig { interfaces }).expect_err(case);
+            assert!(is_the_refusal(&refused), "{case}: {refused:?}");
+        }
+    }
+
+    #[test]
+    fn a_name_fills_ifnamsiz_and_one_byte_more_is_refused() {
+        let named = |name: &str| {
+            validate(&AwgConfig {
+                interfaces: vec![iface(name)],
+            })
         };
-        assert!(validate(&cfg).is_err());
+        named("fifteen-bytes-1").unwrap();
+        let refused = named("sixteen-bytes-16").unwrap_err();
+        assert!(
+            matches!(&refused, Invalid::InterfaceNameTooLong(name) if name == "sixteen-bytes-16"),
+            "{refused:?}"
+        );
     }
 
     fn dialed(persistent_keepalive: Option<Range<u16>>) -> AwgConfig {
@@ -428,44 +435,50 @@ interfaces:
         config
     }
 
-    const OBFUSCATING_FIELDS: [&str; 3] = ["jc", "keepalive_timeout", "random_trailers"];
-
     #[test]
-    fn a_dialed_peer_without_a_keepalive_takes_the_default_of_its_interface() {
-        assert_eq!(keepalive_of_the_peer(&dialed(None)), Range::from(25));
-        for field in OBFUSCATING_FIELDS {
-            let obfuscated = obfuscated_by(field, dialed(None));
-            assert!(!obfuscated.interfaces[0].is_plain(), "{field}");
-            assert_eq!(
-                keepalive_of_the_peer(&obfuscated),
-                Range::new(20, 30).unwrap(),
-                "{field}"
-            );
-        }
-        assert!(dialed(None).interfaces[0].is_plain());
-    }
-
-    #[test]
-    fn a_dialed_peers_own_keepalive_stands_whatever_its_interface_sets() {
-        for own in [7, 0] {
-            let plain = dialed(Some(Range::from(own)));
-            assert_eq!(keepalive_of_the_peer(&plain), Range::from(own));
-            let obfuscated = obfuscated_by("jc", dialed(Some(Range::from(own))));
-            assert_eq!(keepalive_of_the_peer(&obfuscated), Range::from(own));
-        }
-    }
-
-    #[test]
-    fn a_peer_that_is_only_waited_for_is_sent_none_whatever_its_entry_sets() {
-        for own in [
-            None,
-            Some(Range::from(7)),
-            Some(Range::new(20, 30).unwrap()),
+    fn a_dialed_peer_is_sent_its_own_keepalive_or_its_interfaces_and_one_waited_for_none() {
+        let (dialed_peer, waited) = (true, false);
+        let wide = Range::new(20, 30).unwrap();
+        for (dials, own, obfuscating, sent) in [
+            (dialed_peer, None, None, Range::from(25)),
+            (dialed_peer, None, Some("jc"), wide),
+            (dialed_peer, None, Some("keepalive_timeout"), wide),
+            (dialed_peer, None, Some("random_trailers"), wide),
+            (dialed_peer, Some(Range::from(7)), None, Range::from(7)),
+            (
+                dialed_peer,
+                Some(Range::from(7)),
+                Some("jc"),
+                Range::from(7),
+            ),
+            (dialed_peer, Some(Range::from(0)), None, Range::from(0)),
+            (
+                dialed_peer,
+                Some(Range::from(0)),
+                Some("jc"),
+                Range::from(0),
+            ),
+            (waited, None, None, NO_KEEPALIVE),
+            (waited, None, Some("jc"), NO_KEEPALIVE),
+            (waited, Some(Range::from(7)), None, NO_KEEPALIVE),
+            (waited, Some(Range::from(7)), Some("jc"), NO_KEEPALIVE),
+            (waited, Some(wide), None, NO_KEEPALIVE),
+            (waited, Some(wide), Some("jc"), NO_KEEPALIVE),
         ] {
-            let plain = waited_for(dialed(own));
-            assert_eq!(keepalive_of_the_peer(&plain), NO_KEEPALIVE, "{own:?}");
-            let obfuscated = waited_for(obfuscated_by("jc", dialed(own)));
-            assert_eq!(keepalive_of_the_peer(&obfuscated), NO_KEEPALIVE, "{own:?}");
+            let case = format!("dials: {dials}, own: {own:?}, obfuscated by: {obfuscating:?}");
+            let mut config = dialed(own);
+            if let Some(field) = obfuscating {
+                config = obfuscated_by(field, config);
+            }
+            assert_eq!(
+                config.interfaces[0].is_plain(),
+                obfuscating.is_none(),
+                "{case}"
+            );
+            if !dials {
+                config = waited_for(config);
+            }
+            assert_eq!(keepalive_of_the_peer(&config), sent, "{case}");
         }
         assert_eq!(NO_KEEPALIVE, Range::from(0));
     }
