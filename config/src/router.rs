@@ -458,7 +458,9 @@ bgp_peers:
     address: 3fff::2
   - name: west
     address: 3fff::3
+bfd: {min_rx_ms: 250, min_tx_ms: 350, multiplier: 4}
 ospf_interfaces: ["mesh-*", "router-lo"]
+direct_interfaces: ["lan0"]
 learn: ["203.0.113.0/27"]
 announce:
   - net: "203.0.113.192/26"
@@ -477,6 +479,26 @@ bypass:
         validate(&cfg).unwrap();
         assert_eq!(cfg.bgp_peers.len(), 2);
         assert_eq!(cfg.bypass.as_ref().unwrap().refresh_interval_secs, 3600);
+        let direct: Vec<&str> = cfg
+            .direct_interfaces
+            .iter()
+            .map(InterfacePattern::as_str)
+            .collect();
+        assert_eq!(direct, ["lan0"]);
+        assert_eq!(cfg.announce[0].label.as_deref(), Some("k8s-services"));
+        let written = sliplib_yaml::to_string(&cfg).unwrap();
+        assert_eq!(
+            sliplib_yaml::from_str::<RouterConfig>(&written).unwrap(),
+            cfg
+        );
+    }
+
+    #[test]
+    fn a_config_without_bfd_and_bypass_is_written_without_their_keys() {
+        let cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
+        let written = sliplib_yaml::to_value(&cfg).unwrap();
+        assert_eq!(written.get("bfd"), None);
+        assert_eq!(written.get("bypass"), None);
     }
 
     fn with_loopbacks(list: &str) -> Result<RouterConfig, String> {

@@ -359,16 +359,10 @@ cargo mutants
 [`cargo-mutants`](https://mutants.rs) changes the code one place at a time and expects a test to
 fail each time; [`.cargo/mutants.toml`](.cargo/mutants.toml) lists what it skips and why.
 
-[`mesh/tests/golden.rs`](mesh/tests/golden.rs) pins what the files give their nodes. Under
-[`mesh/tests/golden/`](mesh/tests/golden), `v1` and `v1-alternate` hold the configs that two
-networks of format version 1 gave every node, with derived public keys named by their owner; the
-first set every key of that format, the second the other side of each key a file sets once. `v2` and
-`v2-alternate` are the same two networks converted to version 2 by hand, and every node of each gets
-those configs, but for what [a conversion
-changes](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand) and the keys of a daemon's own
-config, `metrics` and `handshake_stale_secs`. The files hold values: the test reads each into the
-shared type with those keys beside it and writes it back, and the values have to come out the same.
-A change of what a node gets fails the twins; a key the types do not take fails the read-back.
+What the files give a node is pinned value by value, each in a test of the rule that computes it:
+those of [`mesh/src/render.rs`](mesh/src/render.rs) for a node's two configs, and those of
+[`config/src/awg.rs`](config/src/awg.rs) and [`config/src/router.rs`](config/src/router.rs) for the
+keys the configs are written and read under.
 
 ## Releasing
 
