@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.28.0] - 2026-11-27
+
+### Added ✨
+
+- Subtract a set of networks from another, either family (#110)
+- Serve a daemon's Prometheus endpoint, behind a metrics feature (#112)
+- Manage kernel routes by protocol tag, behind a netlink feature (#111)
+- Start an agent in the cluster and watch one object (#114)
+- Print the cluster's mesh object with every node's endpoint (#115)
+
+### Tests ✅
+
+- Drop tests that repeat another test of the same line (#108)
+- Gather the cases of one function into one table test (#109)
+- Read every rendered value in a test of its rule and drop the golden files (#113)
+- Drop the tests left undecided by the audit (#116)
+
 ## [0.27.0] - 2026-11-27
 
 ### Added ✨
