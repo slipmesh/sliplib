@@ -11,7 +11,7 @@ use sliplib_config::router::{
 };
 use sliplib_config::v2::Name;
 use sliplib_config::v2::network::{LinkKind, Node};
-use sliplib_config::{Obfuscation, ObfuscationError, Prefix, Prefix4, Prefix6};
+use sliplib_config::{Obfuscation, ObfuscationError, Prefix, Prefix4, Prefix6, Range};
 use sliplib_net::Ipv6Net;
 use sliplib_secrets::wireguard::KeyError;
 use std::net::IpAddr;
@@ -183,16 +183,19 @@ fn mesh_interfaces_for(
                 persistent_keepalive: None,
             }],
         };
-        // Written only where it changes what the peer is sent.
-        let without = interface.keepalive_of(&interface.peers[0]);
         interface.peers[0].persistent_keepalive = link.kind.persistent_keepalive();
-        let with = interface.keepalive_of(&interface.peers[0]);
-        if with == without {
-            interface.peers[0].persistent_keepalive = None;
-        }
+        interface.peers[0].persistent_keepalive = resolved_keepalive(&interface, 0);
         out.push(interface);
     }
     Ok(out)
+}
+
+/// What the daemon sends peer `index` of `interface`, written out; none to a peer it does not dial.
+pub fn resolved_keepalive(interface: &InterfaceEntry, index: usize) -> Option<Range<u16>> {
+    let peer = &interface.peers[index];
+    peer.endpoint
+        .is_some()
+        .then(|| interface.keepalive_of(peer))
 }
 
 pub(crate) fn render_awg_config(
@@ -522,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dialed_peer_gets_the_keepalive_of_its_link_where_that_is_not_the_default() {
+    fn a_dialed_peer_gets_the_keepalive_of_its_link_and_one_nobody_dials_none() {
         let network = example("{}");
         // `node-c` dials `node-a`; nobody dials `node-c`, which has no endpoint.
         assert_eq!(
@@ -530,17 +533,24 @@ mod tests {
             Some(Range::new(15, 20).unwrap())
         );
         assert_eq!(peer_keepalive(&network, "node-a", "node-c"), None);
-        // A link that sets none.
-        assert_eq!(peer_keepalive(&network, "node-a", "node-b"), None);
     }
 
     #[test]
-    fn a_keepalive_equal_to_the_default_of_its_type_is_left_out() {
-        let of_the_defaults = example(
-            "{mesh: {wireguard: {persistent_keepalive: 25}, amneziawg: {persistent_keepalive: 20-30}, links: {a-c: {amneziawg: {persistent_keepalive: null}}}}}",
+    fn a_dialed_peer_on_a_link_that_sets_none_gets_what_the_daemon_gives_its_type() {
+        use sliplib_config::awg::{OBFUSCATED_KEEPALIVE, PLAIN_KEEPALIVE};
+        let network = example("{}");
+        assert_eq!(
+            peer_keepalive(&network, "node-a", "node-b"),
+            Some(OBFUSCATED_KEEPALIVE)
         );
-        assert_eq!(peer_keepalive(&of_the_defaults, "node-a", "router1"), None);
-        assert_eq!(peer_keepalive(&of_the_defaults, "node-a", "node-b"), None);
+        assert_eq!(
+            peer_keepalive(&network, "node-a", "router1"),
+            Some(PLAIN_KEEPALIVE)
+        );
+    }
+
+    #[test]
+    fn a_keepalive_set_on_a_type_is_written_as_set() {
         let of_their_own = example(
             "{mesh: {wireguard: {persistent_keepalive: 10}, amneziawg: {persistent_keepalive: 25}}}",
         );

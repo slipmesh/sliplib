@@ -57,7 +57,7 @@ In general:
   that reads a peer's keepalive from its config entry sends a keepalive every 25 seconds to a peer
   it dials on an interface without obfuscation and every `20-30` on one with it, and a RouterOS
   device sends every 25; a file of version 1 gets that. Version 2 gives the same where no key is
-  written, and the generator writes the key only where a link's value differs from it. The
+  written, and the generator writes that value into the peer's entry. The
   [specification](slipmesh-yaml.md#keepalive) says what an older daemon does.
 - BFD is on where its block is. Version 1 had `bfd.enable`.
 - The numbers of route classes are checked against each other and against `200`. Version 1 checked

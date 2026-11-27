@@ -139,6 +139,12 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
         for announced in &mut expected_router.announce {
             announced.label = None;
         }
+        for interface in &mut expected_awg.interfaces {
+            for index in 0..interface.peers.len() {
+                interface.peers[index].persistent_keepalive =
+                    sliplib_mesh::render::resolved_keepalive(interface, index);
+            }
+        }
         let endpoints = expected_awg
             .interfaces
             .iter_mut()
