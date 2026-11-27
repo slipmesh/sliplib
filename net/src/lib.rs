@@ -81,3 +81,20 @@ pub fn exclude(net: IpNet, excluded: IpNet) -> Vec<IpNet> {
     rest.sort();
     rest
 }
+
+/// The fewest networks covering every address in `included` and in none of `excluded`, in address
+/// order, either family. Host bits count as their network.
+pub fn subtract(included: &[IpNet], excluded: &[IpNet]) -> Vec<IpNet> {
+    let mut rest = Vec::new();
+    for &net in included {
+        let mut pieces = vec![net];
+        for &cut in excluded {
+            pieces = pieces
+                .into_iter()
+                .flat_map(|piece| exclude(piece, cut))
+                .collect();
+        }
+        rest.extend(pieces);
+    }
+    IpNet::aggregate(&rest)
+}

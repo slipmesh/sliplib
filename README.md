@@ -153,7 +153,9 @@ reaches every component. On top of its methods:
 
 - `parse`, `parse_ipv4` and `parse_ipv6` read `"<address>/<prefix length>"`, host bits kept, with
   errors that name the input;
-- `exclude(net, excluded)`: the rest of `net`, as the fewest networks, in address order.
+- `exclude(net, excluded)`: the rest of `net`, as the fewest networks, in address order;
+- `subtract(included, excluded)`: every address of `included` in none of `excluded`, as the fewest
+  networks, in address order, either family;
 - `mtu::MIN_IPV6_MTU`, 1280, the least MTU of a link that carries IPv6, and
   `mtu::MESH_MTU_ANNOTATION`, the annotation of a node's `Node` object that carries the mesh MTU.
 
