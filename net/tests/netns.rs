@@ -1,5 +1,6 @@
 //! Against the kernel, each test in a network namespace of its own. Run as the README's Development
 //! section says.
+#![cfg(target_os = "linux")]
 
 #[path = "support/netns.rs"]
 mod support;
@@ -13,6 +14,8 @@ use support::{ip, own_network_namespace};
 
 const TABLE: u32 = 152;
 const PROTOCOL: u8 = 152;
+/// Below BIRD's 32 in both families, as the egress agent sets it.
+const METRIC: u32 = 16;
 
 fn net(text: &str) -> IpNet {
     text.parse().unwrap()
@@ -44,6 +47,7 @@ fn ours(destination: &str, gateway: &str, oif: u32) -> Route {
         protocol: PROTOCOL,
         gateway: Some(address(gateway)),
         oif: Some(oif),
+        metric: Some(METRIC),
     }
 }
 
@@ -110,7 +114,18 @@ async fn a_delete_takes_ours_alone_a_missing_route_is_already_deleted_and_a_refu
         rt.route_replace(route).await.unwrap();
     }
 
-    for route in routes.iter().chain(&routes) {
+    ip("-4 route add 203.0.113.0/24 dev up0 table 152 proto 152 metric 16 scope link");
+    let linked = Route {
+        destination: net("203.0.113.0/24"),
+        table: TABLE,
+        protocol: PROTOCOL,
+        gateway: None,
+        oif: Some(up0),
+        metric: Some(METRIC),
+    };
+    assert!(listed(&rt).await.contains(&linked));
+
+    for route in routes.iter().chain(&routes).chain([&linked]) {
         rt.route_del(route).await.unwrap();
     }
 
@@ -136,6 +151,7 @@ async fn a_route_on_a_link_alone_lands_in_main() {
         protocol: 200,
         gateway: None,
         oif: Some(up0),
+        metric: None,
     };
 
     rt.route_replace(&route).await.unwrap();
@@ -221,10 +237,11 @@ async fn a_route_of_either_family_wakes_whoever_follows_the_changes() {
         "-4 route add 198.51.100.0/24 via 192.0.2.1",
         "-6 route add 3fff:1::/32 via 2001:db8::1",
     ] {
-        while tokio::time::timeout(Duration::from_millis(100), changes.next())
-            .await
-            .is_ok()
-        {}
+        while let Ok(change) =
+            tokio::time::timeout(Duration::from_millis(100), changes.next()).await
+        {
+            assert_eq!(change, Some(()), "the changes ended");
+        }
         ip(change);
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(5), changes.next()).await,

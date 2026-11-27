@@ -1,8 +1,8 @@
 //! CIDR on [`ipnet`]'s types, re-exported so one version reaches every component, the mesh MTU's
-//! floor and annotation, and, with the `netlink` feature, routes by protocol tag.
+//! floor and annotation, and, with the `netlink` feature on Linux, routes by protocol tag.
 
 pub mod mtu;
-#[cfg(feature = "netlink")]
+#[cfg(all(feature = "netlink", target_os = "linux"))]
 pub mod route;
 
 use std::fmt;

@@ -5,9 +5,10 @@ use crate::{Family, IpNet};
 use futures::{Stream, StreamExt, TryStreamExt};
 use rtnetlink::packet_route::address::AddressMessage;
 use rtnetlink::packet_route::route::{
-    RouteAddress, RouteAttribute, RouteHeader, RouteMessage, RouteProtocol,
+    RouteAddress, RouteAttribute, RouteHeader, RouteMessage, RouteProtocol, RouteScope, RouteVia,
 };
 use rtnetlink::{Handle, RouteMessageBuilder};
+use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -16,8 +17,7 @@ pub const MAIN_TABLE: u32 = RouteHeader::RT_TABLE_MAIN as u32;
 
 const ESRCH: i32 = -3;
 
-/// A route as this module installs and lists it. The metric is the kernel's default, so a route
-/// of another daemon at the same destination and its own metric stays beside it.
+/// A route as this module installs and lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Route {
     pub destination: IpNet,
@@ -25,6 +25,29 @@ pub struct Route {
     pub protocol: u8,
     pub gateway: Option<IpAddr>,
     pub oif: Option<u32>,
+    /// `None` is the kernel's default, which differs by family: 0 for IPv4, which wins over every
+    /// other metric, and 1024 for IPv6, which loses to most. Listed, IPv4's 0 reads as `None`.
+    pub metric: Option<u32>,
+}
+
+impl fmt::Display for Route {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} table {} proto {}",
+            self.destination, self.table, self.protocol
+        )?;
+        if let Some(gateway) = self.gateway {
+            write!(f, " via {gateway}")?;
+        }
+        if let Some(oif) = self.oif {
+            write!(f, " dev {oif}")?;
+        }
+        if let Some(metric) = self.metric {
+            write!(f, " metric {metric}")?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -35,8 +58,12 @@ pub enum Error {
     #[error("failed to subscribe to rtnetlink link, route and address changes")]
     Subscribe(#[source] std::io::Error),
     /// rtnetlink does not export the type of its refusal, only its text.
-    #[error("route {destination}: {reason}")]
-    Invalid { destination: IpNet, reason: String },
+    #[error("cannot {action} route {route}: {reason}")]
+    Invalid {
+        action: &'static str,
+        route: String,
+        reason: String,
+    },
     #[error("failed to {action}")]
     Request {
         action: String,
@@ -72,32 +99,29 @@ impl RtClient {
         })
     }
 
-    /// `ip route replace`: a route of the same destination, table, protocol and metric is
-    /// replaced.
+    /// `ip route replace`: any route of the same destination, table, tos and metric is replaced,
+    /// whoever installed it. The kernel does not match the protocol here.
     pub async fn route_replace(&self, route: &Route) -> Result<(), Error> {
         let _guard = self.lock.lock().await;
         self.handle
             .route()
-            .add(route_message(route)?)
+            .add(route_message(route, "replace")?)
             .replace()
             .execute()
             .await
-            .map_err(request(|| format!("replace route {route:?}")))
+            .map_err(request(|| format!("replace route {route}")))
     }
 
     /// `ip route del`, scoped to the route's protocol: another daemon's route at the destination
     /// stays. A route already gone is deleted.
     pub async fn route_del(&self, route: &Route) -> Result<(), Error> {
         let _guard = self.lock.lock().await;
-        match self
-            .handle
-            .route()
-            .del(route_message(route)?)
-            .execute()
-            .await
-        {
+        let mut message = route_message(route, "delete")?;
+        // The kernel matches an IPv4 route's scope on delete unless it is `RT_SCOPE_NOWHERE`.
+        message.header.scope = RouteScope::NoWhere;
+        match self.handle.route().del(message).execute().await {
             Err(rtnetlink::Error::NetlinkError(ref e)) if e.raw_code() == ESRCH => Ok(()),
-            result => result.map_err(request(|| format!("delete route {route:?}"))),
+            result => result.map_err(request(|| format!("delete route {route}"))),
         }
     }
 
@@ -222,9 +246,10 @@ pub fn link_route_and_address_changes() -> Result<impl Stream<Item = ()> + Unpin
     Ok(messages.map(|_| ()))
 }
 
-fn route_message(route: &Route) -> Result<RouteMessage, Error> {
-    let invalid = |reason: &dyn std::fmt::Display| Error::Invalid {
-        destination: route.destination,
+fn route_message(route: &Route, action: &'static str) -> Result<RouteMessage, Error> {
+    let invalid = |reason: &dyn fmt::Display| Error::Invalid {
+        action,
+        route: route.to_string(),
         reason: reason.to_string(),
     };
     let mut builder = RouteMessageBuilder::<IpAddr>::new()
@@ -238,6 +263,9 @@ fn route_message(route: &Route) -> Result<RouteMessage, Error> {
     if let Some(oif) = route.oif {
         builder = builder.output_interface(oif);
     }
+    if let Some(metric) = route.metric {
+        builder = builder.priority(metric);
+    }
     Ok(builder.build())
 }
 
@@ -246,13 +274,17 @@ fn route_of(message: &RouteMessage) -> Option<Route> {
     let mut table = u32::from(message.header.table);
     let mut gateway = None;
     let mut oif = None;
+    let mut metric = None;
     for attribute in &message.attributes {
         match attribute {
             RouteAttribute::Destination(address) => destination = ip_of(address),
             RouteAttribute::Gateway(address) => gateway = ip_of(address),
+            // An IPv6 next hop of an IPv4 route.
+            RouteAttribute::Via(RouteVia::Inet6(address)) => gateway = Some(IpAddr::V6(*address)),
             // The header holds a table above 255 as `RT_TABLE_COMPAT`; the attribute holds any.
             RouteAttribute::Table(id) => table = *id,
             RouteAttribute::Oif(index) => oif = Some(*index),
+            RouteAttribute::Priority(priority) => metric = Some(*priority),
             _ => {}
         }
     }
@@ -268,6 +300,7 @@ fn route_of(message: &RouteMessage) -> Option<Route> {
         protocol: message.header.protocol.into(),
         gateway,
         oif,
+        metric,
     })
 }
 
@@ -355,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn a_route_reads_back_as_it_was_written_in_either_family_and_any_table() {
+    fn a_route_reads_back_as_it_was_written_in_either_family_any_table_and_with_either_next_hop() {
         for route in [
             Route {
                 destination: "192.0.2.0/24".parse().unwrap(),
@@ -363,6 +396,15 @@ mod tests {
                 protocol: 152,
                 gateway: Some("198.51.100.1".parse().unwrap()),
                 oif: Some(7),
+                metric: Some(16),
+            },
+            Route {
+                destination: "192.0.2.0/24".parse().unwrap(),
+                table: 152,
+                protocol: 152,
+                gateway: Some("2001:db8::1".parse().unwrap()),
+                oif: Some(7),
+                metric: None,
             },
             Route {
                 destination: "2001:db8::/32".parse().unwrap(),
@@ -370,10 +412,11 @@ mod tests {
                 protocol: 200,
                 gateway: None,
                 oif: None,
+                metric: None,
             },
         ] {
             assert_eq!(
-                route_of(&route_message(&route).unwrap()),
+                route_of(&route_message(&route, "replace").unwrap()),
                 Some(route.clone())
             );
         }

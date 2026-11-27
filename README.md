@@ -158,9 +158,9 @@ reaches every component. On top of its methods:
 - with the feature `netlink`, Linux only, `route`: kernel routes by table and protocol tag in
   either family (`RtClient::route_replace`, `route_del`, `routes`), the main table's default route
   of a family and the link and addresses it leaves through (`default_route`, `uplink`), and a
-  wake-up on every link, route and address change (`link_route_and_address_changes`). A route
-  takes the kernel's default metric, so another daemon's route to the same destination stays
-  beside it;
+  wake-up on every link, route and address change (`link_route_and_address_changes`). Another
+  daemon's route to the same destination and table stays beside ours when the metrics differ;
+  without a metric of its own a route takes the kernel's default, 0 for IPv4 and 1024 for IPv6;
 - `mtu::MIN_IPV6_MTU`, 1280, the least MTU of a link that carries IPv6, and
   `mtu::MESH_MTU_ANNOTATION`, the annotation of a node's `Node` object that carries the mesh MTU.
 
@@ -350,7 +350,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 # the tests that need a network namespace each; a user namespace cannot load `dummy`
 sudo modprobe dummy
-cargo test --tests --all-features --config "target.'cfg(target_os = \"linux\")'.runner = 'unshare -r'" -- --ignored
+cargo test --tests --all-features --config "target.'cfg(target_os = \"linux\")'.runner = 'unshare -r'" -- --include-ignored
 cargo deny --locked check licenses bans sources
 ```
 
@@ -367,7 +367,15 @@ cargo mutants
 ```
 
 [`cargo-mutants`](https://mutants.rs) changes the code one place at a time and expects a test to
-fail each time; [`.cargo/mutants.toml`](.cargo/mutants.toml) lists what it skips and why.
+fail each time; [`.cargo/mutants.toml`](.cargo/mutants.toml) lists what it skips and why. Only the
+network namespace tests catch the mutants of `sliplib_net::route`, so give them a namespace and
+the ignored tests:
+
+```bash
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER='unshare -r' cargo mutants -- -- --include-ignored
+```
+
+The variable names the host's target triple.
 
 [`mesh/tests/golden.rs`](mesh/tests/golden.rs) pins what the files give their nodes. Under
 [`mesh/tests/golden/`](mesh/tests/golden), `v1` and `v1-alternate` hold the configs that two
