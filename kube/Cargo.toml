@@ -1,0 +1,36 @@
+[package]
+name = "sliplib-kube"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The start every slipmesh agent in a Kubernetes cluster shares: the client, its own node, the stop, and a watch of one object"
+
+[features]
+# A Kubernetes API stand-in for the agents' tests.
+testing = ["dep:serde_json", "dep:tokio"]
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+kube = { workspace = true, features = ["client", "config", "runtime"] }
+serde.workspace = true
+serde_json = { workspace = true, optional = true }
+sliplib-runtime.workspace = true
+tokio = { workspace = true, optional = true, features = ["io-util", "net", "time"] }
+
+[dev-dependencies]
+futures.workspace = true
+k8s-openapi = { workspace = true, features = ["v1_37"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+
+[[test]]
+name = "watch"
+required-features = ["testing"]
+
+[[test]]
+name = "run"
+required-features = ["testing"]

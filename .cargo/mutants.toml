@@ -4,6 +4,8 @@ all_features = true
 # Error messages are wording, which no test pins; their mutants would only ever be missed.
 exclude_re = [
     "impl fmt::Display for KeyError",
+    # A test's request head arrives in one read, so the fake API never reads a second time.
+    "replace == with != in read_request",
     "Visitor.*::expecting",
     # Which of two links of one limit a mesh MTU refusal names: the first, a choice nothing else
     # depends on.
