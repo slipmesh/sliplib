@@ -262,7 +262,9 @@ too, as `network::NodeError`.
   `amneziawg` obfuscation that lacks one of `jc`, `jmin`, `jmax`, `s1`, `s2` and `h1` to `h4`; the
   refusal's `secrets::MissingSecret` names `slipmesh mint`. Nothing of links the node is not on is
   refused. A dialed peer gets its link's keepalive, its type's default included; a peer nobody
-  dials gets none. No metrics listener: the Talos generator adds it.
+  dials gets none. An `amneziawg` interface gets every obfuscation value the daemon sends, one
+  left unset as `0` or `false`; the decoys and the header protection key only where set. No
+  metrics listener: the Talos generator adds it.
 - `mint::create`, behind the `mint` feature, off by default: the secrets the file lacks, by entry,
   no key for a node on no link, or `NoHeaderLeft` where an entry's headers leave no room. Only
   `slipmesh` builds with it.

@@ -251,7 +251,8 @@ pub fn node_configs(mesh: &Mesh<'_>, host: &str) -> std::result::Result<NodeConf
     })
 }
 
-/// Refuses one lacking a minted field, unless `plain`.
+/// Refuses one lacking a minted field, unless `plain`; else gives it with what the daemon sends
+/// for each value left unset.
 fn minted_obfuscation(
     obfuscation: &Obfuscation,
     plain: bool,
@@ -268,7 +269,30 @@ fn minted_obfuscation(
             unminted.join(", ")
         )));
     }
-    Ok(obfuscation.clone())
+    Ok(if plain {
+        obfuscation.clone()
+    } else {
+        as_sent(obfuscation.clone())
+    })
+}
+
+/// `0`, the module's "not set", and `false` for a switch. The decoys and the header protection key
+/// are sent only when set, and the minted fields are always set.
+fn as_sent(obfuscation: Obfuscation) -> Obfuscation {
+    let zero = || Some(Range::from(0));
+    Obfuscation {
+        s3: obfuscation.s3.or(Some(0)),
+        s4: obfuscation.s4.or(Some(0)),
+        content_padding_addition: obfuscation.content_padding_addition.or_else(zero),
+        rekey_after_time: obfuscation.rekey_after_time.or_else(zero),
+        rekey_timeout: obfuscation.rekey_timeout.or_else(zero),
+        reject_after_time: obfuscation.reject_after_time.or_else(zero),
+        keepalive_timeout: obfuscation.keepalive_timeout.or_else(zero),
+        max_handshake_attempts: obfuscation.max_handshake_attempts.or_else(zero),
+        random_trailers: obfuscation.random_trailers.or(Some(false)),
+        disable_cookies: obfuscation.disable_cookies.or(Some(false)),
+        ..obfuscation
+    }
 }
 
 #[cfg(test)]
@@ -613,6 +637,58 @@ mod tests {
                 .unwrap();
             assert_eq!(interface.obfuscation, written, "{node}");
         }
+    }
+
+    fn mesh_interface(network: &Mesh<'_>, node: &str, peer: &str) -> InterfaceEntry {
+        node_configs(network, node)
+            .unwrap()
+            .awg
+            .interfaces
+            .into_iter()
+            .find(|interface| interface.name == format!("mesh-{peer}"))
+            .unwrap()
+    }
+
+    #[test]
+    fn an_amneziawg_interface_carries_what_the_daemon_sends_for_a_value_the_file_leaves_unset() {
+        let network = example(
+            "{mesh: {amneziawg: {obfuscation: {s3: null, s4: null, random_trailers: null, \
+             disable_cookies: null}}, links: {a-b: {amneziawg: {obfuscation: \
+             {header_protection_key: null}}}}}}",
+        );
+        let obfuscation = mesh_interface(&network, "node-a", "node-b").obfuscation;
+        let zero = Some(Range::from(0));
+        assert_eq!((obfuscation.s3, obfuscation.s4), (Some(0), Some(0)));
+        for (name, value) in [
+            (
+                "content_padding_addition",
+                obfuscation.content_padding_addition,
+            ),
+            ("rekey_after_time", obfuscation.rekey_after_time),
+            ("rekey_timeout", obfuscation.rekey_timeout),
+            ("reject_after_time", obfuscation.reject_after_time),
+            ("keepalive_timeout", obfuscation.keepalive_timeout),
+            ("max_handshake_attempts", obfuscation.max_handshake_attempts),
+        ] {
+            assert_eq!(value, zero, "{name}");
+        }
+        assert_eq!(
+            (obfuscation.random_trailers, obfuscation.disable_cookies),
+            (Some(false), Some(false))
+        );
+        // Sent only when set.
+        assert_eq!(obfuscation.header_protection_key, None);
+        assert_eq!(obfuscation.i1.as_deref(), Some("<b 0xabcd><r 16>"));
+    }
+
+    #[test]
+    fn a_wireguard_interface_carries_no_obfuscation_and_keeps_the_plain_keepalive() {
+        let interface = mesh_interface(&example("{}"), "node-a", "router1");
+        assert_eq!(interface.obfuscation, Obfuscation::default());
+        assert_eq!(
+            interface.peers[0].persistent_keepalive,
+            Some(sliplib_config::awg::PLAIN_KEEPALIVE)
+        );
     }
 
     #[test]
