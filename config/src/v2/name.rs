@@ -226,6 +226,12 @@ mod tests {
         ] {
             assert_eq!(name(text), Err(refusal), "{text:?}");
         }
+        // A number YAML reads keeps its sign.
+        let negative = sliplib_yaml::from_str::<Name>("-7").unwrap_err();
+        assert!(
+            negative.to_string().starts_with(&edge("-7").to_string()),
+            "{negative}"
+        );
     }
 
     #[test]

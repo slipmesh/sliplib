@@ -8,6 +8,12 @@ use sliplib_yaml::Value;
 #[test]
 fn mint_writes_a_key_for_every_node_on_a_link_and_the_obfuscation_of_every_amneziawg_link() {
     let config = Config::holding(MESH);
+    edited(&config, |network| {
+        network["mesh"]
+            .as_mapping_mut()
+            .unwrap()
+            .shift_remove("interface_prefix");
+    });
     let ran = config.run(&["mint"]);
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
 
@@ -43,6 +49,12 @@ fn mint_writes_a_key_for_every_node_on_a_link_and_the_obfuscation_of_every_amnez
     ] {
         assert!(ran.stdout.contains(route), "{}", ran.stdout);
     }
+    // The prefix the file left out is told beside what was minted.
+    assert!(
+        ran.stdout.contains("mesh.interface_prefix"),
+        "{}",
+        ran.stdout
+    );
     let key = written[0]["nodes"]["node-a"]["wireguard"]["private_key"]
         .as_str()
         .unwrap();

@@ -547,9 +547,7 @@ mod tests {
         }
         assert!(from_yaml("{rekey_after_time: 179}").validate().is_ok());
         assert!(from_yaml("{rekey_after_time: 100-179}").validate().is_ok());
-        // Whatever `reject_after_time` says.
-        let later = "{rekey_after_time: 200, reject_after_time: 300}";
-        let err = from_yaml(later).validate().expect_err(later).to_string();
+        let err = refusal("{rekey_after_time: 200, reject_after_time: 300}");
         assert!(err.contains("obfuscation.rekey_after_time (200)"), "{err}");
     }
 
