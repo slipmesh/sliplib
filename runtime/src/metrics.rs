@@ -1,8 +1,10 @@
 //! A daemon's Prometheus endpoint: pages by path, rendered on each request.
 
 use std::convert::Infallible;
+use std::fmt::Display;
 use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,21 +19,39 @@ use hyper_util::rt::TokioIo;
 use prometheus_client::registry::Registry;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 
 /// What prometheus-client's text encoder writes. Prometheus picks its parser by this header.
 pub const OPENMETRICS: &str = "application/openmetrics-text; version=1.0.0; charset=utf-8";
 
 const TEXT: &str = "text/plain; charset=utf-8";
 
-/// A client that stops reading holds no task longer than this.
+/// The whole connection, keep-alive included: hyper's own timeout for reading a request head is
+/// off here.
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// A failed accept, such as one past the file limit, is retried after this rather than at once.
+const ACCEPT_RETRY: Duration = Duration::from_secs(1);
+
+/// A page as it is answered.
 pub struct Page {
+    /// The `Content-Type` header.
     pub content_type: &'static str,
     pub body: String,
 }
 
+/// A page being rendered. Boxed, so the pages of one `serve` can be different `async` blocks.
+pub type Rendering<E> = Pin<Box<dyn Future<Output = Result<Page, E>> + Send>>;
+
 impl Page {
+    /// Plain UTF-8 text.
+    pub fn text(body: String) -> Self {
+        Self {
+            content_type: TEXT,
+            body,
+        }
+    }
+
     pub fn openmetrics(registry: &Registry) -> Result<Self, std::fmt::Error> {
         let mut body = String::new();
         prometheus_client::encoding::text::encode(&mut body, registry)?;
@@ -64,25 +84,32 @@ pub fn bind(listen: SocketAddr) -> std::io::Result<TcpListener> {
 }
 
 /// Answers `GET` on every path `pages` gives a renderer for, until the process ends; any other
-/// request is a 404 that renders nothing. A page that fails to render is a 500 and is logged: a
-/// failed scrape is the signal, and the daemon goes on.
-pub async fn serve<P, F>(listener: TcpListener, pages: P)
+/// request is a 404 that renders nothing. A page that fails to render is a 500 and is logged with
+/// `{:#}`, an `anyhow` error's whole chain: a failed scrape is the signal, and the daemon goes on.
+/// Past `connections` at once, a client waits in the listen backlog.
+pub async fn serve<P, E>(listener: TcpListener, connections: usize, pages: P)
 where
-    P: Fn(&str) -> Option<F> + Send + Sync + 'static,
-    F: Future<Output = anyhow::Result<Page>> + Send + 'static,
+    P: Fn(&str) -> Option<Rendering<E>> + Send + Sync + 'static,
+    E: Display + 'static,
 {
     let pages = Arc::new(pages);
+    let open = Arc::new(Semaphore::new(connections));
     loop {
+        // Fails only once closed, which nothing does.
+        let Ok(permit) = Arc::clone(&open).acquire_owned().await else {
+            return;
+        };
         let stream = match listener.accept().await {
             Ok((stream, _)) => stream,
             Err(e) => {
-                // One failed accept says nothing about the next.
                 tracing::warn!(error = %e, "metrics: accept failed");
+                tokio::time::sleep(ACCEPT_RETRY).await;
                 continue;
             }
         };
         let pages = Arc::clone(&pages);
         tokio::spawn(async move {
+            let _permit = permit;
             let service = service_fn(move |request: Request<Incoming>| {
                 let page = (request.method() == Method::GET)
                     .then(|| pages(request.uri().path()))
@@ -103,7 +130,7 @@ where
     }
 }
 
-async fn answer(page: Option<impl Future<Output = anyhow::Result<Page>>>) -> Response<Full<Bytes>> {
+async fn answer<E: Display>(page: Option<Rendering<E>>) -> Response<Full<Bytes>> {
     let Some(page) = page else {
         return respond(StatusCode::NOT_FOUND, TEXT, "not found\n".to_owned());
     };

@@ -310,22 +310,28 @@ async fn run() -> anyhow::Result<()> {
 
 `serve` is the default `serve` feature; a tool that only logs takes `default-features = false`.
 
-With the `metrics` feature, `metrics` serves a daemon's Prometheus endpoint. `metrics::bind(listen)`
-binds even while the address is on no interface yet, such as a loopback another service creates,
-and answers once it appears. `metrics::serve(listener, pages)` answers `GET` on every path `pages`
-returns a renderer for, rendering on each request; any other request is a 404 that renders nothing,
-and a page that fails to render is a 500, logged. `Page::openmetrics(&registry)` encodes a
+With the `metrics` feature, on Linux, `metrics` serves a daemon's Prometheus endpoint.
+`metrics::bind(listen)` binds even while the address is on no interface yet, such as a loopback
+another service creates, and answers once it appears. `metrics::serve(listener, connections,
+pages)` answers `GET` on every path `pages` returns a renderer for, rendering on each request; any
+other request is a 404 that renders nothing, a page that fails to render is a 500, logged, and past
+`connections` at once a client waits. `Page::openmetrics(&registry)` encodes a
 [`prometheus-client`](https://crates.io/crates/prometheus-client) registry with the content type
-Prometheus parses it by:
+Prometheus parses it by, and `Page::text(body)` is plain text. A renderer is boxed, so each path can
+be an `async` block of its own:
 
 ```rust,no_run
 use prometheus_client::registry::Registry;
-use sliplib_runtime::metrics::{self, Page};
+use sliplib_runtime::metrics::{self, Page, Rendering};
 
 async fn run() -> anyhow::Result<()> {
     let listener = metrics::bind("192.0.2.1:9500".parse()?)?;
-    metrics::serve(listener, |path: &str| {
-        (path == "/metrics").then(|| async { Ok(Page::openmetrics(&Registry::default())?) })
+    metrics::serve(listener, 16, |path: &str| -> Option<Rendering<anyhow::Error>> {
+        match path {
+            "/metrics" => Some(Box::pin(async { Ok(Page::openmetrics(&Registry::default())?) })),
+            "/prefixes" => Some(Box::pin(async { Ok(Page::text("192.0.2.0/24\n".to_owned())) })),
+            _ => None,
+        }
     })
     .await;
     Ok(())

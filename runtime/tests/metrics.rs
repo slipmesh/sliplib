@@ -1,6 +1,9 @@
+#![cfg(target_os = "linux")]
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use prometheus_client::metrics::counter::Counter;
 use prometheus_client::registry::Registry;
@@ -8,48 +11,55 @@ use sliplib_runtime::metrics::{self, OPENMETRICS, Page};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-/// `/metrics` with one counter, `/broken` failing, nothing else; and how often a page was
-/// rendered.
-async fn serving() -> (SocketAddr, Arc<AtomicUsize>) {
+/// `/metrics` with one counter, `/prefixes` as text, `/broken` failing, nothing else, at most
+/// `connections` at once; and how often a page was rendered.
+async fn serving(connections: usize) -> (SocketAddr, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let rendered = Arc::new(AtomicUsize::new(0));
     let count = Arc::clone(&rendered);
-    tokio::spawn(metrics::serve(listener, move |path: &str| {
-        let count = Arc::clone(&count);
-        let page = match path {
-            "/metrics" => Ok(()),
-            "/broken" => Err(()),
-            _ => return None,
-        };
-        Some(async move {
-            count.fetch_add(1, Ordering::SeqCst);
-            page.map_err(|()| anyhow::anyhow!("broken"))?;
-            let mut registry = Registry::default();
-            registry.register("scrapes", "Scrapes", Counter::<u64>::default());
-            Ok(Page::openmetrics(&registry)?)
-        })
+    tokio::spawn(metrics::serve(listener, connections, move |path: &str| {
+        count.fetch_add(1, Ordering::SeqCst);
+        match path {
+            "/metrics" => Some(Box::pin(async {
+                let mut registry = Registry::default();
+                registry.register("scrapes", "Scrapes", Counter::<u64>::default());
+                Page::openmetrics(&registry).map_err(|e| e.to_string())
+            }) as metrics::Rendering<String>),
+            "/prefixes" => Some(Box::pin(async {
+                Ok(Page::text("192.0.2.0/24\n".to_owned()))
+            })),
+            "/broken" => Some(Box::pin(async { Err("broken".to_owned()) })),
+            _ => None,
+        }
     }));
     (address, rendered)
 }
 
-async fn request(address: SocketAddr, method: &str, path: &str) -> String {
-    let mut stream = TcpStream::connect(address).await.unwrap();
+async fn send(stream: &mut TcpStream, method: &str, path: &str, close: bool) {
+    let connection = if close { "close" } else { "keep-alive" };
     stream
         .write_all(
-            format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-                .as_bytes(),
+            format!(
+                "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: {connection}\r\n\r\n"
+            )
+            .as_bytes(),
         )
         .await
         .unwrap();
+}
+
+async fn request(address: SocketAddr, method: &str, path: &str) -> String {
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    send(&mut stream, method, path, true).await;
     let mut response = String::new();
     stream.read_to_string(&mut response).await.unwrap();
     response
 }
 
 #[tokio::test]
-async fn a_served_path_answers_with_its_page_as_openmetrics() {
-    let (address, _) = serving().await;
+async fn each_served_path_answers_with_its_page_and_its_content_type() {
+    let (address, _) = serving(4).await;
     let response = request(address, "GET", "/metrics").await;
     assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
     assert!(
@@ -57,30 +67,58 @@ async fn a_served_path_answers_with_its_page_as_openmetrics() {
         "{response}"
     );
     assert!(response.contains("scrapes_total 0"), "{response}");
+
+    let response = request(address, "GET", "/prefixes").await;
+    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    assert!(
+        response.contains("content-type: text/plain; charset=utf-8"),
+        "{response}"
+    );
+    assert!(response.ends_with("\r\n\r\n192.0.2.0/24\n"), "{response}");
 }
 
 #[tokio::test]
 async fn another_path_or_method_is_a_404_and_renders_nothing() {
-    let (address, rendered) = serving().await;
-    for (method, path) in [("GET", "/"), ("POST", "/metrics")] {
-        let response = request(address, method, path).await;
-        assert!(
-            response.starts_with("HTTP/1.1 404 Not Found"),
-            "{method} {path}: {response}"
-        );
-    }
+    let (address, rendered) = serving(4).await;
+    let response = request(address, "POST", "/metrics").await;
+    assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
     assert_eq!(rendered.load(Ordering::SeqCst), 0);
+    let response = request(address, "GET", "/").await;
+    assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
 }
 
 #[tokio::test]
-async fn a_page_that_fails_to_render_is_a_500_and_the_next_request_is_served() {
-    let (address, _) = serving().await;
+async fn a_page_that_fails_to_render_is_a_500() {
+    let (address, _) = serving(4).await;
     let response = request(address, "GET", "/broken").await;
     assert!(
         response.starts_with("HTTP/1.1 500 Internal Server Error"),
         "{response}"
     );
-    let response = request(address, "GET", "/metrics").await;
+}
+
+#[tokio::test]
+async fn a_connection_past_the_cap_waits_until_one_closes() {
+    let (address, _) = serving(1).await;
+    let mut held = TcpStream::connect(address).await.unwrap();
+    send(&mut held, "GET", "/metrics", false).await;
+    let mut buf = [0; 1024];
+    assert!(held.read(&mut buf).await.unwrap() > 0);
+
+    let mut waiting = TcpStream::connect(address).await.unwrap();
+    send(&mut waiting, "GET", "/metrics", true).await;
+    let early = tokio::time::timeout(Duration::from_millis(300), waiting.read(&mut buf)).await;
+    assert!(early.is_err(), "served past the cap");
+
+    drop(held);
+    let mut response = String::new();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        waiting.read_to_string(&mut response),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
 }
 
