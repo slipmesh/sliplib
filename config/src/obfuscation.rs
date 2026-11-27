@@ -440,7 +440,8 @@ mod tests {
         let err = refusal("{h1: 5-9, h2: 10, h3: 9-12, h4: 13}");
         assert!(err.contains("obfuscation.h1 (5-9)"), "{err}");
         assert!(err.contains("obfuscation.h3 (9-12)"), "{err}");
-        let err = refusal("{h2: 7, h4: 7}");
+        let pair = "{h2: 7, h4: 7}";
+        let err = from_yaml(pair).validate().expect_err(pair).to_string();
         assert!(err.contains("obfuscation.h2 (7)"), "{err}");
         assert!(err.contains("obfuscation.h4 (7)"), "{err}");
         assert!(

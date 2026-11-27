@@ -203,6 +203,8 @@ mod tests {
             assert_eq!(generated, clamped);
             assert_eq!(clamped, generated);
         }
+        let (ones, _) = all_ones();
+        assert_eq!(PrivateKey::from(format!("{}\n", ones.expose())), ones);
     }
 
     #[test]

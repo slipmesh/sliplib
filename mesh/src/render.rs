@@ -665,7 +665,7 @@ mod tests {
              links: {a-b: {amneziawg: {obfuscation: null}}}}}",
         ] {
             let unminted = example(overlay);
-            let refusal = refused(&unminted, "node-b");
+            let refusal = node_configs(&unminted, "node-b").expect_err(overlay);
             let missing = missing_secret(&refusal).map(ToString::to_string);
             assert!(
                 missing.is_some_and(|missing| missing.contains("a-b") && missing.contains("jc")),
