@@ -15,4 +15,7 @@ exclude_re = [
     "replace < with <= in <impl fmt::Display for TrailerLoss>::fmt",
     # The network and node_id halves of a derived address share no bit, so `|` and `^` agree.
     "replace \\| with \\^ in ipv[46]_in",
+    # A cut wholly below a network leaves it whole: starting the run of cuts earlier costs time
+    # alone.
+    "replace < with == in subtract",
 ]
