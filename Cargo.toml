@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["config", "fs", "mesh", "net", "runtime", "secrets", "slipmesh", "yaml"]
+members = ["config", "fs", "kube", "mesh", "net", "runtime", "secrets", "slipmesh", "yaml"]
 
 # One version and one tag for every crate: the shared release flow releases one version per
 # repository.
@@ -27,6 +27,9 @@ hyper-util = { version = "0.1.21", features = ["tokio"] }
 # order written.
 indexmap = { version = "2.14.2", features = ["serde"] }
 ipnet = "2.12.2"
+# The binary picks the Kubernetes version and TLS: a library enables neither.
+k8s-openapi = "0.29.0"
+kube = { version = "5.2.0", default-features = false }
 prometheus-client = "0.26.0"
 rand = "0.10.4"
 # Re-exports the netlink-packet-route it is built on, so no second copy is depended on.
@@ -46,12 +49,14 @@ tempfile = "3.27.0"
 nix = { version = "0.32.0", default-features = false, features = ["signal"] }
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 # The path of the key a value read whole was refused at, which a laid tree has no line for.
 serde_path_to_error = "0.1.20"
 sliplib-config = { path = "config" }
 sliplib-fs = { path = "fs" }
 sliplib-mesh = { path = "mesh" }
 sliplib-net = { path = "net" }
+sliplib-runtime = { path = "runtime" }
 sliplib-secrets = { path = "secrets" }
 sliplib-yaml = { path = "yaml" }
 # `static_secrets` for a key that outlives one handshake, `getrandom` to generate one.

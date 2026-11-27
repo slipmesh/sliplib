@@ -13,6 +13,7 @@ the command-line tool for `slipmesh.yaml` itself.
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 | [`sliplib-config`](config) | `slipmesh.yaml`, its schema and its loader, and what every platform's daemons share of their configs, with its checks |
 | [`sliplib-mesh`](mesh) | A node's `awg` and `router` configs, computed from `slipmesh.yaml` |
+| [`sliplib-kube`](kube) | The start every agent in a Kubernetes cluster shares, and a watch of one object |
 
 The crates and the tool are one workspace with one version and one tag. A change to one crate moves
 the tag for all of them; for a consumer of another crate that update changes nothing.
@@ -250,6 +251,8 @@ chain prints the whole message, each part once.
   written as `"<address>/<prefix length>"`.
 - `Range`: a number or `lo-hi` the module draws from. A range is written as a string, which a
   daemon built before ranges refuses; nothing here checks a node's release.
+- `annotations`: the keys of the annotations a node's `Node` carries the mesh's facts in, for the
+  tool that writes them and the agents that read them.
 
 ### `sliplib-mesh`
 
@@ -349,6 +352,29 @@ async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 ```
+
+### `sliplib-kube`
+
+For an agent that runs as a DaemonSet. `run(name, shutdown_timeout, timeouts, body)` runs `body`
+under `sliplib_runtime::serve` with an `Agent`: a client of the inferred config and the node's
+name from `NODE_NAME`, which the pod gets through the Downward API, logged once with `name`:
+
+```yaml
+env:
+  - name: NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+```
+
+`ApiTimeouts` gives the client a read timeout longer than a watch's server-side lifetime, so a
+request the API server never answers is cut and retried. `watch_one(api, name, timeouts)` watches
+the one object `name`, selected by the API server, with kube's default backoff.
+
+The binary picks TLS and the Kubernetes version: it depends on `kube` with its TLS feature and a
+crypto provider, `ring` or `aws-lc-rs`, or with kube's defaults, and on `k8s-openapi` with one
+version feature, which this crate leaves alone. rustls without a provider panics at runtime. The
+`testing` feature gives `testing::FakeApi`, a Kubernetes API stand-in for an agent's tests.
 
 ### `sliplib-secrets`
 
