@@ -15,22 +15,16 @@ testing = ["dep:serde_json", "dep:tokio"]
 [dependencies]
 anyhow.workspace = true
 futures.workspace = true
-kube = { workspace = true, features = ["client", "config", "runtime"] }
+kube = { workspace = true, features = ["client", "runtime"] }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 sliplib-runtime.workspace = true
 tokio = { workspace = true, optional = true, features = ["io-util", "net", "time"] }
+tracing.workspace = true
 
 [dev-dependencies]
-futures.workspace = true
 k8s-openapi = { workspace = true, features = ["v1_37"] }
+# Its own tests take the stand-in.
+sliplib-kube = { path = ".", features = ["testing"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
-
-[[test]]
-name = "watch"
-required-features = ["testing"]
-
-[[test]]
-name = "run"
-required-features = ["testing"]

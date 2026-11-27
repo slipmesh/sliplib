@@ -40,8 +40,8 @@ tempfile = "3.27.0"
 nix = { version = "0.32.0", default-features = false, features = ["signal"] }
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
-# The path of the key a value read whole was refused at, which a laid tree has no line for.
 serde_json = "1.0.154"
+# The path of the key a value read whole was refused at, which a laid tree has no line for.
 serde_path_to_error = "0.1.20"
 sliplib-config = { path = "config" }
 sliplib-fs = { path = "fs" }

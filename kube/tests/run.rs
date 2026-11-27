@@ -40,7 +40,7 @@ fn the_body_gets_this_nodes_name_and_a_client_of_the_inferred_config_and_none_wi
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("kubeconfig");
         std::fs::write(&path, kubeconfig(&api.url())).unwrap();
-        // SAFETY: no other thread runs.
+        // SAFETY: the one other thread is libtest's main thread, which only waits for this test.
         unsafe {
             std::env::remove_var("NODE_NAME");
             std::env::set_var("KUBECONFIG", &path);
@@ -61,7 +61,7 @@ fn the_body_gets_this_nodes_name_and_a_client_of_the_inferred_config_and_none_wi
         assert!(refused.is_err());
         assert!(!*called.lock().unwrap(), "body run without a node name");
 
-        // SAFETY: no other thread runs.
+        // SAFETY: the one other thread is libtest's main thread, which only waits for this test.
         unsafe { std::env::set_var("NODE_NAME", "node-a") };
         let seen = Arc::new(Mutex::new(None));
         let found = Arc::clone(&seen);

@@ -110,11 +110,15 @@ async fn serve(
     }
 }
 
+fn head_complete(request: &[u8]) -> bool {
+    request.windows(4).any(|w| w == b"\r\n\r\n")
+}
+
 /// `None` if the client closes the connection before a whole request head arrives.
 async fn read_request(conn: &mut TcpStream) -> Option<String> {
     let mut request = Vec::new();
     let mut buf = [0; 4096];
-    while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+    while !head_complete(&request) {
         let n = conn.read(&mut buf).await.ok()?;
         if n == 0 {
             return None;

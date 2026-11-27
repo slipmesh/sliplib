@@ -1583,9 +1583,11 @@ dependencies = [
  "kube",
  "serde",
  "serde_json",
+ "sliplib-kube",
  "sliplib-runtime",
  "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

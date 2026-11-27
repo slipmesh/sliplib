@@ -1,6 +1,7 @@
 //! The start every agent in the cluster shares: the client, its own node, the stop, and a watch of
-//! one object. TLS and the Kubernetes version are the binary's: it enables kube's TLS feature and
-//! one `k8s-openapi` version feature.
+//! one object. TLS and the Kubernetes version are the binary's: it enables kube's TLS feature with
+//! a crypto provider, `ring` or `aws-lc-rs` (rustls without one panics at runtime), or keeps kube's
+//! defaults, and one `k8s-openapi` version feature.
 
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -31,6 +32,8 @@ pub struct ApiTimeouts {
 impl ApiTimeouts {
     pub fn client(&self, mut config: kube::Config) -> Result<kube::Client, kube::Error> {
         config.read_timeout = Some(self.read);
+        // Or the time a pooled connection sat idle counts against the next response.
+        config.reset_reader_on_write = true;
         kube::Client::try_from(config)
     }
 }
@@ -42,7 +45,7 @@ pub struct Agent {
 }
 
 /// Runs `body` under `sliplib_runtime::serve`, with a client of the inferred config and this
-/// node's name. Logging is the caller's, first in `main`.
+/// node's name, logged once known. Setting up logging is the caller's, first in `main`.
 pub async fn run<B, Fut>(
     name: &'static str,
     shutdown_timeout: Duration,
@@ -57,6 +60,7 @@ where
         let node = std::env::var(NODE_NAME).with_context(|| {
             format!("{NODE_NAME} is not set: give it spec.nodeName through the Downward API")
         })?;
+        tracing::info!(name, node, "starting");
         let config = kube::Config::infer()
             .await
             .context("failed to load the Kubernetes config")?;
@@ -74,7 +78,7 @@ pub fn watch_one<K>(
     api: Api<K>,
     name: &str,
     timeouts: &ApiTimeouts,
-) -> impl Stream<Item = watcher::Result<watcher::Event<K>>> + Send
+) -> impl Stream<Item = watcher::Result<watcher::Event<K>>> + Send + use<K>
 where
     K: Resource + Clone + DeserializeOwned + Debug + Send + 'static,
 {

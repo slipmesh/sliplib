@@ -1,4 +1,3 @@
-use std::pin::pin;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -14,12 +13,17 @@ const TIMEOUTS: ApiTimeouts = ApiTimeouts {
 };
 
 /// `watch_one` for `node-a` against `api`, polled in a task of its own: the first object it gives,
-/// or `None` within `deadline`.
+/// or `None` within `deadline`. The stream outlives the name and timeouts it was made from.
 async fn first_object(api: &FakeApi, deadline: Duration) -> Option<Node> {
     let nodes: Api<Node> = Api::all(TIMEOUTS.client(api.config()).unwrap());
     let (found, mut objects) = tokio::sync::mpsc::unbounded_channel();
+    let events = {
+        let name = String::from("node-a");
+        let timeouts = TIMEOUTS;
+        Box::pin(watch_one(nodes, &name, &timeouts))
+    };
     tokio::spawn(async move {
-        let mut events = pin!(watch_one(nodes, "node-a", &TIMEOUTS));
+        let mut events = events;
         while let Some(event) = events.next().await {
             if let Ok(Event::InitApply(node) | Event::Apply(node)) = event {
                 let _ = found.send(node);

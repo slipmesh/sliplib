@@ -317,7 +317,7 @@ async fn run() -> anyhow::Result<()> {
 
 For an agent that runs as a DaemonSet. `run(name, shutdown_timeout, timeouts, body)` runs `body`
 under `sliplib_runtime::serve` with an `Agent`: a client of the inferred config and the node's
-name from `NODE_NAME`, which the pod gets through the Downward API:
+name from `NODE_NAME`, which the pod gets through the Downward API, logged once with `name`:
 
 ```yaml
 env:
@@ -331,8 +331,9 @@ env:
 request the API server never answers is cut and retried. `watch_one(api, name, timeouts)` watches
 the one object `name`, selected by the API server, with kube's default backoff.
 
-The binary picks TLS and the Kubernetes version: it depends on `kube` with a TLS feature and on
-`k8s-openapi` with one version feature, which this crate leaves alone. The `testing` feature gives
+The binary picks TLS and the Kubernetes version: it depends on `kube` with its TLS feature and a
+crypto provider, `ring` or `aws-lc-rs`, or with kube's defaults, and on `k8s-openapi` with one
+version feature, which this crate leaves alone. rustls without a provider panics at runtime. The `testing` feature gives
 `testing::FakeApi`, a Kubernetes API stand-in for an agent's tests.
 
 ### `sliplib-secrets`
