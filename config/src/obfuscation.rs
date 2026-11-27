@@ -375,12 +375,12 @@ mod tests {
             (
                 [Some(12), Some(12), Some(12), Some(11)],
                 no_room(&["s4"]),
-                "s4",
+                "needs s4 to be",
             ),
             (
                 [None; 4],
                 no_room(&["s1", "s2", "s3", "s4"]),
-                "s1, s2, s3, s4",
+                "needs s1, s2, s3, s4 to be",
             ),
             ([Some(12); 4], Ok(()), ""),
         ] {
@@ -393,28 +393,35 @@ mod tests {
 
     // An unset magic header is sent as its WireGuard message type, 1..4.
     #[test]
-    fn rejects_a_magic_header_that_holds_an_unset_ones_default() {
-        for (yaml, first, second, told) in [
+    fn rejects_magic_headers_that_share_a_value_an_unset_one_holding_its_default() {
+        let overlap = |first, second| Err(ObfuscationError::HeadersOverlap { first, second });
+        let range = |lo, hi| Range::new(lo, hi).unwrap();
+        for (yaml, expected, told) in [
             (
                 "{h1: 2}",
-                (1, Range::from(2)),
-                (2, Range::from(2)),
-                ["obfuscation.h1 (2)", "obfuscation.h2 (2)"],
+                overlap((1, Range::from(2)), (2, Range::from(2))),
+                &["obfuscation.h1 (2)", "obfuscation.h2 (2)"][..],
             ),
             (
                 "{h4: 3-9}",
-                (3, Range::from(3)),
-                (4, Range::new(3, 9).unwrap()),
-                ["obfuscation.h3 (3)", "obfuscation.h4 (3-9)"],
+                overlap((3, Range::from(3)), (4, range(3, 9))),
+                &["obfuscation.h3 (3)", "obfuscation.h4 (3-9)"],
             ),
+            (
+                "{h1: 5-9, h2: 10, h3: 9-12, h4: 13}",
+                overlap((1, range(5, 9)), (3, range(9, 12))),
+                &["obfuscation.h1 (5-9)", "obfuscation.h3 (9-12)"],
+            ),
+            (
+                "{h2: 7, h4: 7}",
+                overlap((2, Range::from(7)), (4, Range::from(7))),
+                &["obfuscation.h2 (7)", "obfuscation.h4 (7)"],
+            ),
+            ("{h1: 5-9, h2: 10, h3: 11-12, h4: 13}", Ok(()), &[]),
         ] {
-            let refused = from_yaml(yaml).validate().expect_err(yaml);
-            assert_eq!(
-                refused,
-                ObfuscationError::HeadersOverlap { first, second },
-                "{yaml}"
-            );
-            let message = refused.to_string();
+            let checked = from_yaml(yaml).validate();
+            assert_eq!(checked, expected, "{yaml}");
+            let message = checked.map_or_else(|refusal| refusal.to_string(), |()| String::new());
             for text in told {
                 assert!(message.contains(text), "{yaml}: {message}");
             }
@@ -451,22 +458,6 @@ mod tests {
     fn accepts_a_content_padding_addition_that_starts_at_zero() {
         assert!(
             from_yaml("{content_padding_addition: 0-128}")
-                .validate()
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn rejects_magic_header_ranges_that_share_a_value_and_names_both() {
-        let err = refusal("{h1: 5-9, h2: 10, h3: 9-12, h4: 13}");
-        assert!(err.contains("obfuscation.h1 (5-9)"), "{err}");
-        assert!(err.contains("obfuscation.h3 (9-12)"), "{err}");
-        let pair = "{h2: 7, h4: 7}";
-        let err = from_yaml(pair).validate().expect_err(pair).to_string();
-        assert!(err.contains("obfuscation.h2 (7)"), "{err}");
-        assert!(err.contains("obfuscation.h4 (7)"), "{err}");
-        assert!(
-            from_yaml("{h1: 5-9, h2: 10, h3: 11-12, h4: 13}")
                 .validate()
                 .is_ok()
         );
