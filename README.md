@@ -154,6 +154,13 @@ reaches every component. On top of its methods:
 - `parse`, `parse_ipv4` and `parse_ipv6` read `"<address>/<prefix length>"`, host bits kept, with
   errors that name the input;
 - `exclude(net, excluded)`: the rest of `net`, as the fewest networks, in address order.
+- `Family`, IPv4 or IPv6;
+- with the feature `netlink`, Linux only, `route`: kernel routes by table and protocol tag in
+  either family (`RtClient::route_replace`, `route_del`, `routes`), the main table's default route
+  of a family and the link and addresses it leaves through (`default_route`, `uplink`), and a
+  wake-up on every link, route and address change (`link_route_and_address_changes`). A route
+  takes the kernel's default metric, so another daemon's route to the same destination stays
+  beside it;
 - `mtu::MIN_IPV6_MTU`, 1280, the least MTU of a link that carries IPv6, and
   `mtu::MESH_MTU_ANNOTATION`, the annotation of a node's `Node` object that carries the mesh MTU.
 
@@ -341,6 +348,9 @@ unclamped, and the two are equal.
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
+# the tests that need a network namespace each; a user namespace cannot load `dummy`
+sudo modprobe dummy
+cargo test --tests --all-features --config "target.'cfg(target_os = \"linux\")'.runner = 'unshare -r'" -- --ignored
 cargo deny --locked check licenses bans sources
 ```
 

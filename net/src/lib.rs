@@ -1,12 +1,20 @@
-//! CIDR on [`ipnet`]'s types, re-exported so one version reaches every component, and the mesh
-//! MTU's floor and annotation.
+//! CIDR on [`ipnet`]'s types, re-exported so one version reaches every component, the mesh MTU's
+//! floor and annotation, and, with the `netlink` feature, routes by protocol tag.
 
 pub mod mtu;
+#[cfg(feature = "netlink")]
+pub mod route;
 
 use std::fmt;
 use std::net::IpAddr;
 
 pub use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Family {
+    Ipv4,
+    Ipv6,
+}
 
 /// Names the input as written.
 #[derive(Debug, Clone, PartialEq, Eq)]
