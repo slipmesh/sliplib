@@ -9,6 +9,7 @@ mod check;
 mod edit;
 mod file;
 mod fmt;
+mod manifest;
 mod mint;
 mod rekey;
 
@@ -49,6 +50,12 @@ enum Command {
         #[command(flatten)]
         files: Edit,
     },
+    /// Print the cluster's `Mesh` object, every node's endpoint, writing nothing.
+    Manifest {
+        /// Read; may be repeated.
+        #[arg(long = "in", num_args = 1.., required = true)]
+        inputs: Vec<PathBuf>,
+    },
     /// Rewrite each file in the form this tool writes it, changing no value.
     Fmt {
         #[arg(required = true)]
@@ -68,6 +75,7 @@ fn main() -> Result<ExitCode> {
     match Cli::parse().command {
         Command::Check { inputs } => return Ok(check::run(&inputs)),
         Command::Mint { files } => mint::run(&files.inputs, &files.edit)?,
+        Command::Manifest { inputs } => manifest::run(&inputs)?,
         Command::Fmt { files } => fmt::run(&files)?,
         Command::Rekey { node, files } => rekey::run(&node, &files.inputs, &files.edit)?,
     }

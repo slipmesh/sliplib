@@ -4,5 +4,6 @@ mod check;
 mod common;
 mod files;
 mod fmt;
+mod manifest;
 mod mint;
 mod v2;

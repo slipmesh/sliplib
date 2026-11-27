@@ -177,8 +177,8 @@ pub enum Family {
 }
 
 /// An address of its key's family, or a name taken as written and dialed over it; no port.
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(try_from = "EndpointKeys")]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(try_from = "EndpointKeys", into = "EndpointKeys")]
 pub struct Endpoint {
     family: Family,
     host: String,
@@ -195,13 +195,46 @@ impl Endpoint {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "kube", derive(kube::KubeSchema))]
+#[cfg_attr(
+    feature = "kube",
+    x_kube(validation = "has(self.ipv4) != has(self.ipv6)")
+)]
+#[cfg_attr(all(feature = "kube", test), x_kube(cel))]
 #[serde(deny_unknown_fields)]
-struct EndpointKeys {
-    #[serde(default)]
+pub(crate) struct EndpointKeys {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     ipv4: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     ipv6: Option<String>,
+}
+
+impl From<Endpoint> for EndpointKeys {
+    fn from(endpoint: Endpoint) -> Self {
+        let host = Some(endpoint.host);
+        match endpoint.family {
+            Family::Ipv4 => Self {
+                ipv4: host,
+                ipv6: None,
+            },
+            Family::Ipv6 => Self {
+                ipv4: None,
+                ipv6: host,
+            },
+        }
+    }
+}
+
+#[cfg(feature = "kube")]
+impl schemars::JsonSchema for Endpoint {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Endpoint".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        EndpointKeys::json_schema(generator)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]

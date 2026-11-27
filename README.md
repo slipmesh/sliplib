@@ -30,6 +30,7 @@ document](docs/slipmesh-yaml-v1-to-v2.md#converting-a-file-by-hand) turns into v
 slipmesh check --in mesh.yaml secrets.yaml talos.yaml
 slipmesh mint --in mesh.yaml talos.yaml --edit secrets.yaml
 slipmesh fmt mesh.yaml secrets.yaml talos.yaml
+slipmesh manifest --in mesh.yaml > mesh-object.yaml
 slipmesh rekey --node node-a --in mesh.yaml talos.yaml --edit secrets.yaml
 ```
 
@@ -121,6 +122,27 @@ writing its `wireguard` block where the node has none. Every peer of the node di
 public half of that key, so the config of each of them changes with it and has to reach its node in
 the same pass. It refuses a node on no link, which nothing dials, and checks, as `mint` does, that
 the files with the new key still give a network before it writes it.
+
+### `manifest`
+
+`manifest` prints the cluster's `Mesh` object, `slipmesh.net/v1alpha1`, cluster-scoped and called
+`mesh`: every node of the network by its name, with its `endpoint` as the files write it and none
+for a node without one. The agents in the cluster read it, and the egress agent takes every
+endpoint out of its lists. It reads the files the way `check` does and writes nothing; apply its
+output whenever a node is added or its endpoint changes:
+
+```yaml
+apiVersion: slipmesh.net/v1alpha1
+kind: Mesh
+metadata:
+  name: mesh
+spec:
+  nodes:
+    node-a:
+      endpoint:
+        ipv4: 192.0.2.1
+    node-c: {}
+```
 
 ### Installing
 
@@ -241,6 +263,8 @@ chain prints the whole message, each part once.
   written as `"<address>/<prefix length>"`.
 - `Range`: a number or `lo-hi` the module draws from. A range is written as a string, which a
   daemon built before ranges refuses; nothing here checks a node's release.
+- `mesh_object`: `MeshSpec`, what [`slipmesh manifest`](#manifest) writes, and with the `kube`
+  feature the `Mesh` custom resource the agents read and its CRD, `Mesh::crd()`.
 
 ### `sliplib-mesh`
 

@@ -46,10 +46,11 @@ impl Config {
         MultiDoc::parse(&self.text()).unwrap().values()
     }
 
-    /// The path given last: read by `check`, written by `mint` and `rekey`, rewritten by `fmt`.
+    /// The path given last: read by `check` and `manifest`, written by `mint` and `rekey`,
+    /// rewritten by `fmt`.
     pub fn run(&self, command: &[&str]) -> Ran {
         let flag = match command[0] {
-            "check" => &["--in"][..],
+            "check" | "manifest" => &["--in"][..],
             "fmt" => &[],
             _ => &["--edit"],
         };
