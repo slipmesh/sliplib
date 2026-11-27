@@ -219,19 +219,19 @@ mod tests {
     }
 
     #[test]
-    fn with_a_tunnel_ipv4_the_pattern_of_the_links_ends_every_nodes_list() {
-        let mesh = example("{}");
-        assert_eq!(direct_interfaces(&mesh, "node-a"), ["lan0", "mesh-*"]);
-        assert_eq!(
-            direct_interfaces(&mesh, "router1"),
-            ["bridge-lan", "mesh-*"]
-        );
-    }
-
-    #[test]
-    fn a_pattern_already_in_a_list_keeps_its_place_and_is_not_added() {
-        let mesh = example("{routing: {direct_interfaces: ['mesh-*', lan0]}}");
-        assert_eq!(direct_interfaces(&mesh, "node-a"), ["mesh-*", "lan0"]);
+    fn with_a_tunnel_ipv4_the_pattern_of_the_links_ends_a_list_that_does_not_hold_it() {
+        for (overlay, node, list) in [
+            ("{}", "node-a", ["lan0", "mesh-*"]),
+            ("{}", "router1", ["bridge-lan", "mesh-*"]),
+            (
+                "{routing: {direct_interfaces: ['mesh-*', lan0]}}",
+                "node-a",
+                ["mesh-*", "lan0"],
+            ),
+        ] {
+            let mesh = example(overlay);
+            assert_eq!(direct_interfaces(&mesh, node), list, "{node} of {overlay}");
+        }
     }
 
     #[test]

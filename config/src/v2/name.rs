@@ -204,27 +204,27 @@ mod tests {
     }
 
     #[test]
-    fn a_name_with_any_other_character_is_refused_naming_it() {
-        for (text, character) in [
-            ("node a", ' '),
-            ("node/a", '/'),
-            ("node*", '*'),
-            ("nöde", 'ö'),
+    fn a_name_outside_the_rule_is_refused_for_what_breaks_it() {
+        let character = |name: &str, character| NameError::Character {
+            name: name.to_owned(),
+            character,
+        };
+        let edge = |name: &str| NameError::Edge(name.to_owned());
+        for (text, refusal) in [
+            ("node a", character("node a", ' ')),
+            ("node/a", character("node/a", '/')),
+            ("node*", character("node*", '*')),
+            ("nöde", character("nöde", 'ö')),
+            ("-a", edge("-a")),
+            ("a-", edge("a-")),
+            (".a", edge(".a")),
+            ("a.", edge("a.")),
+            ("_a", edge("_a")),
+            ("a_", edge("a_")),
+            ("-", edge("-")),
+            ("", NameError::Empty),
         ] {
-            assert_eq!(
-                name(text),
-                Err(NameError::Character {
-                    name: text.to_owned(),
-                    character
-                })
-            );
-        }
-    }
-
-    #[test]
-    fn a_name_starts_and_ends_with_a_letter_or_a_digit() {
-        for text in ["-a", "a-", ".a", "a.", "_a", "a_", "-"] {
-            assert_eq!(name(text), Err(NameError::Edge(text.to_owned())), "{text}");
+            assert_eq!(name(text), Err(refusal), "{text:?}");
         }
     }
 
@@ -244,11 +244,6 @@ mod tests {
                 .to_string(),
             "egress"
         );
-    }
-
-    #[test]
-    fn an_empty_name_is_refused() {
-        assert_eq!(name(""), Err(NameError::Empty));
     }
 
     #[test]

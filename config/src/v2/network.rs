@@ -774,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn a_link_holds_the_block_of_its_own_type_and_no_other() {
+    fn a_link_holds_the_block_of_its_own_type_alone_and_exactly_two_ends() {
         for (yaml, refusal) in [
             (
                 "{type: wireguard, ends: {a: {}, b: {}}}",
@@ -798,21 +798,21 @@ mod tests {
                     block: WIREGUARD,
                 },
             ),
+            (
+                "{type: wireguard, ends: {a: {}}, wireguard: {port: 1}}",
+                LinkError::Ends(WIREGUARD, 1),
+            ),
+            (
+                "{type: wireguard, ends: {a: {}, b: {}, c: {}}, wireguard: {port: 1}}",
+                LinkError::Ends(WIREGUARD, 3),
+            ),
+            (
+                "{type: wireguard, ends: {}, wireguard: {port: 1}}",
+                LinkError::Ends(WIREGUARD, 0),
+            ),
         ] {
             let refused = link(yaml).unwrap_err();
             assert!(refused.contains(&refusal.to_string()), "{yaml}: {refused}");
-        }
-    }
-
-    #[test]
-    fn a_tunnel_has_exactly_two_ends() {
-        for (ends, count) in [("{a: {}}", 1), ("{a: {}, b: {}, c: {}}", 3), ("{}", 0)] {
-            let refused = link(&format!(
-                "{{type: wireguard, ends: {ends}, wireguard: {{port: 1}}}}"
-            ))
-            .unwrap_err();
-            let refusal = LinkError::Ends(WIREGUARD, count).to_string();
-            assert!(refused.contains(&refusal), "{ends}: {refused}");
         }
     }
 

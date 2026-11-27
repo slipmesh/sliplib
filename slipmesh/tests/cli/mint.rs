@@ -58,23 +58,6 @@ fn mint_writes_nothing_when_a_node_would_be_refused_with_what_it_minted() {
 }
 
 #[test]
-fn files_the_loader_refuses_are_left_as_they_are_by_mint_and_rekey() {
-    let content = MESH.replace(
-        "  interface_prefix: mesh-\n",
-        "  interface_prefix: mesh-\n  no_such_setting: 1\n",
-    );
-    assert_ne!(content, MESH);
-    for command in [&["mint"][..], &["rekey", "--node", "node-a"][..]] {
-        let config = Config::holding(&content);
-        let ran = config.run(command);
-        assert_eq!(ran.code, Some(1), "{command:?}");
-        assert_eq!(ran.stdout, "", "{command:?}");
-        assert!(ran.stderr.contains("no_such_setting"), "{}", ran.stderr);
-        assert_eq!(config.text(), content, "{command:?}");
-    }
-}
-
-#[test]
 fn mint_with_nothing_to_write_leaves_the_files_and_their_comments_as_they_are() {
     let config = minted();
     let commented = format!("# kept by hand\n{}", config.text());

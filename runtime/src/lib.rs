@@ -30,20 +30,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn without_rust_log_info_and_above_are_logged() {
-        assert_eq!(filter(None).max_level_hint(), Some(LevelFilter::INFO));
-        assert_eq!(filter(Some("")).max_level_hint(), Some(LevelFilter::INFO));
-    }
-
-    #[test]
-    fn rust_log_overrides_the_default() {
-        assert_eq!(
-            filter(Some("debug")).max_level_hint(),
-            Some(LevelFilter::DEBUG)
-        );
-        assert_eq!(
-            filter(Some("error")).max_level_hint(),
-            Some(LevelFilter::ERROR)
-        );
+    fn info_and_above_are_logged_unless_rust_log_says_otherwise() {
+        for (rust_log, level) in [
+            (None, LevelFilter::INFO),
+            (Some(""), LevelFilter::INFO),
+            (Some("debug"), LevelFilter::DEBUG),
+            (Some("error"), LevelFilter::ERROR),
+        ] {
+            assert_eq!(
+                filter(rust_log).max_level_hint(),
+                Some(level),
+                "{rust_log:?}"
+            );
+        }
     }
 }

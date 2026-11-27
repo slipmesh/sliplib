@@ -116,9 +116,14 @@ mod tests {
     }
 
     #[test]
-    fn decodes_a_key_with_surrounding_whitespace() {
+    fn decodes_a_key_with_surrounding_whitespace_and_rejects_one_of_the_wrong_length() {
         let bytes = [7; 32];
-        assert_eq!(decode_key(&format!(" {}\n", encode_key(&bytes))), Ok(bytes));
+        for (text, decoded) in [
+            (format!(" {}\n", encode_key(&bytes)), Ok(bytes)),
+            ("AAAA".to_owned(), Err(KeyError::Length(3))),
+        ] {
+            assert_eq!(decode_key(&text), decoded, "{text:?}");
+        }
     }
 
     #[test]
@@ -126,11 +131,6 @@ mod tests {
         use std::error::Error as _;
         assert!(decode_key("not base64!").unwrap_err().source().is_some());
         assert!(decode_key("AAAA").unwrap_err().source().is_none());
-    }
-
-    #[test]
-    fn rejects_a_key_of_the_wrong_length() {
-        assert_eq!(decode_key("AAAA"), Err(KeyError::Length(3)));
     }
 
     /// RFC 7748, section 6.1: Alice's key pair.
@@ -193,32 +193,34 @@ mod tests {
     }
 
     #[test]
-    fn a_key_equals_its_clamped_form() {
-        for (generated, clamped) in [all_ones(), all_zeros()] {
+    fn a_key_is_compared_clamped_and_other_text_as_written() {
+        let (ones, ones_clamped) = all_ones();
+        let (zeros, zeros_clamped) = all_zeros();
+        for (generated, clamped) in [(&ones, &ones_clamped), (&zeros, &zeros_clamped)] {
             assert_ne!(
                 generated.expose(),
                 clamped.expose(),
                 "the two differ as text"
             );
-            assert_eq!(generated, clamped);
-            assert_eq!(clamped, generated);
         }
-        let (ones, _) = all_ones();
-        assert_eq!(PrivateKey::from(format!("{}\n", ones.expose())), ones);
-    }
-
-    #[test]
-    fn different_keys_are_not_equal() {
-        let (ones, _) = all_ones();
-        let (zeros, _) = all_zeros();
-        assert_ne!(ones, zeros);
-    }
-
-    #[test]
-    fn text_that_is_not_a_key_is_compared_as_written() {
-        let (ones, _) = all_ones();
-        assert_eq!(PrivateKey::from("AAAA"), PrivateKey::from("AAAA"));
-        assert_ne!(PrivateKey::from("AAAA"), PrivateKey::from("AAAB"));
-        assert_ne!(PrivateKey::from("not base64!"), ones);
+        let text = |text: &str| PrivateKey::from(text);
+        for (case, left, right, equal) in [
+            ("ones, clamped", ones.clone(), ones_clamped.clone(), true),
+            ("clamped, ones", ones_clamped, ones.clone(), true),
+            ("zeros, clamped", zeros.clone(), zeros_clamped.clone(), true),
+            ("clamped, zeros", zeros_clamped, zeros.clone(), true),
+            (
+                "ones ending in a newline, ones",
+                PrivateKey::from(format!("{}\n", ones.expose())),
+                ones.clone(),
+                true,
+            ),
+            ("ones, zeros", ones.clone(), zeros, false),
+            ("AAAA, AAAA", text("AAAA"), text("AAAA"), true),
+            ("AAAA, AAAB", text("AAAA"), text("AAAB"), false),
+            ("not base64!, ones", text("not base64!"), ones, false),
+        ] {
+            assert_eq!(left == right, equal, "{case}");
+        }
     }
 }

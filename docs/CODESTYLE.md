@@ -27,7 +27,7 @@
 - Types and functions say what they are for, not how: `PrivateKey::public_key`, not
   `derive_x25519`.
 - Tests are named for the behaviour they pin, as a sentence:
-  `a_key_equals_its_clamped_form`.
+  `a_key_is_compared_clamped_and_other_text_as_written`.
 
 ## Error handling
 
