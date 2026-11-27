@@ -204,8 +204,11 @@ impl Endpoint {
 #[cfg_attr(all(feature = "kube", test), x_kube(cel))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EndpointKeys {
+    // Not nullable in the schema: the reader refuses a `null`, so the API server refuses it too.
+    #[cfg_attr(feature = "kube", schemars(with = "String"))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ipv4: Option<String>,
+    #[cfg_attr(feature = "kube", schemars(with = "String"))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ipv6: Option<String>,
 }

@@ -1337,6 +1337,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sliplib-config",
  "sliplib-net",
  "sliplib-secrets",
  "sliplib-yaml",

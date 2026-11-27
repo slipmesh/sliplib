@@ -10,6 +10,7 @@ pub const API_VERSION: &str = "slipmesh.net/v1alpha1";
 pub const KIND: &str = "Mesh";
 pub const NAME: &str = "mesh";
 
+/// Read strictly: a new field reaches the agents before the CRD and the manifest carry it.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "kube", derive(kube::CustomResource, schemars::JsonSchema))]
 #[cfg_attr(
@@ -126,15 +127,21 @@ mod tests {
 
     #[cfg(feature = "kube")]
     #[test]
-    fn the_crd_refuses_an_endpoint_of_both_families_or_of_none() {
+    fn the_crd_refuses_an_endpoint_of_both_families_of_none_or_of_null() {
         use crate::v2::network::EndpointKeys;
         use kube::CustomResourceExt;
         let crd = serde_json::to_value(Mesh::crd()).unwrap();
         let node = "/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/nodes/additionalProperties";
-        let rules = crd.pointer(&format!(
-            "{node}/properties/endpoint/x-kubernetes-validations"
-        ));
-        assert!(rules.is_some(), "{crd}");
+        let endpoint = crd.pointer(&format!("{node}/properties/endpoint")).unwrap();
+        assert!(
+            endpoint.get("x-kubernetes-validations").is_some(),
+            "{endpoint}"
+        );
+        for family in ["ipv4", "ipv6"] {
+            let field = &endpoint["properties"][family];
+            assert_eq!(field["type"], "string", "{endpoint}");
+            assert!(field.get("nullable").is_none(), "{endpoint}");
+        }
         for (endpoint, valid) in [
             (serde_json::json!({"ipv4": "192.0.2.1"}), true),
             (serde_json::json!({"ipv6": "2001:db8::1"}), true),

@@ -29,4 +29,6 @@ thiserror.workspace = true
 k8s-openapi = { workspace = true, features = ["v1_37"] }
 kube = { workspace = true, features = ["cel", "derive"] }
 serde_json.workspace = true
+# Its own tests take the custom resource.
+sliplib-config = { path = ".", features = ["kube"] }
 tempfile.workspace = true

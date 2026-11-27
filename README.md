@@ -264,7 +264,8 @@ chain prints the whole message, each part once.
 - `Range`: a number or `lo-hi` the module draws from. A range is written as a string, which a
   daemon built before ranges refuses; nothing here checks a node's release.
 - `mesh_object`: `MeshSpec`, what [`slipmesh manifest`](#manifest) writes, and with the `kube`
-  feature the `Mesh` custom resource the agents read and its CRD, `Mesh::crd()`.
+  feature the `Mesh` custom resource the agents read and its CRD, `Mesh::crd()`. A binary that
+  enables `kube` also enables one `v1_*` feature of `k8s-openapi`.
 
 ### `sliplib-mesh`
 
