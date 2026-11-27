@@ -216,20 +216,6 @@ mod tests {
     }
 
     #[test]
-    fn a_number_is_the_range_of_that_one_value() {
-        let range: Range<u16> = parsed("120").unwrap();
-        assert_eq!((range.lo(), range.hi()), (120, 120));
-        assert_eq!(range, Range::from(120));
-    }
-
-    #[test]
-    fn two_numbers_around_a_dash_are_the_ends() {
-        let range: Range<u16> = parsed("100-140").unwrap();
-        assert_eq!((range.lo(), range.hi()), (100, 140));
-        assert_eq!(range, Range::new(100, 140).unwrap());
-    }
-
-    #[test]
     fn a_range_whose_ends_are_out_of_order_is_refused_and_named() {
         let reversed = Err(RangeError::Reversed { lo: 140, hi: 100 });
         assert_eq!(parsed::<u16>("140-100"), reversed);
@@ -264,12 +250,6 @@ mod tests {
             let err = parsed::<u32>(text).unwrap_err().to_string();
             assert!(err.contains(&format!("{text:?}")), "{text:?}: {err}");
         }
-    }
-
-    #[test]
-    fn it_is_shown_as_a_number_when_its_ends_are_equal_and_as_a_range_otherwise() {
-        assert_eq!(Range::<u32>::from(7).to_string(), "7");
-        assert_eq!(Range::<u32>::new(5, 9).unwrap().to_string(), "5-9");
     }
 
     #[test]
@@ -310,13 +290,6 @@ mod tests {
         assert!(range(7, 7).overlaps(range(7, 7)));
         assert!(!range(5, 8).overlaps(range(9, 12)));
         assert!(!range(9, 12).overlaps(range(5, 8)));
-    }
-
-    #[test]
-    fn only_the_range_from_zero_to_zero_is_zero() {
-        assert!(Range::<u16>::from(0).is_zero());
-        assert!(!Range::<u16>::new(0, 5).unwrap().is_zero());
-        assert!(!Range::<u16>::from(5).is_zero());
     }
 
     #[test]

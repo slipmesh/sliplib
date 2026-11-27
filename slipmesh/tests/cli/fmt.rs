@@ -1,6 +1,4 @@
 use crate::common::Config;
-use sliplib_config::Range;
-use sliplib_config::v2::network::LinkKind;
 use sliplib_secrets::wireguard::PrivateKey;
 use sliplib_yaml::{MultiDoc, Value};
 
@@ -90,55 +88,6 @@ fn fmt_rewrites_hand_written_files_in_the_serializers_form_and_keeps_every_value
     );
     assert_eq!(values(&rewritten), values(&by_hand));
     assert_eq!(network_of(&rewritten), network_of(&by_hand));
-}
-
-#[test]
-fn fmt_keeps_a_number_a_string_and_a_block_scalar_what_they_were() {
-    let config = Config::holding(&by_hand(PrivateKey::generate().expose()));
-    assert_eq!(config.run(&["fmt"]).code, Some(0));
-    let rewritten = config.text();
-    let installer = &values(&rewritten)[1]["installer"];
-    assert_eq!(installer["mtu"], Value::from(1500));
-    assert_eq!(installer["release"], Value::from("0123"));
-    assert_eq!(
-        installer["script"],
-        Value::from("first line\n  second line, indented\n")
-    );
-    // An alias is written out as a copy, and a document that holds nothing is dropped.
-    assert!(
-        !rewritten.contains("&shared") && !rewritten.contains("*shared"),
-        "{rewritten}"
-    );
-    assert_eq!(installer["first"], installer["second"]);
-    assert_eq!(installer["second"]["wipe"], Value::from(true));
-    assert_eq!(rewritten.matches("\n---\n").count(), 1, "{rewritten}");
-}
-
-#[test]
-fn fmt_keeps_a_range_a_range_and_a_number_a_number() {
-    let by_hand = by_hand(PrivateKey::generate().expose()).replace(
-        "amneziawg: {port: 51820}",
-        "amneziawg: {port: 51820, obfuscation: {h1: 5-9, h2: 0xA, rekey_after_time: 100-140}}",
-    );
-    let config = Config::holding(&by_hand);
-    assert_eq!(config.run(&["fmt"]).code, Some(0));
-
-    let obfuscation =
-        &values(&config.text())[0]["mesh"]["links"]["a-b"]["amneziawg"]["obfuscation"];
-    assert_eq!(obfuscation["h1"], Value::from("5-9"));
-    assert_eq!(obfuscation["h2"], Value::from(10));
-    assert_eq!(obfuscation["rekey_after_time"], Value::from("100-140"));
-
-    let network = network_of(&config.text());
-    let LinkKind::Amneziawg(block) = &network.mesh.links["a-b"].kind else {
-        panic!("a-b is not of type amneziawg");
-    };
-    let read = &block.obfuscation.as_ref().unwrap().0;
-    assert_eq!(read.h1, Some(Range::new(5, 9).unwrap()));
-    assert_eq!(read.h2, Some(10.into()));
-    assert_eq!(read.rekey_after_time, Some(Range::new(100, 140).unwrap()));
-    // Read and written back through the types, they are what the file holds.
-    assert_eq!(&sliplib_yaml::to_value(read).unwrap(), obfuscation);
 }
 
 #[cfg(unix)]

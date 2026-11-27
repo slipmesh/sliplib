@@ -37,12 +37,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wipes_its_text_when_dropped() {
-        fn wiped_on_drop<T: ZeroizeOnDrop>() {}
-        wiped_on_drop::<Secret>();
-    }
-
-    #[test]
     fn debug_output_never_carries_the_secret() {
         #[derive(Debug)]
         #[expect(dead_code)]

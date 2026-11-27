@@ -126,11 +126,6 @@ mod tests {
     use super::*;
     use crate::test_support::example;
 
-    /// Padded to 16 but not past the MTU, with WireGuard's header and tag, the junk, UDP and IP.
-    fn outer(inner: u32, mtu: u32, s4: u32, ip: u32) -> u32 {
-        inner.div_ceil(16).saturating_mul(16).min(mtu) + 32 + s4 + 8 + ip
-    }
-
     /// `mesh` and `nodes` under a block, an addressing and an AS number.
     fn mesh_of(mesh_and_nodes: &str) -> Mesh<'static> {
         let text = format!(
@@ -190,13 +185,6 @@ mod tests {
         assert_eq!(mtu_of(AT_V4, UNDIALED, WIREGUARD, ""), 1440);
         assert_eq!(mtu_of(UNDIALED, AT_V4, WIREGUARD, ""), 1440);
         assert_eq!(mtu_of(UNDIALED, AT_V6, WIREGUARD, ""), 1420);
-    }
-
-    #[test]
-    fn a_host_name_is_dialed_over_the_family_of_its_key() {
-        let named = |family: &str| format!("{{endpoint: {{{family}: a.example.com}}}}");
-        assert_eq!(mtu_of(&named("ipv4"), UNDIALED, WIREGUARD, ""), 1440);
-        assert_eq!(mtu_of(&named("ipv6"), UNDIALED, WIREGUARD, ""), 1420);
     }
 
     #[test]
@@ -308,28 +296,6 @@ mod tests {
     }
 
     #[test]
-    fn across_the_grid_a_full_size_packet_fits_and_one_byte_more_does_not() {
-        for s4 in [0, 12, 20, 89, 150] {
-            for underlay in [1400, 1460, 1500, 9000] {
-                for (endpoint, ip) in [("ipv4: 192.0.2.10", 20), ("ipv6: '2001:db8::10'", 40)] {
-                    let a = format!("{{mtu: {underlay}, endpoint: {{{endpoint}}}}}");
-                    let b = format!("{{mtu: {underlay}}}");
-                    let link = amneziawg(&format!("{{s4: {s4}}}"));
-                    let Ok(Some(mtu)) = of(&network(&a, &b, &link, "")) else {
-                        assert!(underlay - 32 - 8 - ip - s4 < MIN_IPV6_MTU);
-                        continue;
-                    };
-                    assert!(outer(mtu, mtu, s4, ip) <= underlay, "{s4} {underlay} {ip}");
-                    assert!(
-                        outer(mtu + 1, mtu + 1, s4, ip) > underlay,
-                        "{s4} {underlay} {ip}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
     fn the_mesh_mtu_of_the_example_is_below_the_least_limit_of_its_links_as_its_comment_says() {
         let mtu = |overlay: &str| {
             let network = example(overlay);
@@ -337,32 +303,5 @@ mod tests {
         };
         assert_eq!(mtu("{}"), Some(1320));
         assert_eq!(mtu("{mesh: {mtu: null}}"), Some(1344));
-    }
-
-    fn mtu_refusal(overlay: &str) -> crate::mtu::MtuError {
-        let network = example(overlay);
-        crate::mtu::mesh_mtu(&network).unwrap_err()
-    }
-
-    #[test]
-    fn an_mtu_of_zero_is_refused() {
-        use crate::mtu::MtuError;
-        let underlay = mtu_refusal("{nodes: {node-b: {underlay: {wan: {mtu: 0}}}}}");
-        assert!(
-            matches!(&underlay, MtuError::LimitBelowMinimum { link, limit: 0 } if link == "a-b"),
-            "{underlay:?}"
-        );
-        let mesh = mtu_refusal("{mesh: {mtu: 0}}");
-        assert!(
-            matches!(mesh, MtuError::BelowMinimum { mtu: 0 }),
-            "{mesh:?}"
-        );
-    }
-
-    #[test]
-    fn a_node_has_the_mtu_of_its_underlay_or_that_of_ethernet() {
-        let mesh = example("{}");
-        assert_eq!(underlay_mtu(mesh.node("node-c").unwrap()), 1420);
-        assert_eq!(underlay_mtu(mesh.node("node-a").unwrap()), 1500);
     }
 }

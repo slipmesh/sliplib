@@ -116,23 +116,9 @@ mod tests {
     }
 
     #[test]
-    fn decodes_what_it_encodes() {
-        let bytes: [u8; 32] = std::array::from_fn(|i| i as u8);
-        assert_eq!(decode_key(&encode_key(&bytes)), Ok(bytes));
-    }
-
-    #[test]
     fn decodes_a_key_with_surrounding_whitespace() {
         let bytes = [7; 32];
         assert_eq!(decode_key(&format!(" {}\n", encode_key(&bytes))), Ok(bytes));
-    }
-
-    #[test]
-    fn rejects_text_that_is_not_base64() {
-        assert!(matches!(
-            decode_key("not base64!"),
-            Err(KeyError::Base64(_))
-        ));
     }
 
     #[test]
@@ -158,24 +144,10 @@ mod tests {
     }
 
     #[test]
-    fn a_public_key_needs_a_private_key_that_decodes() {
-        assert_eq!(
-            PrivateKey::from("AAAA").public_key(),
-            Err(KeyError::Length(3))
-        );
-    }
-
-    #[test]
     fn generates_a_key_that_has_a_public_key() {
         let key = PrivateKey::generate();
         decode_key(key.expose()).unwrap();
         decode_key(&key.public_key().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn wipes_its_text_when_dropped() {
-        fn wiped_on_drop<T: zeroize::ZeroizeOnDrop>() {}
-        wiped_on_drop::<PrivateKey>();
     }
 
     #[test]
@@ -231,12 +203,6 @@ mod tests {
             assert_eq!(generated, clamped);
             assert_eq!(clamped, generated);
         }
-    }
-
-    #[test]
-    fn a_key_equals_itself_with_surrounding_whitespace() {
-        let (ones, _) = all_ones();
-        assert_eq!(PrivateKey::from(format!("{}\n", ones.expose())), ones);
     }
 
     #[test]

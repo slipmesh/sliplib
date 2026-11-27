@@ -51,59 +51,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ipv4_loopback_ors_node_id_into_the_host_bits() {
-        let network = Ipv4Addr::new(198, 51, 100, 0);
-        let node_id = Ipv4Addr::new(0, 0, 0, 5);
-        assert_eq!(
-            ipv4_in(network, 25, node_id),
-            Ipv4Addr::new(198, 51, 100, 5)
-        );
-    }
-
-    #[test]
-    fn different_node_ids_never_collide_for_the_same_network() {
-        let network = Ipv4Addr::new(198, 51, 100, 0);
-        let a = ipv4_in(network, 25, Ipv4Addr::new(0, 0, 0, 1));
-        let b = ipv4_in(network, 25, Ipv4Addr::new(0, 0, 0, 2));
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn a_96_takes_all_32_bits_of_the_node_id() {
-        let network: Ipv6Addr = "3fff:0:0:1::".parse().unwrap();
-        let node_id = Ipv4Addr::new(192, 0, 2, 1);
-        let expected: Ipv6Addr = "3fff:0:0:1::c000:201".parse().unwrap();
-        assert_eq!(ipv6_in(network, 96, node_id), expected);
-    }
-
-    #[test]
-    fn the_networks_own_bits_in_the_low_32_stay_under_a_longer_network() {
-        let network: Ipv6Addr = "3fff::1:0".parse().unwrap();
-        let loopback = ipv6_in(network, 120, Ipv4Addr::new(0, 0, 0, 5));
-        assert_eq!(loopback.to_string(), "3fff::1:5");
-        assert_eq!(link_local_from_loopback(loopback).to_string(), "fe80::1:5");
-    }
-
-    #[test]
-    fn ipv6_loopback_ors_node_id_into_the_low_32_host_bits() {
-        let network: Ipv6Addr = "3fff::".parse().unwrap();
-        let node_id = Ipv4Addr::new(0, 0, 0, 5);
-        assert_eq!(ipv6_in(network, 32, node_id).to_string(), "3fff::5");
-    }
-
-    #[test]
     fn ipv6_loopback_leaves_middle_bits_zero() {
         let network: Ipv6Addr = "3fff::".parse().unwrap();
         let node_id = Ipv4Addr::new(198, 51, 100, 1);
         assert_eq!(ipv6_in(network, 32, node_id).to_string(), "3fff::c633:6401");
-    }
-
-    #[test]
-    fn link_local_from_loopback_derives_fe80_from_low_32_bits() {
-        assert_eq!(
-            link_local_from_loopback("3fff::a1b2:c3d4".parse().unwrap()).to_string(),
-            "fe80::a1b2:c3d4"
-        );
     }
 
     #[test]

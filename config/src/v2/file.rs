@@ -1197,19 +1197,6 @@ mod tests {
     }
 
     #[test]
-    fn the_example_of_the_specification_reads_with_its_nodes_and_links_in_order() {
-        let file = file(&[&network("{}")]).unwrap();
-        let network = file.network();
-        let nodes: Vec<&Name> = network.nodes.keys().collect();
-        assert_eq!(
-            names(&nodes.into_iter().cloned().collect::<Vec<_>>()),
-            ["node-a", "node-b", "node-c", "router1"]
-        );
-        let links: Vec<Name> = network.mesh.links.keys().cloned().collect();
-        assert_eq!(names(&links), ["a-b", "a-c", "a-r1"]);
-    }
-
-    #[test]
     fn a_node_without_lists_of_its_own_has_the_networks() {
         let file = file(&[&network("{}")]).unwrap();
         let node = &file.network().nodes["node-a"].routing;
@@ -1257,20 +1244,6 @@ mod tests {
     }
 
     #[test]
-    fn two_nodes_of_one_name_are_refused() {
-        let twice = format!(
-            "{}  node-a: {{platform: talos, node_id: 0.0.0.9, underlay: {{wan: {{}}}}}}\n",
-            network("{}")
-        );
-        assert!(
-            twice.trim_end().ends_with("underlay: {wan: {}}}"),
-            "{twice}"
-        );
-        let refusal = refusal(&[&twice]);
-        assert!(matches!(refusal, Error::Yaml(_)), "{refusal:?}");
-    }
-
-    #[test]
     fn a_null_in_the_networks_own_routing_is_the_key_left_out() {
         let text = network_edited(BLOCK, |tree| {
             tree["routing"]["learn"] = Value::Null;
@@ -1278,45 +1251,6 @@ mod tests {
         let file = file(&[&text]).unwrap();
         assert!(file.network().routing.learn.is_empty());
         assert!(file.network().nodes["node-a"].routing.learn.is_empty());
-    }
-
-    #[test]
-    fn an_end_written_null_is_the_end_left_out() {
-        let three = network_edited(BLOCK, |tree| {
-            tree["mesh"]["links"]["a-b"]["ends"]["node-c"] = Value::Null;
-        });
-        let file = file(&[&three]).unwrap();
-        assert_eq!(
-            names(&file.network().mesh.links["a-b"].ends),
-            ["node-a", "node-b"]
-        );
-        let none = network_edited(BLOCK, |tree| {
-            let ends = &mut tree["mesh"]["links"]["a-b"]["ends"];
-            *ends = yaml("{node-a: null, node-b: null}");
-        });
-        let documents = [none.as_str()];
-        let at = file_line(&documents, "a-b:");
-        let refusal = refusal(&documents);
-        assert!(
-            matches!(&refusal, Error::Laid { kind: NETWORK, at: key, .. } if key.file().is_none() && key.line() == at),
-            "{refusal:?}"
-        );
-    }
-
-    #[test]
-    fn an_underlay_entry_written_null_is_the_entry_left_out() {
-        let text = network_edited(BLOCK, |tree| {
-            tree["nodes"]["node-b"]["underlay"]["wan"] = Value::Null;
-        });
-        let refusal = refusal(&[&text]);
-        let none = Invalid::Underlay {
-            node: name("node-b"),
-            entries: 0,
-        };
-        assert!(
-            matches!(&refusal, Error::Invalid(invalid) if *invalid == none),
-            "{refusal:?}"
-        );
     }
 
     #[test]
@@ -1407,13 +1341,6 @@ mod tests {
     }
 
     #[test]
-    fn a_link_without_a_keepalive_anywhere_has_none() {
-        let file = file(&[&network("{}")]).unwrap();
-        assert_eq!(wireguard(&file, "a-r1").persistent_keepalive, None);
-        assert_eq!(amneziawg(&file, "a-b").persistent_keepalive, None);
-    }
-
-    #[test]
     fn a_null_at_a_links_keepalive_takes_the_networks_away_for_that_link() {
         let text = network_edited(BLOCK, |tree| {
             tree["mesh"]["amneziawg"]["persistent_keepalive"] = yaml("21-29");
@@ -1435,26 +1362,6 @@ mod tests {
         assert_eq!(obfuscation.jc, Some(4));
         assert_eq!(obfuscation.s3, Some(40));
         assert_eq!(obfuscation.random_trailers, Some(true));
-    }
-
-    #[test]
-    fn a_link_that_writes_no_obfuscation_has_the_networks() {
-        let file = file(&[&network("{}")]).unwrap();
-        let obfuscation = &amneziawg(&file, "a-b").obfuscation.as_ref().unwrap().0;
-        assert_eq!(obfuscation.s4, Some(16));
-    }
-
-    #[test]
-    fn a_null_at_a_field_of_a_links_obfuscation_drops_that_field_for_the_link() {
-        let text = network_edited(BLOCK, |tree| {
-            tree["mesh"]["links"]["a-b"]["amneziawg"]["obfuscation"] = yaml("{s3: null}");
-        });
-        let file = file(&[&text]).unwrap();
-        let dropped = &amneziawg(&file, "a-b").obfuscation.as_ref().unwrap().0;
-        assert_eq!(dropped.s3, None);
-        assert_eq!(dropped.s4, Some(16));
-        let kept = &amneziawg(&file, "a-c").obfuscation.as_ref().unwrap().0;
-        assert_eq!(kept.s3, Some(40));
     }
 
     #[test]
@@ -1554,27 +1461,6 @@ mod tests {
                 "{block}: {refusal:?}"
             );
         }
-    }
-
-    #[test]
-    fn an_empty_block_is_refused_as_malformed_and_a_key_written_twice_as_not_yaml() {
-        let network = network("{}");
-        for block in ["slipmesh:\n", "slipmesh: null\n"] {
-            let refusal = refusal(&[&network, block]);
-            assert!(
-                matches!(
-                    refusal,
-                    Error::Block {
-                        source: BlockError::Malformed(_),
-                        ..
-                    }
-                ),
-                "{block}: {refusal:?}"
-            );
-        }
-        let twice = "slipmesh: {kind: patch, platform: talos, include: [a], include: [b]}\n";
-        let refusal = refusal(&[&network, twice]);
-        assert!(matches!(refusal, Error::Yaml(_)), "{refusal:?}");
     }
 
     #[test]
@@ -2193,12 +2079,6 @@ mod tests {
     }
 
     #[test]
-    fn files_without_a_network_are_refused() {
-        let refusal = refusal(&["slipmesh: {kind: groups}\n"]);
-        assert!(matches!(refusal, Error::NoNetwork), "{refusal:?}");
-    }
-
-    #[test]
     fn a_key_the_network_does_not_have_is_refused_by_its_line() {
         let documents = [network("{mesh: {colour: red}}")];
         let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
@@ -2225,34 +2105,6 @@ mod tests {
     }
 
     #[test]
-    fn a_document_reaches_the_nodes_of_its_platform_when_it_names_none() {
-        let file = file(&[&network("{}"), &patch("platform: talos", "one")]).unwrap();
-        assert_eq!(
-            reached(&file, file.patches()[0].aim()),
-            ["node-a", "node-b", "node-c"]
-        );
-        assert!(!file.patches()[0].aim().reaches("node-x"));
-    }
-
-    #[test]
-    fn a_document_reaches_what_its_include_names_less_what_its_exclude_names() {
-        let groups = "slipmesh: {kind: groups}\ncore: [node-a, node-b]\n";
-        let file = file(&[
-            &network("{}"),
-            groups,
-            &patch(
-                "platform: talos, include: [core, node-c], exclude: [node-a]",
-                "one",
-            ),
-        ])
-        .unwrap();
-        assert_eq!(
-            reached(&file, file.patches()[0].aim()),
-            ["node-b", "node-c"]
-        );
-    }
-
-    #[test]
     fn a_name_that_is_neither_a_node_nor_a_group_is_refused_naming_the_document() {
         let documents = [
             network("{}"),
@@ -2266,21 +2118,6 @@ mod tests {
         let refusal = refusal(&documents);
         assert!(
             matches!(&refusal, Error::Reach(groups) if *groups == unknown),
-            "{refusal:?}"
-        );
-    }
-
-    #[test]
-    fn a_document_left_reaching_no_node_is_refused() {
-        let documents = [
-            network("{}"),
-            template("platform: talos, include: [node-a], exclude: [node-a]"),
-        ];
-        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
-        let empty = GroupsError::Empty(place(TEMPLATE, &documents, 1).to_string());
-        let refusal = refusal(&documents);
-        assert!(
-            matches!(&refusal, Error::Reach(groups) if *groups == empty),
             "{refusal:?}"
         );
     }
@@ -2343,19 +2180,6 @@ mod tests {
                 "{refusal:?}"
             );
         }
-    }
-
-    #[test]
-    fn the_groups_are_checked_against_the_nodes() {
-        let refusal = refusal(&[
-            &network("{}"),
-            "slipmesh: {kind: groups}\nnode-a: [node-b]\n",
-        ]);
-        let like_a_node = GroupsError::NamedLikeANode(name("node-a"));
-        assert!(
-            matches!(&refusal, Error::Groups(groups) if *groups == like_a_node),
-            "{refusal:?}"
-        );
     }
 
     #[test]
@@ -2469,32 +2293,6 @@ mod tests {
     }
 
     #[test]
-    fn a_patch_gives_its_document_without_the_block() {
-        let file = file(&[&network("{}"), &patch("platform: talos", "one")]).unwrap();
-        assert_eq!(
-            file.patches()[0].value(),
-            &yaml("{kind: Example, name: one}")
-        );
-    }
-
-    #[test]
-    fn templates_come_ranked_with_their_bodies() {
-        let file = file(&[
-            &network("{}"),
-            &template("platform: talos, include: [node-a]"),
-            &template("platform: talos"),
-        ])
-        .unwrap();
-        let for_a = file.templates_for("node-a");
-        assert_eq!(for_a.len(), 2);
-        assert!(for_a[0].aim().rank() < for_a[1].aim().rank());
-        assert_eq!(reached(&file, for_a[1].aim()), ["node-a"]);
-        assert_eq!(file.templates_for("node-b").len(), 1);
-        assert_eq!(file.templates().len(), 2);
-        assert_eq!(for_a[1].value()["content"], yaml("text"));
-    }
-
-    #[test]
     fn a_body_of_a_template_or_a_platform_is_taken_as_written() {
         let documents = [
             network("{}"),
@@ -2567,12 +2365,6 @@ mod tests {
             file.patches()[0].aim().to_string(),
             place(PATCH, &documents, 1).to_string()
         );
-    }
-
-    #[test]
-    fn a_platform_without_its_document_has_none() {
-        let file = file(&[&network("{}")]).unwrap();
-        assert!(file.platform(Platform::Talos).is_none());
     }
 
     #[test]

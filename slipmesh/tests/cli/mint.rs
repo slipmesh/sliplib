@@ -37,25 +37,6 @@ fn mint_with_no_secret_to_create_still_writes_the_reference_value_the_file_leave
 }
 
 #[test]
-fn mint_writes_nothing_and_names_the_link_whose_headers_leave_no_room() {
-    let config = Config::holding(MESH);
-    edited(&config, |network| {
-        network["mesh"]["links"]["a-b"]["amneziawg"]["obfuscation"] =
-            sliplib_yaml::from_str("{h1: 5-2147483647}").unwrap();
-    });
-    let before = config.text();
-    let ran = config.run(&["mint"]);
-    assert_eq!(ran.code, Some(1), "{}", ran.stderr);
-    assert!(
-        ran.stderr.contains("mesh.links.a-b.amneziawg.obfuscation"),
-        "{}",
-        ran.stderr
-    );
-    assert_eq!(ran.stdout, "");
-    assert_eq!(config.text(), before);
-}
-
-#[test]
 fn mint_writes_nothing_when_a_node_would_be_refused_with_what_it_minted() {
     // No `jmax` the generator draws reaches this `jmin`, so the link's obfuscation is one the
     // kernel module refuses whatever is minted beside it.

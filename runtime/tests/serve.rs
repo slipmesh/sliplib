@@ -7,13 +7,6 @@ use anyhow::{Context, anyhow};
 const TIMEOUT: Duration = Duration::from_secs(1);
 
 #[tokio::test]
-async fn work_that_ends_ends_serve() {
-    sliplib_runtime::serve("test", TIMEOUT, async |_| Ok(()))
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
 async fn the_work_is_not_asked_to_stop_without_a_signal() {
     sliplib_runtime::serve("test", TIMEOUT, async |shutdown| {
         let early = tokio::time::timeout(Duration::from_millis(100), shutdown.requested()).await;

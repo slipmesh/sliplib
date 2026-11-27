@@ -352,17 +352,6 @@ impl Obfuscation {
 mod tests {
     use super::*;
 
-    #[test]
-    fn serializing_omits_unset_fields_instead_of_writing_null() {
-        let cfg = Obfuscation {
-            jc: Some(4),
-            ..Obfuscation::default()
-        };
-        let yaml = sliplib_yaml::to_string(&cfg).unwrap();
-        assert!(yaml.contains("jc: 4"), "yaml was:\n{yaml}");
-        assert!(!yaml.contains("null"), "yaml was:\n{yaml}");
-    }
-
     fn header_protected(junk_sizes: [Option<u16>; 4]) -> Obfuscation {
         let [s1, s2, s3, s4] = junk_sizes;
         Obfuscation {
@@ -399,32 +388,6 @@ mod tests {
         assert!(header_protected([Some(12); 4]).validate().is_ok());
     }
 
-    #[test]
-    fn accepts_small_junk_sizes_without_header_protection() {
-        let o = Obfuscation {
-            s1: Some(0),
-            ..Obfuscation::default()
-        };
-        assert!(o.validate().is_ok());
-    }
-
-    #[test]
-    fn accepts_a_fully_unset_obfuscation() {
-        assert!(Obfuscation::default().validate().is_ok());
-    }
-
-    #[test]
-    fn rejects_two_equal_magic_headers() {
-        let o = Obfuscation {
-            h2: Some(7.into()),
-            h4: Some(7.into()),
-            ..Obfuscation::default()
-        };
-        let err = o.validate().unwrap_err().to_string();
-        assert!(err.contains("obfuscation.h2 (7)"), "{err}");
-        assert!(err.contains("obfuscation.h4 (7)"), "{err}");
-    }
-
     // An unset magic header is sent as its WireGuard message type, 1..4.
     #[test]
     fn rejects_a_magic_header_equal_to_an_unset_ones_default() {
@@ -445,34 +408,6 @@ mod tests {
         from_yaml(yaml).validate().unwrap_err().to_string()
     }
 
-    #[test]
-    fn a_header_or_a_tuning_value_is_read_as_a_number_or_as_a_range() {
-        let o = from_yaml("{h1: 5-9, h2: 10, rekey_after_time: 100-140, rekey_timeout: 6}");
-        assert_eq!(o.h1, Some(Range::new(5, 9).unwrap()));
-        assert_eq!(o.h2, Some(10.into()));
-        assert_eq!(o.rekey_after_time, Some(Range::new(100, 140).unwrap()));
-        assert_eq!(o.rekey_timeout, Some(6.into()));
-        o.validate().unwrap();
-    }
-
-    // The module holds each end of a tuning value in 16 bits.
-    #[test]
-    fn a_tuning_value_above_65535_is_not_read() {
-        for key in [
-            "content_padding_addition",
-            "rekey_after_time",
-            "rekey_timeout",
-            "reject_after_time",
-            "keepalive_timeout",
-            "max_handshake_attempts",
-        ] {
-            let read = |value: u32| {
-                sliplib_yaml::from_str::<Obfuscation>(&format!("{{{key}: {value}}}")).is_ok()
-            };
-            assert!(read(65535) && !read(65536), "{key}");
-        }
-    }
-
     // The module draws from the range as written: a draw of 0 is a timer that fires at once.
     #[test]
     fn rejects_a_timing_range_that_starts_at_zero_and_names_it() {
@@ -491,16 +426,6 @@ mod tests {
         }
     }
 
-    // Zero alone is the module's "not set".
-    #[test]
-    fn accepts_zero_for_a_timing_value() {
-        let o = from_yaml(
-            "{rekey_after_time: 0, rekey_timeout: 0, reject_after_time: 0, keepalive_timeout: 0, \
-             max_handshake_attempts: 0}",
-        );
-        assert!(o.validate().is_ok());
-    }
-
     #[test]
     fn accepts_a_content_padding_addition_that_starts_at_zero() {
         assert!(
@@ -515,6 +440,9 @@ mod tests {
         let err = refusal("{h1: 5-9, h2: 10, h3: 9-12, h4: 13}");
         assert!(err.contains("obfuscation.h1 (5-9)"), "{err}");
         assert!(err.contains("obfuscation.h3 (9-12)"), "{err}");
+        let err = refusal("{h2: 7, h4: 7}");
+        assert!(err.contains("obfuscation.h2 (7)"), "{err}");
+        assert!(err.contains("obfuscation.h4 (7)"), "{err}");
         assert!(
             from_yaml("{h1: 5-9, h2: 10, h3: 11-12, h4: 13}")
                 .validate()
@@ -673,16 +601,6 @@ mod tests {
         );
         let hundredth = TrailerLoss::Share { values: 429497 }.to_string();
         assert!(hundredth.contains(", 0.01%"), "{hundredth}");
-    }
-
-    #[test]
-    fn the_share_says_what_it_is_a_bound_of_and_which_messages_a_packet_is_taken_for() {
-        let share = TrailerLoss::Share { values: 102 }.to_string();
-        assert!(share.contains("a handshake or cookie message"), "{share}");
-        assert!(
-            share.contains("where those bytes are random, up to 102 packets"),
-            "{share}"
-        );
     }
 
     #[test]

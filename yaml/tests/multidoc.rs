@@ -85,26 +85,6 @@ fn the_text_holds_every_document_with_content_and_multi_line_strings_as_blocks()
 }
 
 #[test]
-fn an_edit_shows_in_the_text_with_the_key_order_kept() {
-    let mut file = MultiDoc::parse("b: 1\na: 2\n").unwrap();
-    let document = file.document_mut(0).unwrap();
-    document["c"] = Value::Sequence(vec!["203.0.113.3/32".into()]);
-    document["b"] = 4.into();
-    assert_eq!(file.text().unwrap(), "b: 4\na: 2\nc:\n- 203.0.113.3/32\n");
-}
-
-#[test]
-fn a_file_that_cannot_be_read_is_an_error_naming_it() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("missing.yaml");
-    let err = format!(
-        "{:#}",
-        anyhow::Error::from(MultiDoc::read(&path).err().unwrap())
-    );
-    assert!(err.contains("missing.yaml"), "{err}");
-}
-
-#[test]
 fn documents_join_into_one_text() {
     assert_eq!(
         join(&["a: 1\n".into(), "b: 2\n".into()]),

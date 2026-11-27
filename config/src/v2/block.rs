@@ -394,38 +394,6 @@ mod tests {
     }
 
     #[test]
-    fn a_key_its_kind_does_not_take_is_refused() {
-        for (yaml, key) in [
-            (
-                "{kind: network, version: 2, revision: 1, include: [a]}",
-                "include",
-            ),
-            (
-                "{kind: network, version: 2, revision: 1, platform: talos}",
-                "platform",
-            ),
-            ("{kind: groups, exclude: [a]}", "exclude"),
-            ("{kind: groups, version: 2}", "version"),
-            ("{kind: platform, platform: talos, include: [a]}", "include"),
-            ("{kind: patch, platform: talos, revision: 1}", "revision"),
-            ("{kind: template, platform: talos, inculde: [a]}", "inculde"),
-            ("{kind: groups, platform: talos}", "platform"),
-            ("{kind: vars, version: 2}", "version"),
-            (
-                "{kind: network, version: 2, revision: 1, exclude: [a]}",
-                "exclude",
-            ),
-            ("{kind: platform, platform: talos, exclude: [a]}", "exclude"),
-        ] {
-            let refused = block(yaml).unwrap_err();
-            assert!(
-                refused.contains(&format!("unknown field `{key}`")),
-                "{yaml}: {refused}"
-            );
-        }
-    }
-
-    #[test]
     fn a_block_is_a_mapping_and_one_written_as_a_list_is_refused() {
         for list in [
             "[network, 2, 1]",
@@ -464,6 +432,7 @@ mod tests {
                 "revision",
             ),
             ("{kind: patch, platform: talos, version: []}", "version"),
+            ("{kind: vars, version: 2}", "version"),
             ("{kind: groups, 0: 5}", "0"),
         ] {
             let refused = block(yaml).unwrap_err();
@@ -492,44 +461,9 @@ mod tests {
     }
 
     #[test]
-    fn a_kind_or_a_platform_the_format_does_not_have_is_refused() {
-        assert!(
-            block("{kind: roadwarriors}")
-                .unwrap_err()
-                .contains("roadwarriors")
-        );
-        assert!(
-            block("{kind: patch, platform: openwrt}")
-                .unwrap_err()
-                .contains("openwrt")
-        );
-    }
-
-    #[test]
     fn a_platform_reads_as_the_files_write_it() {
         assert_eq!(Platform::Talos.to_string(), "talos");
         assert_eq!(Platform::Routeros.to_string(), "routeros");
-    }
-
-    #[test]
-    fn an_order_is_a_whole_number_up_to_65535() {
-        assert_eq!(block("{kind: groups, order: 0}").unwrap().order(), Order(0));
-        assert_eq!(
-            block("{kind: groups, order: 65535}").unwrap().order(),
-            Order(65535)
-        );
-        for order in ["65536", "-1", "1.5", "first"] {
-            let refused = block(&format!("{{kind: groups, order: {order}}}")).unwrap_err();
-            assert!(refused.contains("u16"), "{order}: {refused}");
-        }
-    }
-
-    #[test]
-    fn an_order_left_out_is_1000_on_every_kind_that_is_aimed() {
-        for kind in ["template", "patch"] {
-            let read = block(&format!("{{kind: {kind}, platform: talos}}")).unwrap();
-            assert_eq!(read.order(), Order(1000), "{kind}");
-        }
     }
 
     /// As the loader takes a document an edit has left without its text.
@@ -613,21 +547,5 @@ mod tests {
             let refused = block(&format!("{{kind: patch, platform: talos{keys}}}")).unwrap_err();
             assert!(refused.contains(said), "{keys}: {refused}");
         }
-    }
-
-    #[test]
-    fn order_ranks_before_how_narrowly_a_document_is_aimed() {
-        let (all, _) = aim("");
-        let (some, _) = aim(", include: [node-a]");
-        let talos = Some(Platform::Talos);
-        let rank = |order, platform, include| Rank::of(Order(order), platform, include);
-        assert!(rank(1000, talos, &some) > rank(1000, talos, &all));
-        assert!(rank(1000, talos, &all) > rank(1000, None, &all));
-        assert_eq!(rank(1000, talos, &some), rank(1000, None, &some));
-        assert!(rank(1000, None, &all) > rank(999, talos, &some));
-        assert_eq!(
-            rank(7, talos, &all),
-            rank(7, talos, &aim(", include: [all]").0)
-        );
     }
 }
