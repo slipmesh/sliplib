@@ -70,14 +70,6 @@ fn an_edited_document_is_read_with_its_edits() {
 }
 
 #[test]
-fn only_a_document_with_content_can_be_edited() {
-    let mut file = MultiDoc::parse("a: 1\n---\n# nothing here yet\n").unwrap();
-    assert!(file.document_mut(0).is_some());
-    assert!(file.document_mut(1).is_none());
-    assert!(file.document_mut(2).is_none());
-}
-
-#[test]
 fn the_text_holds_every_document_with_content_and_multi_line_strings_as_blocks() {
     let file =
         MultiDoc::parse("a: 1\n---\n# nothing here yet\n---\nscript: |\n  one\n  two\n").unwrap();

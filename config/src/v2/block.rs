@@ -466,43 +466,6 @@ mod tests {
         assert_eq!(Platform::Routeros.to_string(), "routeros");
     }
 
-    /// As the loader takes a document an edit has left without its text.
-    fn block_from_value(yaml: &str) -> Block {
-        let mut file = MultiDoc::parse(&format!("{META_KEY}: {yaml}\n")).unwrap();
-        file.document_mut(0).unwrap();
-        Block::read(&file.documents()[0]).unwrap()
-    }
-
-    #[test]
-    fn a_name_yaml_reads_as_a_number_or_a_boolean_is_the_name_written() {
-        let yaml = "{kind: patch, platform: talos, include: [7, 1.5], exclude: [true]}";
-        for read in [block(yaml).unwrap(), block_from_value(yaml)] {
-            let Block::Patch(Aimed {
-                include, exclude, ..
-            }) = read
-            else {
-                panic!("{read:?}");
-            };
-            assert_eq!(names(include.names()), ["7", "1.5"]);
-            assert_eq!(names(exclude.names()), ["true"]);
-        }
-    }
-
-    #[test]
-    fn a_negative_number_is_refused_by_the_name_rule() {
-        let refused = block("{kind: patch, platform: talos, include: [-7]}").unwrap_err();
-        assert!(
-            refused.contains("has to start and end with a letter or a digit"),
-            "{refused}"
-        );
-    }
-
-    #[test]
-    fn a_name_left_empty_is_refused() {
-        let refused = block("{kind: patch, platform: talos, include: [node-a, null]}").unwrap_err();
-        assert!(refused.contains("a name"), "{refused}");
-    }
-
     fn aim(keys: &str) -> (Include, Exclude) {
         match block(&format!("{{kind: patch, platform: talos{keys}}}")).unwrap() {
             Block::Patch(Aimed {

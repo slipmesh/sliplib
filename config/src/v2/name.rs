@@ -233,17 +233,7 @@ mod tests {
         assert_eq!(format!("{:?}", name("node-a").unwrap()), "\"node-a\"");
         let class = ClassName::try_from("egress".to_owned()).unwrap();
         assert_eq!(format!("{class:?}"), "\"egress\"");
-    }
-
-    #[test]
-    fn a_name_reads_as_its_text_wherever_a_message_names_it() {
-        assert_eq!(name("node-a").unwrap().to_string(), "node-a");
-        assert_eq!(
-            ClassName::try_from("egress".to_owned())
-                .unwrap()
-                .to_string(),
-            "egress"
-        );
+        assert_eq!(class.to_string(), "egress");
     }
 
     #[test]

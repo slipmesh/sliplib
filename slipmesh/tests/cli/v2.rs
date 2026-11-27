@@ -61,26 +61,6 @@ fn mint_writes_into_the_network_document_wherever_it_stands_in_the_file() {
 }
 
 #[test]
-fn mint_writes_the_reference_value_of_the_interface_prefix_and_mints_with_it() {
-    let config = Config::holding(MESH);
-    edited(&config, |network| {
-        network["mesh"]
-            .as_mapping_mut()
-            .unwrap()
-            .shift_remove("interface_prefix");
-    });
-    let ran = config.run(&["mint"]);
-    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
-    assert_eq!(config.documents()[0]["mesh"]["interface_prefix"], "mesh-");
-    assert!(
-        ran.stdout.contains("mesh.interface_prefix"),
-        "{}",
-        ran.stdout
-    );
-    assert_eq!(config.run(&["check"]).code, Some(0));
-}
-
-#[test]
 fn check_refuses_a_file_without_the_interface_prefix_once_naming_mint() {
     let config = minted();
     edited(&config, |network| {

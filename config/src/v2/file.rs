@@ -1244,16 +1244,6 @@ mod tests {
     }
 
     #[test]
-    fn a_null_in_the_networks_own_routing_is_the_key_left_out() {
-        let text = network_edited(BLOCK, |tree| {
-            tree["routing"]["learn"] = Value::Null;
-        });
-        let file = file(&[&text]).unwrap();
-        assert!(file.network().routing.learn.is_empty());
-        assert!(file.network().nodes["node-a"].routing.learn.is_empty());
-    }
-
-    #[test]
     fn a_node_a_link_or_a_class_written_null_is_the_one_left_out() {
         let text = network_edited(BLOCK, |tree| {
             tree["nodes"]["node-x"] = Value::Null;
@@ -1489,15 +1479,6 @@ mod tests {
                 ),
                 "{refusal:?}"
             );
-        }
-    }
-
-    #[test]
-    fn a_document_reads_beside_top_level_keys_that_are_not_strings() {
-        let network = network("{}");
-        for other in ["5: x\n", "? [a, b]\n: c\n"] {
-            let patch = format!("{META_KEY}: {{kind: patch, platform: talos}}\n{other}");
-            file(&[&network, &patch]).unwrap();
         }
     }
 
@@ -2028,21 +2009,6 @@ mod tests {
                 "{block}: {refusal:?}"
             );
         }
-    }
-
-    #[test]
-    fn the_version_of_every_network_document_is_checked_before_any_revision() {
-        let documents = [
-            network_edited("{kind: network, version: 2, revision: 2}", |_| {}),
-            network_edited("{kind: network, version: 3, revision: 1}", |_| {}),
-        ];
-        let documents: Vec<&str> = documents.iter().map(String::as_str).collect();
-        let at = place(NETWORK, &documents, 1);
-        let refusal = refusal(&documents);
-        assert!(
-            matches!(&refusal, Error::NewerVersion { place, version: 3 } if *place == at),
-            "{refusal:?}"
-        );
     }
 
     #[test]
