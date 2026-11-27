@@ -706,9 +706,8 @@ none. `talos` serves it on both types, and `routeros` on `wireguard`, the one ty
 `awg` daemon older than the one that takes a peer's keepalive from its config entry sends 25 to
 every peer it dials, whatever the file says.
 
-The generator writes `persistent_keepalive` into a peer's entry only where the value differs from
-what the consumer gives a peer without it: 25 on a link of type `wireguard`, `20-30` on one of type
-`amneziawg`.
+The generator writes `persistent_keepalive` into the entry of every peer an end dials, the default
+of its type included, and into none other.
 
 It is not `keepalive_timeout` of the obfuscation: that one is how long the module waits, once data
 came in, before it answers with an empty packet.

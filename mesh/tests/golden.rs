@@ -139,6 +139,21 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
         for announced in &mut expected_router.announce {
             announced.label = None;
         }
+        // What the daemon sent the peers of version 1's configs.
+        for interface in &mut expected_awg.interfaces {
+            let sent: Vec<_> = interface
+                .peers
+                .iter()
+                .map(|peer| {
+                    peer.endpoint
+                        .is_some()
+                        .then(|| interface.keepalive_of(peer))
+                })
+                .collect();
+            for (peer, keepalive) in interface.peers.iter_mut().zip(sent) {
+                peer.persistent_keepalive = keepalive;
+            }
+        }
         let endpoints = expected_awg
             .interfaces
             .iter_mut()
