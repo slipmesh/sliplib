@@ -1,5 +1,8 @@
-//! Logging and shutdown, set up alike for every daemon and tool.
+//! Logging and shutdown, set up alike for every daemon and tool, and a daemon's Prometheus
+//! endpoint.
 
+#[cfg(all(feature = "metrics", target_os = "linux"))]
+pub mod metrics;
 #[cfg(feature = "serve")]
 mod serve;
 #[cfg(feature = "serve")]

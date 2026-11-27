@@ -248,9 +248,12 @@ interfaces:
     addresses: ["fe80::a1b2:c3d4/64"]
     private_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
     obfuscation: {jc: 4, jmin: 40, jmax: 70}
+    mtu: 1420
     peers:
       - public_key: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+        name: east
         endpoint: "192.0.2.7:51820"
+        persistent_keepalive: 20-30
   - name: rw-north
     listen_port: 51900
     addresses: ["203.0.113.1/27", "3fff:99::1/64"]
@@ -260,11 +263,24 @@ interfaces:
       s2: 100
       s3: 60
       s4: 20
+      h1: 1101
+      h2: 2202
+      h3: 3303
+      h4: 4400-4499
       i1: "5-10"
+      i2: "<r 32>"
+      i3: "<r 8>"
+      i4: "<rc 12>"
+      i5: "<rd 6>"
       header_protection_key: "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="
       content_padding_addition: 128
       rekey_after_time: 120
+      rekey_timeout: 6
+      reject_after_time: 170
+      keepalive_timeout: 12
       max_handshake_attempts: 90
+      random_trailers: false
+      disable_cookies: false
     peers:
       - public_key: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
         allowed_ips: ["203.0.113.5/32"]
@@ -277,7 +293,14 @@ interfaces:
         let yaml = FULL_CONFIG;
         let cfg: AwgConfig = sliplib_yaml::from_str(yaml).unwrap();
         assert_eq!(cfg.interfaces.len(), 2);
-        assert_eq!(cfg.interfaces[0].peers[0].allowed_ips, None);
+        let dialed = &cfg.interfaces[0].peers[0];
+        assert_eq!(dialed.name.as_deref(), Some("east"));
+        assert_eq!(dialed.endpoint.as_deref(), Some("192.0.2.7:51820"));
+        assert_eq!(
+            dialed.persistent_keepalive,
+            Some(Range::new(20, 30).unwrap())
+        );
+        assert_eq!(dialed.allowed_ips, None);
         assert_eq!(
             cfg.interfaces[1].peers[0].allowed_ips,
             Some(vec![Prefix::try_from("203.0.113.5/32".to_owned()).unwrap()])
@@ -297,6 +320,20 @@ interfaces:
             Some(90.into())
         );
         validate(&cfg).unwrap();
+        let written = sliplib_yaml::to_string(&cfg).unwrap();
+        assert_eq!(sliplib_yaml::from_str::<AwgConfig>(&written).unwrap(), cfg);
+    }
+
+    #[test]
+    fn a_peer_with_nothing_optional_set_is_written_with_its_public_key_alone() {
+        let written = sliplib_yaml::to_value(waited_for(dialed(None))).unwrap();
+        let keys: Vec<&str> = written["interfaces"][0]["peers"][0]
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .map(|key| key.as_str().unwrap())
+            .collect();
+        assert_eq!(keys, ["public_key"]);
     }
 
     #[test]

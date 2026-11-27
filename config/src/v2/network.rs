@@ -170,11 +170,7 @@ pub struct Underlay {
     pub mtu: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Family {
-    Ipv4,
-    Ipv6,
-}
+pub use sliplib_net::Family;
 
 /// An address of its key's family, or a name taken as written and dialed over it; no port.
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]

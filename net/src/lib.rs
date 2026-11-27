@@ -1,12 +1,20 @@
-//! CIDR on [`ipnet`]'s types, re-exported so one version reaches every component, and the mesh
-//! MTU's floor and annotation.
+//! CIDR on [`ipnet`]'s types, re-exported so one version reaches every component, the mesh MTU's
+//! floor and annotation, and, with the `netlink` feature on Linux, routes by protocol tag.
 
 pub mod mtu;
+#[cfg(all(feature = "netlink", target_os = "linux"))]
+pub mod route;
 
 use std::fmt;
 use std::net::IpAddr;
 
 pub use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Family {
+    Ipv4,
+    Ipv6,
+}
 
 /// Names the input as written.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,5 +87,28 @@ pub fn exclude(net: IpNet, excluded: IpNet) -> Vec<IpNet> {
         }
     }
     rest.sort();
+    rest
+}
+
+/// The fewest networks covering every address in `included` and in none of `excluded`, IPv4 first,
+/// then IPv6, each in address order. Host bits count as their network.
+pub fn subtract(included: &[IpNet], excluded: &[IpNet]) -> Vec<IpNet> {
+    // Sorted and disjoint, so the cuts of one network are a run of them.
+    let excluded = IpNet::aggregate(&excluded.to_vec());
+    let mut rest = Vec::new();
+    for net in IpNet::aggregate(&included.to_vec()) {
+        let first = excluded.partition_point(|cut| cut.broadcast() < net.network());
+        let mut pieces = vec![net];
+        for &cut in excluded[first..]
+            .iter()
+            .take_while(|cut| cut.network() <= net.broadcast())
+        {
+            pieces = pieces
+                .into_iter()
+                .flat_map(|piece| exclude(piece, cut))
+                .collect();
+        }
+        rest.extend(pieces);
+    }
     rest
 }

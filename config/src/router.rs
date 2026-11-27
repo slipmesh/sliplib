@@ -458,25 +458,61 @@ bgp_peers:
     address: 3fff::2
   - name: west
     address: 3fff::3
+bfd: {min_rx_ms: 250, min_tx_ms: 350, multiplier: 4}
 ospf_interfaces: ["mesh-*", "router-lo"]
+direct_interfaces: ["lan0"]
 learn: ["203.0.113.0/27"]
 announce:
   - net: "203.0.113.192/26"
     label: "k8s-services"
+  - net: "203.0.113.128/26"
 bypass:
   refresh_interval_secs: 3600
   include:
     - kind: asn
       label: "some vendor"
-      asns: ["AS15169"]
+      asns: ["AS64511"]
+    - kind: geoip
+      country: ZZ
+    - kind: dns
+      label: "some names"
+      hostnames: ["example.com"]
   exclude:
     - kind: literal
-      prefixes: [{net: "192.0.2.0/24"}]
+      prefixes: [{net: "192.0.2.0/24", label: "documentation"}, {net: "198.51.100.0/24"}]
 "#;
         let cfg: RouterConfig = sliplib_yaml::from_str(yaml).unwrap();
         validate(&cfg).unwrap();
         assert_eq!(cfg.bgp_peers.len(), 2);
-        assert_eq!(cfg.bypass.as_ref().unwrap().refresh_interval_secs, 3600);
+        let bypass = cfg.bypass.as_ref().unwrap();
+        assert_eq!(bypass.refresh_interval_secs, 3600);
+        assert_eq!(bypass.include[1].country.as_deref(), Some("ZZ"));
+        assert_eq!(bypass.include[2].label.as_deref(), Some("some names"));
+        assert_eq!(
+            bypass.include[2].hostnames,
+            Some(vec!["example.com".to_owned()])
+        );
+        let excluded = &bypass.exclude[0].prefixes.as_ref().unwrap()[0];
+        assert_eq!(excluded.label.as_deref(), Some("documentation"));
+        let direct: Vec<&str> = cfg
+            .direct_interfaces
+            .iter()
+            .map(InterfacePattern::as_str)
+            .collect();
+        assert_eq!(direct, ["lan0"]);
+        assert_eq!(cfg.announce[0].label.as_deref(), Some("k8s-services"));
+        assert_eq!(
+            sliplib_yaml::to_value(&cfg).unwrap(),
+            sliplib_yaml::from_str::<sliplib_yaml::Value>(yaml).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_config_without_bfd_and_bypass_is_written_without_their_keys() {
+        let cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
+        let written = sliplib_yaml::to_value(&cfg).unwrap();
+        assert_eq!(written.get("bfd"), None);
+        assert_eq!(written.get("bypass"), None);
     }
 
     fn with_loopbacks(list: &str) -> Result<RouterConfig, String> {
