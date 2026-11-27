@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and follows [Semantic Versioning](https://semver.org/).
 
+## [0.27.0] - 2026-11-27
+
+### Added ✨
+
+- Write every dialed peer's keepalive, the default of its type included (#105)
+- Write every obfuscation value of an amneziawg link, unset ones as sent (#106)
+
+### Documentation 📚
+
+- A node no template reaches gets the generator's reference (#104)
+
+### Tests ✅
+
+- Take AS numbers from the documentation range (#103)
+
 ## [0.26.0] - 2026-11-26
 
 ### Breaking changes 💥
