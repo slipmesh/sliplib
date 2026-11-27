@@ -154,6 +154,28 @@ fn the_twin_gives_every_node_what_version_1_gave_it(twin: &Twin) {
                 peer.persistent_keepalive = keepalive;
             }
         }
+        // What the daemon sent for the values version 1 left unset on an obfuscated interface.
+        for interface in expected_awg
+            .interfaces
+            .iter_mut()
+            .filter(|interface| !interface.is_plain())
+        {
+            let sent = &mut interface.obfuscation;
+            sent.s3.get_or_insert(0);
+            sent.s4.get_or_insert(0);
+            for value in [
+                &mut sent.content_padding_addition,
+                &mut sent.rekey_after_time,
+                &mut sent.rekey_timeout,
+                &mut sent.reject_after_time,
+                &mut sent.keepalive_timeout,
+                &mut sent.max_handshake_attempts,
+            ] {
+                value.get_or_insert(sliplib_config::Range::from(0));
+            }
+            sent.random_trailers.get_or_insert(false);
+            sent.disable_cookies.get_or_insert(false);
+        }
         let endpoints = expected_awg
             .interfaces
             .iter_mut()
