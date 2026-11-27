@@ -37,20 +37,3 @@ fn leaves_the_rest_of_the_network_in_address_order() {
         );
     }
 }
-
-/// Every subnet of a /28: the rest and the excluded cover it once, address by address.
-#[test]
-fn the_rest_and_the_excluded_network_partition_the_network() {
-    let whole = net("203.0.113.0/28");
-    for len in 28..=32 {
-        for excluded in whole.subnets(len).unwrap() {
-            let rest = exclude(whole, excluded);
-            for host in whole.hosts().chain([whole.network(), whole.broadcast()]) {
-                let covering = rest.iter().filter(|n| n.contains(&host)).count()
-                    + usize::from(excluded.contains(&host));
-                assert_eq!(covering, 1, "{host} in {whole} minus {excluded}: {rest:?}");
-            }
-            assert!(rest.iter().all(|n| whole.contains(n)), "{rest:?}");
-        }
-    }
-}

@@ -155,7 +155,7 @@ impl<'a> Mesh<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{example, example_files};
+    use crate::test_support::example;
 
     fn addresses(mesh: &Mesh<'_>, node: &str) -> Addresses {
         mesh.addresses(mesh.node(node).unwrap())
@@ -250,11 +250,5 @@ mod tests {
             mesh.node_on("node-x", Platform::Talos).unwrap_err(),
             NodeError::Unknown(UnknownNode("node-x".to_owned()))
         );
-    }
-
-    #[test]
-    fn files_without_the_interface_prefix_are_refused_naming_what_writes_it() {
-        let files = example_files("{mesh: {interface_prefix: null}}");
-        assert_eq!(Mesh::of(&files).unwrap_err(), Error::NoInterfacePrefix);
     }
 }

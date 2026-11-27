@@ -33,6 +33,11 @@ fn mint_with_no_secret_to_create_still_writes_the_reference_value_the_file_leave
     let ran = config.run(&["mint"]);
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
     assert!(!ran.stdout.contains("minted"), "{}", ran.stdout);
+    assert!(
+        ran.stdout.contains("mesh.interface_prefix"),
+        "{}",
+        ran.stdout
+    );
     assert_eq!(config.documents()[0]["mesh"]["interface_prefix"], "mesh-");
 }
 

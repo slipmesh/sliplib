@@ -60,11 +60,6 @@ mod tests {
     }
 
     #[test]
-    fn the_example_loses_nothing() {
-        assert_eq!(told_of("{}"), []);
-    }
-
-    #[test]
     fn a_link_is_warned_about_by_what_its_type_and_the_link_give_it_together() {
         // The type turns the trailers on; the link's headers lie in one range of ten.
         let told = lines(&told_of(

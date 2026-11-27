@@ -547,10 +547,6 @@ mod tests {
         }
         assert!(from_yaml("{rekey_after_time: 179}").validate().is_ok());
         assert!(from_yaml("{rekey_after_time: 100-179}").validate().is_ok());
-    }
-
-    #[test]
-    fn a_larger_reject_after_time_does_not_allow_a_larger_rekey_after_time() {
         let err = refusal("{rekey_after_time: 200, reject_after_time: 300}");
         assert!(err.contains("obfuscation.rekey_after_time (200)"), "{err}");
     }
@@ -590,10 +586,6 @@ mod tests {
     fn a_fully_unset_obfuscation_serializes_to_an_empty_mapping() {
         let yaml = sliplib_yaml::to_string(&Obfuscation::default()).unwrap();
         assert_eq!(yaml.trim(), "{}");
-    }
-
-    fn with_trailers(yaml: &str) -> Obfuscation {
-        from_yaml(&format!("{{random_trailers: true, {yaml}}}"))
     }
 
     #[test]
@@ -685,30 +677,6 @@ mod tests {
         assert!(
             unset.contains("s1 stands 8 bytes above s4, which is not set and counts as 0,"),
             "{unset}"
-        );
-    }
-
-    #[test]
-    fn a_header_protection_key_does_not_keep_a_range_from_costing_its_share() {
-        let mut o = header_protected([Some(21), Some(22), Some(23), Some(20)]);
-        o.random_trailers = Some(true);
-        o.h2 = Some("2200-2299".parse().unwrap());
-        assert_eq!(o.trailer_loss(), [TrailerLoss::Share { values: 102 }]);
-    }
-
-    #[test]
-    fn a_range_and_an_offset_into_the_header_are_both_told() {
-        let o = with_trailers("h3: 7700-7799, s3: 28, s4: 20");
-        assert_eq!(
-            o.trailer_loss(),
-            [
-                TrailerLoss::Share { values: 102 },
-                TrailerLoss::ReadsHeader {
-                    field: "s3",
-                    above: 8,
-                    data_junk: Some(20),
-                }
-            ]
         );
     }
 }

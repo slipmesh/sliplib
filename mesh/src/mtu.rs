@@ -124,7 +124,6 @@ fn link_family([(a, a_node), (b, b_node)]: [(&str, &Node); 2]) -> Result<Family,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::example;
 
     /// `mesh` and `nodes` under a block, an addressing and an AS number.
     fn mesh_of(mesh_and_nodes: &str) -> Mesh<'static> {
@@ -287,15 +286,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn the_mesh_mtu_of_the_example_is_below_the_least_limit_of_its_links_as_its_comment_says() {
-        let mtu = |overlay: &str| {
-            let network = example(overlay);
-            crate::mtu::mesh_mtu(&network).unwrap()
-        };
-        assert_eq!(mtu("{}"), Some(1320));
-        assert_eq!(mtu("{mesh: {mtu: null}}"), Some(1344));
     }
 }

@@ -226,6 +226,12 @@ mod tests {
         ] {
             assert_eq!(name(text), Err(refusal), "{text:?}");
         }
+        // A number YAML reads keeps its sign.
+        let negative = sliplib_yaml::from_str::<Name>("-7").unwrap_err();
+        assert!(
+            negative.to_string().starts_with(&edge("-7").to_string()),
+            "{negative}"
+        );
     }
 
     #[test]
@@ -233,17 +239,7 @@ mod tests {
         assert_eq!(format!("{:?}", name("node-a").unwrap()), "\"node-a\"");
         let class = ClassName::try_from("egress".to_owned()).unwrap();
         assert_eq!(format!("{class:?}"), "\"egress\"");
-    }
-
-    #[test]
-    fn a_name_reads_as_its_text_wherever_a_message_names_it() {
-        assert_eq!(name("node-a").unwrap().to_string(), "node-a");
-        assert_eq!(
-            ClassName::try_from("egress".to_owned())
-                .unwrap()
-                .to_string(),
-            "egress"
-        );
+        assert_eq!(class.to_string(), "egress");
     }
 
     #[test]

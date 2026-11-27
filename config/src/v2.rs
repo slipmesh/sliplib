@@ -108,10 +108,10 @@ mod tests {
 
     #[test]
     fn keys_of_their_own_keep_the_order_written() {
-        let yaml = "{b: 1, 07: 2, a: 3, 7: 4}";
+        let yaml = "{b: 1, 07: 2, a: 3, 7: 4, 1.5: 5}";
         let from_text = sliplib_yaml::from_str::<Named>(yaml).unwrap();
         let from_text: Vec<&str> = from_text.0.keys().map(Name::as_str).collect();
-        assert_eq!(from_text, ["b", "07", "a", "7"]);
-        assert_eq!(names(yaml).unwrap(), ["b", "07", "a", "7"]);
+        assert_eq!(from_text, ["b", "07", "a", "7", "1.5"]);
+        assert_eq!(names(yaml).unwrap(), ["b", "07", "a", "7", "1.5"]);
     }
 }

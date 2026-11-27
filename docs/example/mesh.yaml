@@ -44,7 +44,7 @@ routing:
           priority: 1001
 mesh:
   interface_prefix: mesh-
-  # Below the least limit of the links, which is 1344 here.
+  # Below the limit of every link.
   mtu: 1320
   # What every link of type amneziawg starts from.
   amneziawg:
