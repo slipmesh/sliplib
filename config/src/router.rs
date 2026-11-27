@@ -359,6 +359,8 @@ fn validate_bypass_entry(entry: &BypassSourceEntry) -> Result<(), Invalid> {
 mod tests {
     use super::*;
 
+    type IsTheRefusal = fn(&Invalid) -> bool;
+
     fn minimal_yaml() -> &'static str {
         r#"
 node:
@@ -368,14 +370,81 @@ bgp_as: 64496
     }
 
     #[test]
-    fn validate_rejects_each_bfd_setting_of_zero_alone() {
-        let refusal = |setting: &str| {
-            let yaml = format!("{}bfd:\n  {setting}: 0\n", minimal_yaml());
-            validate(&sliplib_yaml::from_str(&yaml).unwrap()).unwrap_err()
-        };
-        assert!(matches!(refusal("min_rx_ms"), Invalid::BfdIntervalZero));
-        assert!(matches!(refusal("min_tx_ms"), Invalid::BfdIntervalZero));
-        assert!(matches!(refusal("multiplier"), Invalid::BfdMultiplierZero));
+    fn validate_rejects_what_bird_or_the_daemon_would_fail_on() {
+        fn with(edit: fn(&mut RouterConfig)) -> RouterConfig {
+            let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
+            edit(&mut cfg);
+            cfg
+        }
+        fn with_bfd(setting: &str) -> RouterConfig {
+            sliplib_yaml::from_str(&format!("{}bfd:\n  {setting}: 0\n", minimal_yaml())).unwrap()
+        }
+        fn bypass_of(refresh_interval_secs: u64, kinds: &[&str]) -> Option<BypassConfig> {
+            Some(BypassConfig {
+                refresh_interval_secs,
+                include: kinds
+                    .iter()
+                    .map(|kind| BypassSourceEntry {
+                        kind: (*kind).to_string(),
+                        label: None,
+                        asns: None,
+                        prefixes: None,
+                        country: None,
+                        hostnames: None,
+                    })
+                    .collect(),
+                exclude: vec![],
+            })
+        }
+        let cases: [(&str, RouterConfig, IsTheRefusal); 8] = [
+            ("bfd.min_rx_ms: 0", with_bfd("min_rx_ms"), |refused| {
+                matches!(refused, Invalid::BfdIntervalZero)
+            }),
+            ("bfd.min_tx_ms: 0", with_bfd("min_tx_ms"), |refused| {
+                matches!(refused, Invalid::BfdIntervalZero)
+            }),
+            ("bfd.multiplier: 0", with_bfd("multiplier"), |refused| {
+                matches!(refused, Invalid::BfdMultiplierZero)
+            }),
+            (
+                "two peers named east",
+                with(|cfg| {
+                    cfg.bgp_peers = ["3fff::2", "3fff::3"]
+                        .map(|address| BgpPeerEntry {
+                            name: "east".to_string(),
+                            address: address.parse().unwrap(),
+                        })
+                        .into();
+                }),
+                |refused| matches!(refused, Invalid::DuplicatePeer(name) if name == "east"),
+            ),
+            (
+                "a bypass source of kind bogus",
+                with(|cfg| {
+                    cfg.bypass = bypass_of(default_bypass_refresh_interval_secs(), &["bogus"]);
+                }),
+                |refused| matches!(refused, Invalid::UnknownSourceKind(kind) if kind == "bogus"),
+            ),
+            ("bgp_as: 0", with(|cfg| cfg.bgp_as = 0), |refused| {
+                matches!(refused, Invalid::BgpAsZero)
+            }),
+            (
+                "bypass.refresh_interval_secs: 0",
+                with(|cfg| cfg.bypass = bypass_of(0, &[])),
+                |refused| matches!(refused, Invalid::BypassRefreshZero),
+            ),
+            (
+                "a literal bypass source without prefixes",
+                with(|cfg| {
+                    cfg.bypass = bypass_of(default_bypass_refresh_interval_secs(), &["literal"]);
+                }),
+                |refused| matches!(refused, Invalid::LiteralWithoutPrefixes),
+            ),
+        ];
+        for (case, cfg, is_the_refusal) in cases {
+            let refused = validate(&cfg).expect_err(case);
+            assert!(is_the_refusal(&refused), "{case}: {refused:?}");
+        }
     }
 
     #[test]
@@ -410,22 +479,6 @@ bypass:
         assert_eq!(cfg.bypass.as_ref().unwrap().refresh_interval_secs, 3600);
     }
 
-    #[test]
-    fn rejects_duplicate_peer_names() {
-        let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.bgp_peers = vec![
-            BgpPeerEntry {
-                name: "east".to_string(),
-                address: "3fff::2".parse().unwrap(),
-            },
-            BgpPeerEntry {
-                name: "east".to_string(),
-                address: "3fff::3".parse().unwrap(),
-            },
-        ];
-        assert!(validate(&cfg).is_err());
-    }
-
     fn with_loopbacks(list: &str) -> Result<RouterConfig, String> {
         sliplib_yaml::from_str(&format!(
             "node:\n  loopback_addresses: {list}\nbgp_as: 64496\n"
@@ -434,34 +487,33 @@ bypass:
     }
 
     #[test]
-    fn the_loopbacks_read_as_one_of_each_family_in_either_order() {
-        for list in [
-            "[198.51.100.1/32, 3fff::1/128]",
-            "[3fff::1/128, 198.51.100.1/32]",
+    fn the_loopbacks_read_as_one_of_each_family_in_either_order_a_bare_address_as_the_hosts() {
+        for (list, ipv4, ipv6) in [
+            (
+                "[198.51.100.1/32, 3fff::1/128]",
+                "198.51.100.1/32",
+                "3fff::1/128",
+            ),
+            (
+                "[3fff::1/128, 198.51.100.1/32]",
+                "198.51.100.1/32",
+                "3fff::1/128",
+            ),
+            (
+                "[198.51.100.1, 3fff::1/64]",
+                "198.51.100.1/32",
+                "3fff::1/64",
+            ),
+            (
+                "[198.51.100.1/25, 3fff::1]",
+                "198.51.100.1/25",
+                "3fff::1/128",
+            ),
         ] {
             let loopbacks = with_loopbacks(list).unwrap().node.loopback_addresses;
-            assert_eq!(loopbacks.ipv4.0.to_string(), "198.51.100.1/32", "{list}");
-            assert_eq!(loopbacks.ipv6.0.to_string(), "3fff::1/128", "{list}");
+            assert_eq!(loopbacks.ipv4.0.to_string(), ipv4, "{list}");
+            assert_eq!(loopbacks.ipv6.0.to_string(), ipv6, "{list}");
         }
-    }
-
-    #[test]
-    fn a_loopback_without_a_prefix_length_is_the_hosts_and_one_with_it_keeps_it() {
-        let loopbacks = with_loopbacks("[198.51.100.1, 3fff::1/64]")
-            .unwrap()
-            .node
-            .loopback_addresses;
-        assert_eq!(loopbacks.ipv4.0.to_string(), "198.51.100.1/32");
-        assert_eq!(loopbacks.ipv6.0.to_string(), "3fff::1/64");
-        let ipv6 = with_loopbacks("[198.51.100.1/25, 3fff::1]").unwrap();
-        assert_eq!(
-            ipv6.node.loopback_addresses.ipv6.0.to_string(),
-            "3fff::1/128"
-        );
-        assert_eq!(
-            ipv6.node.loopback_addresses.ipv4.0.to_string(),
-            "198.51.100.1/25"
-        );
     }
 
     #[test]
@@ -507,60 +559,6 @@ bypass:
                 .to_string();
             assert!(err.starts_with(&format!("{key}: ")), "{yaml}: {err}");
         }
-    }
-
-    #[test]
-    fn rejects_unknown_bypass_kind() {
-        let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.bypass = Some(BypassConfig {
-            refresh_interval_secs: default_bypass_refresh_interval_secs(),
-            include: vec![BypassSourceEntry {
-                kind: "bogus".to_string(),
-                label: None,
-                asns: None,
-                prefixes: None,
-                country: None,
-                hostnames: None,
-            }],
-            exclude: vec![],
-        });
-        assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
-    fn rejects_as0() {
-        let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.bgp_as = 0;
-        assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
-    fn rejects_zero_bypass_refresh_interval() {
-        let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.bypass = Some(BypassConfig {
-            refresh_interval_secs: 0,
-            include: vec![],
-            exclude: vec![],
-        });
-        assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
-    fn rejects_literal_bypass_without_prefixes() {
-        let mut cfg: RouterConfig = sliplib_yaml::from_str(minimal_yaml()).unwrap();
-        cfg.bypass = Some(BypassConfig {
-            refresh_interval_secs: default_bypass_refresh_interval_secs(),
-            include: vec![BypassSourceEntry {
-                kind: "literal".to_string(),
-                label: None,
-                asns: None,
-                prefixes: None,
-                country: None,
-                hostnames: None,
-            }],
-            exclude: vec![],
-        });
-        assert!(validate(&cfg).is_err());
     }
 
     fn pattern(text: &str) -> Result<InterfacePattern, InterfacePatternError> {
@@ -630,16 +628,10 @@ bypass:
     }
 
     #[test]
-    fn bfd_settings_left_out_take_the_defaults() {
-        let yaml = format!("{}bfd: {{}}\n", minimal_yaml());
+    fn bfd_settings_and_a_bypass_interval_left_out_take_the_defaults() {
+        let yaml = format!("{}bfd: {{}}\nbypass:\n  include: []\n", minimal_yaml());
         let cfg: RouterConfig = sliplib_yaml::from_str(&yaml).unwrap();
         assert_eq!(cfg.bfd, Some(BfdSettings::default()));
-    }
-
-    #[test]
-    fn a_bypass_without_an_interval_is_resolved_again_daily() {
-        let yaml = format!("{}bypass:\n  include: []\n", minimal_yaml());
-        let cfg: RouterConfig = sliplib_yaml::from_str(&yaml).unwrap();
         assert_eq!(cfg.bypass.unwrap().refresh_interval_secs, 86_400);
     }
 }

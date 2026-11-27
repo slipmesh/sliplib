@@ -10,46 +10,32 @@ fn net(n: &str) -> IpNet {
 
 #[test]
 fn leaves_the_rest_of_the_network_in_address_order() {
-    assert_eq!(
-        exclude(net("203.0.113.0/25"), net("203.0.113.64/26")),
-        nets(&["203.0.113.0/26"])
-    );
-    assert_eq!(
-        exclude(net("203.0.113.0/25"), net("203.0.113.32/27")),
-        nets(&["203.0.113.0/27", "203.0.113.64/26"])
-    );
-    assert_eq!(
-        exclude(net("3fff::/62"), net("3fff:0:0:1::/64")),
-        nets(&["3fff::/64", "3fff:0:0:2::/63"])
-    );
-}
-
-#[test]
-fn a_network_outside_changes_nothing_and_one_covering_leaves_nothing() {
-    assert_eq!(
-        exclude(net("203.0.113.0/25"), net("203.0.113.128/25")),
-        nets(&["203.0.113.0/25"])
-    );
-    assert_eq!(
-        exclude(net("203.0.113.0/25"), net("2001:db8::/32")),
-        nets(&["203.0.113.0/25"])
-    );
-    assert_eq!(
-        exclude(net("203.0.113.0/25"), net("203.0.113.0/25")),
-        nets(&[])
-    );
-    assert_eq!(
-        exclude(net("203.0.113.0/25"), net("203.0.113.0/24")),
-        nets(&[])
-    );
-}
-
-#[test]
-fn host_bits_count_as_the_network_they_sit_in() {
-    assert_eq!(
-        exclude(net("203.0.113.7/25"), net("203.0.113.100/26")),
-        nets(&["203.0.113.0/26"])
-    );
+    for (network, excluded, rest) in [
+        ("203.0.113.0/25", "203.0.113.64/26", &["203.0.113.0/26"][..]),
+        (
+            "203.0.113.0/25",
+            "203.0.113.32/27",
+            &["203.0.113.0/27", "203.0.113.64/26"],
+        ),
+        (
+            "3fff::/62",
+            "3fff:0:0:1::/64",
+            &["3fff::/64", "3fff:0:0:2::/63"],
+        ),
+        // One outside changes nothing, one covering leaves nothing.
+        ("203.0.113.0/25", "203.0.113.128/25", &["203.0.113.0/25"]),
+        ("203.0.113.0/25", "2001:db8::/32", &["203.0.113.0/25"]),
+        ("203.0.113.0/25", "203.0.113.0/25", &[]),
+        ("203.0.113.0/25", "203.0.113.0/24", &[]),
+        // Host bits count as the network they sit in.
+        ("203.0.113.7/25", "203.0.113.100/26", &["203.0.113.0/26"]),
+    ] {
+        assert_eq!(
+            exclude(net(network), net(excluded)),
+            nets(rest),
+            "{network} without {excluded}"
+        );
+    }
 }
 
 /// Every subnet of a /28: the rest and the excluded cover it once, address by address.

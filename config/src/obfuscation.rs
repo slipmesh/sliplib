@@ -365,39 +365,67 @@ mod tests {
     }
 
     #[test]
-    fn rejects_header_protection_key_with_a_junk_size_below_the_nonce() {
-        let err = header_protected([Some(12), Some(12), Some(12), Some(11)])
-            .validate()
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("s4"), "{err}");
-        assert!(!err.contains("s1"), "{err}");
-    }
-
-    #[test]
-    fn rejects_header_protection_key_with_junk_sizes_left_unset() {
-        let err = header_protected([None; 4])
-            .validate()
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("s1, s2, s3, s4"), "{err}");
-    }
-
-    #[test]
-    fn accepts_header_protection_key_with_every_junk_size_holding_the_nonce() {
-        assert!(header_protected([Some(12); 4]).validate().is_ok());
+    fn a_header_protection_key_needs_every_junk_size_to_hold_its_nonce() {
+        let no_room = |too_small: &[&'static str]| {
+            Err(ObfuscationError::NoRoomForNonce {
+                too_small: too_small.to_vec(),
+            })
+        };
+        for (junk_sizes, expected, told) in [
+            (
+                [Some(12), Some(12), Some(12), Some(11)],
+                no_room(&["s4"]),
+                "needs s4 to be",
+            ),
+            (
+                [None; 4],
+                no_room(&["s1", "s2", "s3", "s4"]),
+                "needs s1, s2, s3, s4 to be",
+            ),
+            ([Some(12); 4], Ok(()), ""),
+        ] {
+            let checked = header_protected(junk_sizes).validate();
+            assert_eq!(checked, expected, "{junk_sizes:?}");
+            let message = checked.map_or_else(|refusal| refusal.to_string(), |()| String::new());
+            assert!(message.contains(told), "{junk_sizes:?}: {message}");
+        }
     }
 
     // An unset magic header is sent as its WireGuard message type, 1..4.
     #[test]
-    fn rejects_a_magic_header_equal_to_an_unset_ones_default() {
-        let o = Obfuscation {
-            h1: Some(2.into()),
-            ..Obfuscation::default()
-        };
-        let err = o.validate().unwrap_err().to_string();
-        assert!(err.contains("obfuscation.h1 (2)"), "{err}");
-        assert!(err.contains("obfuscation.h2 (2)"), "{err}");
+    fn rejects_magic_headers_that_share_a_value_an_unset_one_holding_its_default() {
+        let overlap = |first, second| Err(ObfuscationError::HeadersOverlap { first, second });
+        let range = |lo, hi| Range::new(lo, hi).unwrap();
+        for (yaml, expected, told) in [
+            (
+                "{h1: 2}",
+                overlap((1, Range::from(2)), (2, Range::from(2))),
+                &["obfuscation.h1 (2)", "obfuscation.h2 (2)"][..],
+            ),
+            (
+                "{h4: 3-9}",
+                overlap((3, Range::from(3)), (4, range(3, 9))),
+                &["obfuscation.h3 (3)", "obfuscation.h4 (3-9)"],
+            ),
+            (
+                "{h1: 5-9, h2: 10, h3: 9-12, h4: 13}",
+                overlap((1, range(5, 9)), (3, range(9, 12))),
+                &["obfuscation.h1 (5-9)", "obfuscation.h3 (9-12)"],
+            ),
+            (
+                "{h2: 7, h4: 7}",
+                overlap((2, Range::from(7)), (4, Range::from(7))),
+                &["obfuscation.h2 (7)", "obfuscation.h4 (7)"],
+            ),
+            ("{h1: 5-9, h2: 10, h3: 11-12, h4: 13}", Ok(()), &[]),
+        ] {
+            let checked = from_yaml(yaml).validate();
+            assert_eq!(checked, expected, "{yaml}");
+            let message = checked.map_or_else(|refusal| refusal.to_string(), |()| String::new());
+            for text in told {
+                assert!(message.contains(text), "{yaml}: {message}");
+            }
+        }
     }
 
     fn from_yaml(yaml: &str) -> Obfuscation {
@@ -435,68 +463,74 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rejects_magic_header_ranges_that_share_a_value_and_names_both() {
-        let err = refusal("{h1: 5-9, h2: 10, h3: 9-12, h4: 13}");
-        assert!(err.contains("obfuscation.h1 (5-9)"), "{err}");
-        assert!(err.contains("obfuscation.h3 (9-12)"), "{err}");
-        let pair = "{h2: 7, h4: 7}";
-        let err = from_yaml(pair).validate().expect_err(pair).to_string();
-        assert!(err.contains("obfuscation.h2 (7)"), "{err}");
-        assert!(err.contains("obfuscation.h4 (7)"), "{err}");
-        assert!(
-            from_yaml("{h1: 5-9, h2: 10, h3: 11-12, h4: 13}")
-                .validate()
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn rejects_a_magic_header_range_that_covers_an_unset_ones_default() {
-        let err = refusal("{h4: 3-9}");
-        assert!(err.contains("obfuscation.h3 (3)"), "{err}");
-        assert!(err.contains("obfuscation.h4 (3-9)"), "{err}");
-    }
-
     // The module subtracts the low ends of the other two from reject_after_time to decide when a
-    // key is due for renewal; a result of zero or less renews it at once, every time.
+    // key is due for renewal; a result of zero or less renews it at once, every time. 180, 10 and 5
+    // are what it uses for one that is unset or zero.
     #[test]
     fn rejects_a_reject_after_time_not_above_keepalive_timeout_plus_rekey_timeout() {
-        let err =
-            refusal("{reject_after_time: 30-90, keepalive_timeout: 20-25, rekey_timeout: 10-15}");
-        assert!(err.contains("reject_after_time (30)"), "{err}");
-        assert!(err.contains("keepalive_timeout (20)"), "{err}");
-        assert!(err.contains("rekey_timeout (10)"), "{err}");
-        let just_above =
-            "{reject_after_time: 31-90, keepalive_timeout: 20-25, rekey_timeout: 10-15}";
-        assert!(from_yaml(just_above).validate().is_ok());
-    }
-
-    // 180, 10 and 5 are what the module uses for one that is unset or zero.
-    #[test]
-    fn an_unset_or_zero_timing_value_counts_as_the_modules_own_in_that_check() {
-        let names = |yaml: &str, value: &str| {
-            let err = refusal(yaml);
-            assert!(err.contains(value), "{yaml}: {err}");
+        let too_early = |reject, keepalive, rekey| {
+            Err(ObfuscationError::RejectTooEarly {
+                reject,
+                keepalive,
+                rekey,
+            })
         };
-        names("{reject_after_time: 15}", "reject_after_time (15)");
-        assert!(from_yaml("{reject_after_time: 16}").validate().is_ok());
-        names("{keepalive_timeout: 175}", "keepalive_timeout (175)");
-        assert!(from_yaml("{keepalive_timeout: 174}").validate().is_ok());
-        names("{rekey_timeout: 170}", "rekey_timeout (170)");
-        assert!(from_yaml("{rekey_timeout: 169}").validate().is_ok());
-        names(
-            "{reject_after_time: 0, keepalive_timeout: 175}",
-            "reject_after_time (180)",
-        );
-        names(
-            "{reject_after_time: 16, keepalive_timeout: 0, rekey_timeout: 7}",
-            "keepalive_timeout (10)",
-        );
-        names(
-            "{reject_after_time: 16, keepalive_timeout: 12, rekey_timeout: 0}",
-            "rekey_timeout (5)",
-        );
+        for (yaml, expected, told) in [
+            (
+                "{reject_after_time: 30-90, keepalive_timeout: 20-25, rekey_timeout: 10-15}",
+                too_early(30, 20, 10),
+                &[
+                    "reject_after_time (30)",
+                    "keepalive_timeout (20)",
+                    "rekey_timeout (10)",
+                ][..],
+            ),
+            (
+                "{reject_after_time: 31-90, keepalive_timeout: 20-25, rekey_timeout: 10-15}",
+                Ok(()),
+                &[],
+            ),
+            (
+                "{reject_after_time: 15}",
+                too_early(15, 10, 5),
+                &["reject_after_time (15)"],
+            ),
+            ("{reject_after_time: 16}", Ok(()), &[]),
+            (
+                "{keepalive_timeout: 175}",
+                too_early(180, 175, 5),
+                &["keepalive_timeout (175)"],
+            ),
+            ("{keepalive_timeout: 174}", Ok(()), &[]),
+            (
+                "{rekey_timeout: 170}",
+                too_early(180, 10, 170),
+                &["rekey_timeout (170)"],
+            ),
+            ("{rekey_timeout: 169}", Ok(()), &[]),
+            (
+                "{reject_after_time: 0, keepalive_timeout: 175}",
+                too_early(180, 175, 5),
+                &["reject_after_time (180)"],
+            ),
+            (
+                "{reject_after_time: 16, keepalive_timeout: 0, rekey_timeout: 7}",
+                too_early(16, 10, 7),
+                &["keepalive_timeout (10)"],
+            ),
+            (
+                "{reject_after_time: 16, keepalive_timeout: 12, rekey_timeout: 0}",
+                too_early(16, 12, 5),
+                &["rekey_timeout (5)"],
+            ),
+        ] {
+            let checked = from_yaml(yaml).validate();
+            assert_eq!(checked, expected, "{yaml}");
+            let message = checked.map_or_else(|refusal| refusal.to_string(), |()| String::new());
+            for text in told {
+                assert!(message.contains(text), "{yaml}: {message}");
+            }
+        }
     }
 
     // The module stops using a key 180 seconds after its handshake, whatever reject_after_time
@@ -522,36 +556,34 @@ mod tests {
     }
 
     #[test]
-    fn rejects_jmin_above_jmax() {
-        let o = Obfuscation {
-            jc: Some(4),
-            jmin: Some(90),
-            jmax: Some(80),
-            ..Obfuscation::default()
-        };
-        let err = o.validate().unwrap_err().to_string();
-        assert!(err.contains("jmin") && err.contains("jmax"), "{err}");
-    }
-
-    // The module sends junk packets only when jc and jmax are both non-zero.
-    #[test]
-    fn accepts_jmin_alone_when_no_junk_is_sent() {
-        let o = Obfuscation {
-            jmin: Some(40),
-            ..Obfuscation::default()
-        };
-        assert!(o.validate().is_ok());
-    }
-
-    #[test]
-    fn accepts_jmin_equal_to_jmax() {
-        let o = Obfuscation {
-            jc: Some(4),
-            jmin: Some(80),
-            jmax: Some(80),
-            ..Obfuscation::default()
-        };
-        assert!(o.validate().is_ok());
+    fn rejects_jmin_above_jmax_where_junk_is_sent() {
+        for (jc, jmin, jmax, expected) in [
+            (
+                Some(4),
+                Some(90),
+                Some(80),
+                Err(ObfuscationError::JunkSizesReversed { jmin: 90, jmax: 80 }),
+            ),
+            // The module sends junk packets only when jc and jmax are both non-zero.
+            (None, Some(40), None, Ok(())),
+            (Some(4), Some(80), Some(80), Ok(())),
+        ] {
+            let o = Obfuscation {
+                jc,
+                jmin,
+                jmax,
+                ..Obfuscation::default()
+            };
+            let checked = o.validate();
+            assert_eq!(checked, expected, "{jc:?} {jmin:?} {jmax:?}");
+            if let Err(refusal) = checked {
+                let message = refusal.to_string();
+                assert!(
+                    message.contains("jmin") && message.contains("jmax"),
+                    "{message}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -565,27 +597,57 @@ mod tests {
     }
 
     #[test]
-    fn a_tunnel_without_random_trailers_loses_nothing_whatever_else_it_sets() {
-        for switch in ["", "random_trailers: false, "] {
-            let o = from_yaml(&format!("{{{switch}h1: 10-19, s1: 21, s4: 20}}"));
-            assert_eq!(o.trailer_loss(), [], "{switch:?}");
+    fn random_trailers_cost_a_range_in_h1_to_h3_and_an_offset_1_to_15_above_s4() {
+        let (unset, off, on) = ("", "random_trailers: false, ", "random_trailers: true, ");
+        let above = |field: &'static str, above: u16| TrailerLoss::ReadsHeader {
+            field,
+            above,
+            data_junk: Some(20),
+        };
+        let protected = format!(
+            "header_protection_key: {}=, s1: 21, s2: 22, s3: 23, s4: 20",
+            "A".repeat(43)
+        );
+        for (trailers, rest, loss) in [
+            (unset, "h1: 10-19, s1: 21, s4: 20", vec![]),
+            (off, "h1: 10-19, s1: 21, s4: 20", vec![]),
+            // 10 values, one value, and the one an unset header counts as.
+            (
+                on,
+                "h1: 10-19, h2: 2202",
+                vec![TrailerLoss::Share { values: 12 }],
+            ),
+            (
+                on,
+                "h1: 1101, h2: 2000-2099, h3: 3000-3999",
+                vec![TrailerLoss::Share { values: 1101 }],
+            ),
+            (on, "h1: 1101, h2: 2202, h3: 3303, h4: 5505-5599", vec![]),
+            (on, "jc: 4", vec![]),
+            (on, "s1: 20, s4: 20", vec![]),
+            (on, "s1: 21, s4: 20", vec![above("s1", 1)]),
+            (on, "s2: 35, s4: 20", vec![above("s2", 15)]),
+            (on, "s3: 36, s4: 20", vec![]),
+            (
+                on,
+                "s3: 8",
+                vec![TrailerLoss::ReadsHeader {
+                    field: "s3",
+                    above: 8,
+                    data_junk: None,
+                }],
+            ),
+            (on, "s1: 19, s4: 20", vec![]),
+            (
+                on,
+                "s1: 24, s2: 28, s3: 60, s4: 20",
+                vec![above("s1", 4), above("s2", 8)],
+            ),
+            (on, protected.as_str(), vec![]),
+        ] {
+            let o = from_yaml(&format!("{{{trailers}{rest}}}"));
+            assert_eq!(o.trailer_loss(), loss, "{trailers}{rest}");
         }
-    }
-
-    #[test]
-    fn a_range_in_h1_to_h3_costs_the_values_of_the_three_together() {
-        // 10 values, one value, and the one an unset header counts as.
-        let o = with_trailers("h1: 10-19, h2: 2202");
-        assert_eq!(o.trailer_loss(), [TrailerLoss::Share { values: 12 }]);
-        let o = with_trailers("h1: 1101, h2: 2000-2099, h3: 3000-3999");
-        assert_eq!(o.trailer_loss(), [TrailerLoss::Share { values: 1101 }]);
-    }
-
-    #[test]
-    fn single_headers_and_a_range_in_h4_cost_nothing_worth_a_warning() {
-        let o = with_trailers("h1: 1101, h2: 2202, h3: 3303, h4: 5505-5599");
-        assert_eq!(o.trailer_loss(), []);
-        assert_eq!(with_trailers("jc: 4").trailer_loss(), []);
     }
 
     #[test]
@@ -632,43 +694,6 @@ mod tests {
         o.random_trailers = Some(true);
         o.h2 = Some("2200-2299".parse().unwrap());
         assert_eq!(o.trailer_loss(), [TrailerLoss::Share { values: 102 }]);
-    }
-
-    #[test]
-    fn an_offset_1_to_15_above_s4_reads_the_header_of_a_data_packet() {
-        let above = |field: &'static str, above: u16| TrailerLoss::ReadsHeader {
-            field,
-            above,
-            data_junk: Some(20),
-        };
-        for (yaml, loss) in [
-            ("s1: 20, s4: 20", vec![]),
-            ("s1: 21, s4: 20", vec![above("s1", 1)]),
-            ("s2: 35, s4: 20", vec![above("s2", 15)]),
-            ("s3: 36, s4: 20", vec![]),
-            (
-                "s3: 8",
-                vec![TrailerLoss::ReadsHeader {
-                    field: "s3",
-                    above: 8,
-                    data_junk: None,
-                }],
-            ),
-            ("s1: 19, s4: 20", vec![]),
-            (
-                "s1: 24, s2: 28, s3: 60, s4: 20",
-                vec![above("s1", 4), above("s2", 8)],
-            ),
-        ] {
-            assert_eq!(with_trailers(yaml).trailer_loss(), loss, "{yaml}");
-        }
-    }
-
-    #[test]
-    fn a_header_protection_key_keeps_every_offset_from_reading_the_header() {
-        let mut o = header_protected([Some(21), Some(22), Some(23), Some(20)]);
-        o.random_trailers = Some(true);
-        assert_eq!(o.trailer_loss(), []);
     }
 
     #[test]

@@ -14,40 +14,39 @@ fn keys(value: &Value) -> Vec<&str> {
 }
 
 #[test]
-fn mappings_merge_recursively() {
-    let merged = merge(
-        yaml("extraArgs: {rotate: 'true', level: '2'}"),
-        &yaml("extraArgs: {level: '4'}"),
-    );
-    assert_eq!(merged, yaml("extraArgs: {rotate: 'true', level: '4'}"));
+fn mappings_merge_key_by_key_and_anything_else_is_replaced() {
+    for (base, overlay, merged) in [
+        (
+            "extraArgs: {rotate: 'true', level: '2'}",
+            "extraArgs: {level: '4'}",
+            "extraArgs: {rotate: 'true', level: '4'}",
+        ),
+        // RFC 7396: a sequence is replaced, not concatenated.
+        ("list: [x, y]", "list: [z]", "list: [z]"),
+        ("a: 1", "a: {b: 2, c: null}", "a: {b: 2}"),
+    ] {
+        assert_eq!(
+            merge(yaml(base), &yaml(overlay)),
+            yaml(merged),
+            "{overlay} over {base}"
+        );
+    }
 }
 
+// By the keys: `Mapping` equality ignores their order.
 #[test]
-fn the_base_key_order_is_kept_and_new_keys_are_appended() {
-    let merged = merge(yaml("a: 1\nb: 2\nc: 3"), &yaml("new: 0\nb: 20"));
-    assert_eq!(keys(&merged), ["a", "b", "c", "new"]);
-}
-
-#[test]
-fn a_sequence_is_replaced_not_concatenated() {
-    assert_eq!(
-        merge(yaml("list: [x, y]"), &yaml("list: [z]")),
-        yaml("list: [z]")
-    );
-}
-
-#[test]
-fn an_explicit_null_deletes_the_key_and_keeps_the_rest_in_order() {
-    let merged = merge(yaml("a: 1\nb: 2\nc: 3\nd: 4"), &yaml("a: null"));
-    assert_eq!(keys(&merged), ["b", "c", "d"]);
-}
-
-#[test]
-fn a_mapping_over_a_scalar_replaces_it_without_its_nulls() {
-    assert_eq!(
-        merge(yaml("a: 1"), &yaml("a: {b: 2, c: null}")),
-        yaml("a: {b: 2}")
-    );
+fn the_base_key_order_is_kept_with_new_keys_appended_and_a_null_taking_its_key_out() {
+    for (base, overlay, order) in [
+        (
+            "a: 1\nb: 2\nc: 3",
+            "new: 0\nb: 20",
+            &["a", "b", "c", "new"][..],
+        ),
+        ("a: 1\nb: 2\nc: 3\nd: 4", "a: null", &["b", "c", "d"]),
+    ] {
+        let merged = merge(yaml(base), &yaml(overlay));
+        assert_eq!(keys(&merged), order, "{overlay:?} over {base:?}");
+    }
 }
 
 #[test]

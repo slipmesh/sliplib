@@ -17,4 +17,7 @@ exclude_re = [
     "replace \\| with \\^ in ipv[46]_in",
     # Tentative and Dadfailed are two bits of their own, so `|` and `^` agree.
     "replace \\| with \\^ in source_address",
+    # A cut wholly below a network leaves it whole: starting the run of cuts earlier costs time
+    # alone.
+    "replace < with == in subtract",
 ]

@@ -351,6 +351,10 @@ mod tests {
         check(&with(overlay).unwrap()).unwrap_err()
     }
 
+    fn checked(overlay: &str) -> Result<(), Invalid> {
+        check(&with(overlay).unwrap())
+    }
+
     fn name(text: &str) -> Name {
         Name::try_from(text.to_owned()).unwrap()
     }
@@ -363,9 +367,47 @@ mod tests {
     const NODE: &str = "{platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}";
 
     #[test]
-    fn a_network_without_nodes_is_refused() {
-        let refusal = refusal("{nodes: {node-a: null, node-b: null, node-c: null, router1: null}}");
-        assert_eq!(refusal, Invalid::NoNodes);
+    fn a_network_whose_nodes_break_a_rule_is_refused_naming_it() {
+        let underlay = |entries| Invalid::Underlay {
+            node: name("node-b"),
+            entries,
+        };
+        for (overlay, refused) in [
+            (
+                "{nodes: {node-a: null, node-b: null, node-c: null, router1: null}}".to_owned(),
+                Invalid::NoNodes,
+            ),
+            (
+                format!("{{nodes: {{all: {NODE}}}}}"),
+                Invalid::ReservedName(name("all")),
+            ),
+            (
+                format!("{{nodes: {{none: {NODE}}}}}"),
+                Invalid::ReservedName(name("none")),
+            ),
+            (
+                "{nodes: {node-b: {underlay: {lan: {}}}}}".to_owned(),
+                underlay(2),
+            ),
+            (
+                "{nodes: {node-b: {underlay: {wan: null}}}}".to_owned(),
+                underlay(0),
+            ),
+            (
+                "{nodes: {node-c: {node_id: 0.0.0.1}}}".to_owned(),
+                Invalid::NodeIdTwice {
+                    id: Ipv4Addr::new(0, 0, 0, 1),
+                    first: name("node-a"),
+                    second: name("node-c"),
+                },
+            ),
+            (
+                "{nodes: {node-b: {node_id: 0.0.0.0}}}".to_owned(),
+                Invalid::NodeIdZero(name("node-b")),
+            ),
+        ] {
+            assert_eq!(refusal(&overlay), refused, "{overlay}");
+        }
     }
 
     #[test]
@@ -387,54 +429,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_node_named_by_a_reserved_word_is_refused() {
-        for word in ["all", "none"] {
-            assert_eq!(
-                refusal(&format!("{{nodes: {{{word}: {NODE}}}}}")),
-                Invalid::ReservedName(name(word))
-            );
-        }
-    }
-
-    #[test]
-    fn a_node_has_exactly_one_underlay_entry() {
-        assert_eq!(
-            refusal("{nodes: {node-b: {underlay: {lan: {}}}}}"),
-            Invalid::Underlay {
-                node: name("node-b"),
-                entries: 2
-            }
-        );
-        assert_eq!(
-            refusal("{nodes: {node-b: {underlay: {wan: null}}}}"),
-            Invalid::Underlay {
-                node: name("node-b"),
-                entries: 0
-            }
-        );
-    }
-
-    #[test]
-    fn two_nodes_of_one_node_id_are_refused_naming_both() {
-        assert_eq!(
-            refusal("{nodes: {node-c: {node_id: 0.0.0.1}}}"),
-            Invalid::NodeIdTwice {
-                id: Ipv4Addr::new(0, 0, 0, 1),
-                first: name("node-a"),
-                second: name("node-c"),
-            }
-        );
-    }
-
-    #[test]
-    fn a_node_id_of_zeros_is_refused_naming_the_node() {
-        assert_eq!(
-            refusal("{nodes: {node-b: {node_id: 0.0.0.0}}}"),
-            Invalid::NodeIdZero(name("node-b"))
-        );
-    }
-
     fn too_wide(id: [u8; 4], key: &'static str, host_bits: u8) -> Invalid {
         Invalid::NodeIdTooWide {
             node: name("node-b"),
@@ -445,161 +439,124 @@ mod tests {
     }
 
     #[test]
-    fn a_node_id_one_bit_too_wide_for_a_network_it_is_added_to_is_refused_naming_it() {
+    fn a_node_id_is_taken_at_the_limit_of_its_networks_and_refused_one_bit_wider() {
         // The example's loopbacks are a /25 and a /64, its links' IPv4 a /25.
         let cases = [
             (
                 "{nodes: {node-b: {node_id: 0.0.0.128}}}",
-                too_wide([0, 0, 0, 128], "addressing.loopback.ipv4", 7),
+                Err(too_wide([0, 0, 0, 128], "addressing.loopback.ipv4", 7)),
             ),
             (
                 "{addressing: {loopback: {ipv4: 198.18.0.0/15, ipv6: '3fff:0:0:1::/120'}, tunnel: \
                  {ipv4: null}}, nodes: {node-b: {node_id: 0.0.1.0}}}",
-                too_wide([0, 0, 1, 0], "addressing.loopback.ipv6", 8),
+                Err(too_wide([0, 0, 1, 0], "addressing.loopback.ipv6", 8)),
             ),
             (
                 "{addressing: {tunnel: {ipv4: 198.51.100.192/26}}, nodes: {node-b: {node_id: \
                  0.0.0.64}}}",
-                too_wide([0, 0, 0, 64], "addressing.tunnel.ipv4", 6),
+                Err(too_wide([0, 0, 0, 64], "addressing.tunnel.ipv4", 6)),
             ),
             (
                 "{addressing: {tunnel: {ipv4: null, link_local: 'fe80::/122'}}, nodes: {node-b: \
                  {node_id: 0.0.0.64}}}",
-                too_wide([0, 0, 0, 64], "addressing.tunnel.link_local", 6),
+                Err(too_wide([0, 0, 0, 64], "addressing.tunnel.link_local", 6)),
+            ),
+            (
+                "{addressing: {loopback: {ipv4: 198.51.100.0/24, ipv6: '3fff:0:0:1::/120'}, tunnel: \
+                 {ipv4: null}}, nodes: {node-b: {node_id: 0.0.0.255}}}",
+                Ok(()),
             ),
         ];
         for (overlay, expected) in cases {
-            assert_eq!(refusal(overlay), expected, "{overlay}");
+            assert_eq!(checked(overlay), expected, "{overlay}");
         }
     }
 
     #[test]
-    fn a_node_id_at_the_limit_of_its_networks_is_taken() {
-        let network = with(
-            "{addressing: {loopback: {ipv4: 198.51.100.0/24, ipv6: '3fff:0:0:1::/120'}, tunnel: \
-             {ipv4: null}}, nodes: {node-b: {node_id: 0.0.0.255}}}",
-        )
-        .unwrap();
-        assert_eq!(check(&network), Ok(()));
+    fn a_link_is_refused_for_its_ends_its_type_its_pair_or_its_port() {
+        for (overlay, expected) in [
+            (
+                "{mesh: {links: {a-x: {type: wireguard, ends: {node-a: {}, node-x: {}}, wireguard: {port: 1}}}}}",
+                Err(Invalid::UnknownEnd {
+                    link: name("a-x"),
+                    end: name("node-x"),
+                }),
+            ),
+            (
+                "{mesh: {links: {b-r1: {type: amneziawg, ends: {node-b: {}, router1: {}}, amneziawg: {port: 1}}}}}",
+                Err(Invalid::NotServed {
+                    link: name("b-r1"),
+                    kind: "amneziawg",
+                    node: name("router1"),
+                    platform: Platform::Routeros,
+                }),
+            ),
+            // Whatever the order of its ends.
+            (
+                "{mesh: {links: {b-a: {type: wireguard, ends: {node-b: {}, node-a: {}}, wireguard: {port: 1}}}}}",
+                Err(Invalid::SecondLink {
+                    first: name("a-b"),
+                    second: name("b-a"),
+                    a: name("node-b"),
+                    b: name("node-a"),
+                }),
+            ),
+            // 51830 is the port of `a-b`; the new link shares `node-b` with it and nothing else.
+            (
+                "{mesh: {links: {b-c: {type: wireguard, ends: {node-c: {}, node-b: {}}, wireguard: {port: 51830}}}}}",
+                Err(Invalid::PortTwice {
+                    node: name("node-b"),
+                    port: 51830,
+                    first: name("a-b"),
+                    second: name("b-c"),
+                }),
+            ),
+            // 51832 is the port of `a-r1`, which joins `node-a` and `router1`; this one joins the
+            // other two.
+            (
+                "{mesh: {links: {b-c: {type: wireguard, ends: {node-b: {}, node-c: {}}, wireguard: {port: 51832}}}}}",
+                Ok(()),
+            ),
+        ] {
+            assert_eq!(checked(overlay), expected, "{overlay}");
+        }
     }
 
     #[test]
-    fn an_end_that_is_not_a_node_is_refused() {
-        let refusal = refusal(
-            "{mesh: {links: {a-x: {type: wireguard, ends: {node-a: {}, node-x: {}}, wireguard: {port: 1}}}}}",
-        );
-        assert_eq!(
-            refusal,
-            Invalid::UnknownEnd {
-                link: name("a-x"),
-                end: name("node-x")
-            }
-        );
-    }
-
-    #[test]
-    fn a_link_of_a_type_one_of_its_ends_does_not_serve_is_refused() {
-        let refusal = refusal(
-            "{mesh: {links: {b-r1: {type: amneziawg, ends: {node-b: {}, router1: {}}, amneziawg: {port: 1}}}}}",
-        );
-        assert_eq!(
-            refusal,
-            Invalid::NotServed {
-                link: name("b-r1"),
-                kind: "amneziawg",
-                node: name("router1"),
-                platform: Platform::Routeros,
-            }
-        );
-    }
-
-    #[test]
-    fn a_second_link_between_two_nodes_is_refused_whatever_the_order_of_its_ends() {
-        let refusal = refusal(
-            "{mesh: {links: {b-a: {type: wireguard, ends: {node-b: {}, node-a: {}}, wireguard: {port: 1}}}}}",
-        );
-        assert_eq!(
-            refusal,
-            Invalid::SecondLink {
-                first: name("a-b"),
-                second: name("b-a"),
-                a: name("node-b"),
-                b: name("node-a"),
-            }
-        );
-    }
-
-    #[test]
-    fn a_port_two_links_of_one_node_take_is_refused() {
-        // 51830 is the port of `a-b`; the new link shares `node-b` with it and nothing else.
-        let refusal = refusal(
-            "{mesh: {links: {b-c: {type: wireguard, ends: {node-c: {}, node-b: {}}, wireguard: {port: 51830}}}}}",
-        );
-        assert_eq!(
-            refusal,
-            Invalid::PortTwice {
-                node: name("node-b"),
-                port: 51830,
-                first: name("a-b"),
-                second: name("b-c"),
-            }
-        );
-    }
-
-    #[test]
-    fn two_links_that_share_no_node_may_share_a_port() {
-        // `a-r1` joins `node-a` and `router1`; this one joins the other two.
-        let shared = with(
-            "{mesh: {links: {b-c: {type: wireguard, ends: {node-b: {}, node-c: {}}, wireguard: {port: 51832}}}}}",
-        )
-        .unwrap();
-        assert_eq!(check(&shared), Ok(()));
-    }
-
-    #[test]
-    fn a_class_takes_no_number_of_the_kernel() {
-        for protocol in [0, 4] {
-            assert_eq!(
-                refusal(&format!(
-                    "{{routing: {{classes: {{egress: {{protocol: {protocol}}}}}}}}}"
-                )),
-                Invalid::KernelProtocol {
+    fn a_class_takes_no_number_of_the_kernel_of_the_pools_routes_or_of_another_class() {
+        let of_the_kernel = |protocol| {
+            Err(Invalid::KernelProtocol {
+                class: class("egress"),
+                protocol,
+            })
+        };
+        for (class_name, protocol, expected) in [
+            ("egress", 0, of_the_kernel(0)),
+            ("egress", 4, of_the_kernel(4)),
+            ("egress", 5, Ok(())),
+            ("egress", 199, Ok(())),
+            (
+                "egress",
+                200,
+                Err(Invalid::PoolProtocol {
                     class: class("egress"),
-                    protocol
-                }
-            );
+                }),
+            ),
+            ("egress", 201, Ok(())),
+            (
+                "transit",
+                152,
+                Err(Invalid::ProtocolTwice {
+                    protocol: 152,
+                    first: class("egress"),
+                    second: class("transit"),
+                }),
+            ),
+        ] {
+            let overlay =
+                format!("{{routing: {{classes: {{{class_name}: {{protocol: {protocol}}}}}}}}}");
+            assert_eq!(checked(&overlay), expected, "{overlay}");
         }
-        let above = with("{routing: {classes: {egress: {protocol: 5}}}}").unwrap();
-        assert_eq!(check(&above), Ok(()));
-    }
-
-    #[test]
-    fn a_class_takes_not_the_number_of_the_pools_routes() {
-        assert_eq!(
-            refusal("{routing: {classes: {egress: {protocol: 200}}}}"),
-            Invalid::PoolProtocol {
-                class: class("egress")
-            }
-        );
-        for beside in [199, 201] {
-            let network = with(&format!(
-                "{{routing: {{classes: {{egress: {{protocol: {beside}}}}}}}}}"
-            ))
-            .unwrap();
-            assert_eq!(check(&network), Ok(()));
-        }
-    }
-
-    #[test]
-    fn two_classes_of_one_number_are_refused_naming_both() {
-        assert_eq!(
-            refusal("{routing: {classes: {transit: {protocol: 152}}}}"),
-            Invalid::ProtocolTwice {
-                protocol: 152,
-                first: class("egress"),
-                second: class("transit"),
-            }
-        );
     }
 
     #[test]
@@ -647,34 +604,26 @@ mod tests {
     }
 
     #[test]
-    fn a_keepalive_range_from_zero_is_refused_where_it_is_written() {
-        let of_the_network = refusal("{mesh: {amneziawg: {persistent_keepalive: 0-30}}}");
-        assert_eq!(
-            of_the_network,
-            Invalid::KeepaliveFromZero {
-                key: "mesh.amneziawg".into(),
+    fn a_keepalive_range_from_zero_is_refused_where_it_is_written_and_no_other() {
+        let from_zero = |key: &str| {
+            Err(Invalid::KeepaliveFromZero {
+                key: key.into(),
                 range: Range::new(0, 30).unwrap(),
-            }
-        );
-        let of_a_link =
-            refusal("{mesh: {links: {a-b: {amneziawg: {persistent_keepalive: 0-30}}}}}");
-        assert_eq!(
-            of_a_link,
-            Invalid::KeepaliveFromZero {
-                key: "mesh.links.a-b.amneziawg".into(),
-                range: Range::new(0, 30).unwrap(),
-            }
-        );
-    }
-
-    #[test]
-    fn a_keepalive_of_zero_alone_and_a_range_from_one_are_valid() {
-        for value in ["0", "1-30"] {
-            let network = with(&format!(
-                "{{mesh: {{amneziawg: {{persistent_keepalive: {value}}}}}}}"
-            ))
-            .unwrap();
-            assert_eq!(check(&network), Ok(()));
+            })
+        };
+        for (overlay, expected) in [
+            (
+                "{mesh: {amneziawg: {persistent_keepalive: 0-30}}}",
+                from_zero("mesh.amneziawg"),
+            ),
+            (
+                "{mesh: {links: {a-b: {amneziawg: {persistent_keepalive: 0-30}}}}}",
+                from_zero("mesh.links.a-b.amneziawg"),
+            ),
+            ("{mesh: {amneziawg: {persistent_keepalive: 0}}}", Ok(())),
+            ("{mesh: {amneziawg: {persistent_keepalive: 1-30}}}", Ok(())),
+        ] {
+            assert_eq!(checked(overlay), expected, "{overlay}");
         }
     }
 }

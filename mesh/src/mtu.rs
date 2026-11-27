@@ -175,16 +175,29 @@ mod tests {
     }
 
     #[test]
-    fn a_link_dialed_over_ipv4_on_a_1500_underlay_takes_1440_and_over_ipv6_20_less() {
-        assert_eq!(mtu_of(AT_V4, AT_V4_OTHER, WIREGUARD, ""), 1440);
-        assert_eq!(mtu_of(AT_V6, UNDIALED, WIREGUARD, ""), 1420);
-    }
-
-    #[test]
-    fn a_link_is_dialed_over_the_family_of_whichever_end_has_an_endpoint() {
-        assert_eq!(mtu_of(AT_V4, UNDIALED, WIREGUARD, ""), 1440);
-        assert_eq!(mtu_of(UNDIALED, AT_V4, WIREGUARD, ""), 1440);
-        assert_eq!(mtu_of(UNDIALED, AT_V6, WIREGUARD, ""), 1420);
+    fn a_link_takes_the_smaller_underlay_less_the_headers_of_its_family_and_its_junk() {
+        let at_v4_1460 = "{mtu: 1460, endpoint: {ipv4: 192.0.2.10}}";
+        let (no_junk, junk_12, junk_20) = (
+            amneziawg("{}"),
+            amneziawg("{s4: 12}"),
+            amneziawg("{s4: 20}"),
+        );
+        let of_the_type = ", amneziawg: {obfuscation: {s4: 12}}";
+        for (a, b, link, mesh, mtu) in [
+            (AT_V4, AT_V4_OTHER, WIREGUARD, "", 1440),
+            (AT_V6, UNDIALED, WIREGUARD, "", 1420),
+            (AT_V4, UNDIALED, WIREGUARD, "", 1440),
+            (UNDIALED, AT_V4, WIREGUARD, "", 1440),
+            (UNDIALED, AT_V6, WIREGUARD, "", 1420),
+            (at_v4_1460, UNDIALED, WIREGUARD, "", 1400),
+            (AT_V4, "{mtu: 1460}", WIREGUARD, "", 1400),
+            (at_v4_1460, "{mtu: 1450}", WIREGUARD, "", 1390),
+            (AT_V6, UNDIALED, junk_12.as_str(), "", 1408),
+            (AT_V4, UNDIALED, no_junk.as_str(), of_the_type, 1428),
+            (AT_V4, UNDIALED, junk_20.as_str(), of_the_type, 1420),
+        ] {
+            assert_eq!(mtu_of(a, b, link, mesh), mtu, "{a} {b} {link}{mesh}");
+        }
     }
 
     #[test]
@@ -198,25 +211,6 @@ mod tests {
         assert!(
             matches!(&neither, LinkError::NoEndpoint(a, b) if a == "a" && b == "b"),
             "{neither:?}"
-        );
-    }
-
-    #[test]
-    fn the_smaller_underlay_of_the_two_ends_bounds_the_link() {
-        let at_v4 = |mtu: u32| format!("{{mtu: {mtu}, endpoint: {{ipv4: 192.0.2.10}}}}");
-        assert_eq!(mtu_of(&at_v4(1460), UNDIALED, WIREGUARD, ""), 1400);
-        assert_eq!(mtu_of(AT_V4, "{mtu: 1460}", WIREGUARD, ""), 1400);
-        assert_eq!(mtu_of(&at_v4(1460), "{mtu: 1450}", WIREGUARD, ""), 1390);
-    }
-
-    #[test]
-    fn the_junk_on_data_packets_lowers_the_link_by_its_size_its_own_or_its_types() {
-        assert_eq!(mtu_of(AT_V6, UNDIALED, &amneziawg("{s4: 12}"), ""), 1408);
-        let of_the_type = ", amneziawg: {obfuscation: {s4: 12}}";
-        assert_eq!(mtu_of(AT_V4, UNDIALED, &amneziawg("{}"), of_the_type), 1428);
-        assert_eq!(
-            mtu_of(AT_V4, UNDIALED, &amneziawg("{s4: 20}"), of_the_type),
-            1420
         );
     }
 

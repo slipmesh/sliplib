@@ -111,28 +111,34 @@ fn fmt_leaves_files_already_in_that_form_untouched_and_says_so() {
 }
 
 #[test]
-fn fmt_refuses_a_block_the_loader_refuses_for_its_reason_and_names_no_key() {
+fn a_block_the_loader_refuses_stops_every_write_for_its_reason_and_names_no_key() {
     let key = PrivateKey::generate();
     let content = by_hand(key.expose()).replace(
         "slipmesh: {kind: network, version: 2, revision: 1}",
         "slipmesh: {kind: network, version: 2, revision: 1, no_such_setting: 1}",
     );
     assert!(content.contains("no_such_setting"));
-    let config = Config::holding(&content);
-    let ran = config.run(&["fmt"]);
-    assert_eq!(ran.code, Some(1));
-    assert_eq!(ran.stdout, "");
-    assert!(ran.stderr.contains("no_such_setting"), "{}", ran.stderr);
-    assert!(
-        ran.stderr.contains(&config.path.display().to_string()),
-        "{}",
-        ran.stderr
-    );
-    assert!(
-        !ran.stderr.contains("would change a value"),
-        "{}",
-        ran.stderr
-    );
-    assert!(!ran.stderr.contains(key.expose()));
-    assert_eq!(config.text(), content);
+    for command in [&["mint"][..], &["rekey", "--node", "node-a"], &["fmt"]] {
+        let config = Config::holding(&content);
+        let ran = config.run(command);
+        assert_eq!(ran.code, Some(1), "{command:?}");
+        assert_eq!(ran.stdout, "", "{command:?}");
+        assert!(
+            ran.stderr.contains("no_such_setting"),
+            "{command:?}: {}",
+            ran.stderr
+        );
+        assert!(
+            ran.stderr.contains(&config.path.display().to_string()),
+            "{command:?}: {}",
+            ran.stderr
+        );
+        assert!(
+            !ran.stderr.contains("would change a value"),
+            "{command:?}: {}",
+            ran.stderr
+        );
+        assert!(!ran.stderr.contains(key.expose()), "{command:?}");
+        assert_eq!(config.text(), content, "{command:?}");
+    }
 }

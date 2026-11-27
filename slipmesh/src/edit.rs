@@ -219,29 +219,28 @@ mod tests {
     // The type of the example sets `s3`, `s4`, the `i` fields and both switches: none of them is
     // written under a link.
     #[test]
-    fn a_link_gets_the_nine_minted_fields_and_none_its_type_sets() {
-        assert_eq!(written_under(EXAMPLE, "a-b"), NINE);
-    }
-
-    #[test]
-    fn a_field_the_link_writes_stays_and_the_minted_ones_join_it() {
-        let written = written_under(EXAMPLE, "a-c");
-        assert_eq!(
-            written,
-            [
-                "h4",
-                "rekey_after_time",
-                "keepalive_timeout",
-                "jc",
-                "jmin",
-                "jmax",
-                "s1",
-                "s2",
-                "h1",
-                "h2",
-                "h3",
-            ]
-        );
+    fn a_link_gets_the_minted_fields_it_lacks_after_those_it_writes_and_none_its_type_sets() {
+        for (link, written) in [
+            ("a-b", &NINE[..]),
+            (
+                "a-c",
+                &[
+                    "h4",
+                    "rekey_after_time",
+                    "keepalive_timeout",
+                    "jc",
+                    "jmin",
+                    "jmax",
+                    "s1",
+                    "s2",
+                    "h1",
+                    "h2",
+                    "h3",
+                ],
+            ),
+        ] {
+            assert_eq!(written_under(EXAMPLE, link), written, "{link}");
+        }
         let written: Value = sliplib_yaml::from_str(&run(EXAMPLE)).unwrap();
         assert_eq!(
             written["mesh"]["links"]["a-c"]["amneziawg"]["obfuscation"]["h4"],
