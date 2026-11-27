@@ -25,19 +25,22 @@ fn every_excluded_network_leaves_every_included_one_of_its_family_and_the_rest_m
     );
 }
 
-/// Every pair of included and every pair of excluded subnets of a /28, down to /30.
+/// Every pair of included subnets of a /29, down to /32, less none or every pair of them.
 #[test]
 fn the_rest_covers_each_address_included_and_not_excluded_with_the_fewest_networks() {
-    let whole: IpNet = "203.0.113.0/28".parse().unwrap();
-    let parts: Vec<IpNet> = (28..=30)
+    let whole: IpNet = "203.0.113.0/29".parse().unwrap();
+    let parts: Vec<IpNet> = (29..=32)
         .flat_map(|len| whole.subnets(len).unwrap())
         .collect();
     let pairs: Vec<[IpNet; 2]> = parts
         .iter()
         .flat_map(|&a| parts.iter().map(move |&b| [a, b]))
         .collect();
+    let excluded_sets: Vec<&[IpNet]> = std::iter::once(&[][..])
+        .chain(pairs.iter().map(|pair| &pair[..]))
+        .collect();
     for included in &pairs {
-        for excluded in &pairs {
+        for &excluded in &excluded_sets {
             let rest = subtract(included, excluded);
             for host in whole.hosts().chain([whole.network(), whole.broadcast()]) {
                 let expected = included.iter().any(|n| n.contains(&host))

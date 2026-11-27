@@ -155,7 +155,7 @@ reaches every component. On top of its methods:
   errors that name the input;
 - `exclude(net, excluded)`: the rest of `net`, as the fewest networks, in address order;
 - `subtract(included, excluded)`: every address of `included` in none of `excluded`, as the fewest
-  networks, in address order, either family;
+  networks, IPv4 first, then IPv6, each in address order;
 - `mtu::MIN_IPV6_MTU`, 1280, the least MTU of a link that carries IPv6, and
   `mtu::MESH_MTU_ANNOTATION`, the annotation of a node's `Node` object that carries the mesh MTU.
 
