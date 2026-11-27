@@ -180,19 +180,18 @@ fn mesh_interfaces_for(
                     .and_then(|underlay| underlay.endpoint.as_ref())
                     .map(|endpoint| addressing::endpoint(endpoint.host(), port)),
                 allowed_ips: None,
-                persistent_keepalive: None,
+                persistent_keepalive: link.kind.persistent_keepalive(),
             }],
         };
-        interface.peers[0].persistent_keepalive = link.kind.persistent_keepalive();
-        interface.peers[0].persistent_keepalive = resolved_keepalive(&interface, 0);
+        interface.peers[0].persistent_keepalive =
+            resolved_keepalive(&interface, &interface.peers[0]);
         out.push(interface);
     }
     Ok(out)
 }
 
-/// What the daemon sends peer `index` of `interface`, written out; none to a peer it does not dial.
-pub fn resolved_keepalive(interface: &InterfaceEntry, index: usize) -> Option<Range<u16>> {
-    let peer = &interface.peers[index];
+/// What the daemon sends `peer` of `interface`, written out; none to a peer it does not dial.
+fn resolved_keepalive(interface: &InterfaceEntry, peer: &PeerEntry) -> Option<Range<u16>> {
     peer.endpoint
         .is_some()
         .then(|| interface.keepalive_of(peer))
