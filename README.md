@@ -9,7 +9,7 @@ the command-line tool for `slipmesh.yaml` itself.
 | [`sliplib-net`](net) | CIDR parsing and arithmetic on `ipnet`'s types, and the mesh MTU's floor and annotation |
 | [`sliplib-fs`](fs) | Files written whole, and only when their text changes |
 | [`sliplib-yaml`](yaml) | Multi-document YAML files read into values, edited and turned back into text |
-| [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool |
+| [`sliplib-runtime`](runtime) | Logging and shutdown set up the same way for every daemon and tool, and a daemon's Prometheus endpoint |
 | [`sliplib-secrets`](secrets) | Secrets `Debug` never prints, and WireGuard keys: decoding, generation, the public key |
 | [`sliplib-config`](config) | `slipmesh.yaml`, its schema and its loader, and what every platform's daemons share of their configs, with its checks |
 | [`sliplib-mesh`](mesh) | A node's `awg` and `router` configs, computed from `slipmesh.yaml` |
@@ -311,6 +311,37 @@ async fn run() -> anyhow::Result<()> {
 ```
 
 `serve` is the default `serve` feature; a tool that only logs takes `default-features = false`.
+
+With the `metrics` feature, on Linux, `metrics` serves a daemon's Prometheus endpoint.
+`metrics::bind(listen)` binds even while the address is on no interface yet, such as a loopback
+another service creates, and answers once it appears. `metrics::serve(listener, connections,
+pages)` answers `GET` on every path `pages` returns a renderer for, rendering on each request; any
+other request is a 404 that renders nothing, a page that fails to render is a 500, logged, and past
+`connections` at once a client waits. A connection that waits a few seconds for a request head, its
+first or its next, is cut, so an idle client holds no place. `Page::openmetrics(&registry)` encodes a
+[`prometheus-client`](https://crates.io/crates/prometheus-client) registry with the content type
+Prometheus parses it by, and `Page::text(body)` is plain text. A renderer is boxed, so each path can
+be an `async` block of its own:
+
+```rust,no_run
+use std::num::NonZeroUsize;
+
+use prometheus_client::registry::Registry;
+use sliplib_runtime::metrics::{self, Page, Rendering};
+
+async fn run() -> anyhow::Result<()> {
+    let listener = metrics::bind("192.0.2.1:9500".parse()?)?;
+    metrics::serve(listener, NonZeroUsize::new(16).unwrap(), |path: &str| -> Option<Rendering<anyhow::Error>> {
+        match path {
+            "/metrics" => Some(Box::pin(async { Ok(Page::openmetrics(&Registry::default())?) })),
+            "/prefixes" => Some(Box::pin(async { Ok(Page::text("192.0.2.0/24\n".to_owned())) })),
+            _ => None,
+        }
+    })
+    .await;
+    Ok(())
+}
+```
 
 ### `sliplib-secrets`
 
