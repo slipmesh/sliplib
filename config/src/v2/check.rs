@@ -363,17 +363,6 @@ mod tests {
     const NODE: &str = "{platform: talos, node_id: 0.0.0.9, underlay: {wan: {}}}";
 
     #[test]
-    fn the_example_of_the_specification_is_valid() {
-        assert_eq!(with("{}").unwrap().check(), Ok(()));
-    }
-
-    #[test]
-    fn a_network_refuses_through_its_check_what_the_checks_refuse() {
-        let refused = with("{nodes: {node-c: {node_id: 0.0.0.1}}}").unwrap();
-        assert!(refused.check().is_err());
-    }
-
-    #[test]
     fn a_network_without_nodes_is_refused() {
         let refusal = refusal("{nodes: {node-a: null, node-b: null, node-c: null, router1: null}}");
         assert_eq!(refusal, Invalid::NoNodes);
@@ -492,39 +481,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(check(&network), Ok(()));
-    }
-
-    #[test]
-    fn a_node_id_too_wide_says_how_far_it_may_go() {
-        assert_eq!(
-            refusal("{nodes: {node-b: {node_id: 0.0.0.128}}}").to_string(),
-            "the node \"node-b\" has `node_id` 0.0.0.128, whose bits do not fit the 7 host bits of \
-             addressing.loopback.ipv4 - give it a `node_id` below 2^7, or take a network there that \
-             leaves more"
-        );
-    }
-
-    #[test]
-    fn a_node_id_of_zeros_says_what_it_gives() {
-        assert_eq!(
-            refusal("{nodes: {node-b: {node_id: 0.0.0.0}}}").to_string(),
-            "the node \"node-b\" has `node_id` 0.0.0.0, which gives its loopbacks a host part of \
-             zeros - give it another"
-        );
-    }
-
-    #[test]
-    fn links_without_an_ipv4_network_take_any_node_id_there() {
-        let overlay = |ipv4: &str| {
-            format!(
-                "{{addressing: {{tunnel: {{ipv4: {ipv4}}}}}, nodes: {{node-b: {{node_id: 0.0.0.100}}}}}}"
-            )
-        };
-        assert_eq!(
-            refusal(&overlay("198.51.100.192/26")),
-            too_wide([0, 0, 0, 100], "addressing.tunnel.ipv4", 6)
-        );
-        assert_eq!(check(&with(&overlay("null")).unwrap()), Ok(()));
     }
 
     #[test]

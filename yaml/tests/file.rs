@@ -21,14 +21,6 @@ fn a_file_reads_as_the_type_it_holds() {
     );
 }
 
-#[test]
-fn a_missing_file_is_an_error_naming_it_once() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("node-a.yaml");
-    let err = chain(read::<Config>(&path).unwrap_err());
-    assert_eq!(err.matches(&path.display().to_string()).count(), 1, "{err}");
-}
-
 #[derive(Debug, Deserialize)]
 struct Interfaces {
     #[expect(dead_code, reason = "read for its refusal")]

@@ -74,13 +74,6 @@ pub const MESH: &str = include_str!("../../../docs/example/mesh.yaml");
 /// And the groups.
 pub const TALOS: &str = include_str!("../../../docs/example/talos.yaml");
 
-/// The number whole, not the start of a longer one.
-pub fn names_line(text: &str, line: usize) -> bool {
-    let named = format!("line {line}");
-    text.match_indices(&named)
-        .any(|(at, _)| !text[at + named.len()..].starts_with(|c: char| c.is_ascii_digit()))
-}
-
 /// In one file, minted.
 pub fn minted() -> Config {
     let config = Config::holding(&format!("{MESH}---\n{TALOS}"));

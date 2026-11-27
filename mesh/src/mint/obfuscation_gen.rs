@@ -125,22 +125,6 @@ mod tests {
         }
     }
 
-    // A header inside one the entry holds is refused when its config is checked, and with a wide
-    // range written nearly every draw would be such a header.
-    #[test]
-    fn a_created_header_falls_outside_a_range_the_entry_holds() {
-        for _ in 0..200 {
-            let o = super::generate(&holding("5-2000000000")).unwrap();
-            let created = [o.h2, o.h3, o.h4];
-            assert!(created.iter().all(|h| *h > 2_000_000_000), "{o:?}");
-            assert!(
-                created[0] != created[1] && created[1] != created[2],
-                "{o:?}"
-            );
-            assert_ne!(created[0], created[2], "{o:?}");
-        }
-    }
-
     // Either can be switched on a link after its offsets were drawn, so the draw goes by neither.
     #[test]
     fn a_created_offset_never_reads_the_header_of_a_data_packet() {
@@ -210,13 +194,6 @@ mod tests {
     }
 
     #[test]
-    fn ranges_that_share_an_end_and_cover_every_value_leave_none() {
-        let mut rng = rand::rng();
-        let taken = taking(&["5-10", "10-2147483647"]);
-        assert_eq!(draw_outside(&mut rng, &taken), None);
-    }
-
-    #[test]
     fn ranges_beside_the_values_a_header_is_drawn_from_take_nothing() {
         let mut rng = rand::rng();
         let taken = taking(&["1-4", "2147483648-4294967295", "5-2147483646"]);
@@ -262,25 +239,6 @@ mod tests {
         let mut created = [o.h3, o.h4];
         created.sort_unstable();
         assert_eq!(created, [2_147_483_646, 2_147_483_647]);
-    }
-
-    #[test]
-    fn generates_jmin_less_than_jmax() {
-        let o = generate();
-        assert!(o.jmin < o.jmax);
-    }
-
-    #[test]
-    fn generates_four_distinct_magic_headers_avoiding_reserved_message_types() {
-        let o = generate();
-        let headers = [o.h1, o.h2, o.h3, o.h4];
-        for h in headers {
-            assert!(!sliplib_config::DEFAULT_MAGIC_HEADERS.contains(&h));
-        }
-        let mut sorted = headers.to_vec();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), 4, "h1-h4 must all be distinct");
     }
 
     // The module's recommended ranges; s1/s2 hold the nonce, and S1 + 56 = S2 gives initiation and

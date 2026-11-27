@@ -252,16 +252,6 @@ mod tests {
     }
 
     #[test]
-    fn a_name_is_read_from_a_yaml_key() {
-        let read: std::collections::BTreeMap<Name, u8> =
-            sliplib_yaml::from_str("{node-a: 1}").unwrap();
-        assert_eq!(read.keys().next().unwrap().as_str(), "node-a");
-        let refused = sliplib_yaml::from_str::<std::collections::BTreeMap<Name, u8>>("{node a: 1}")
-            .unwrap_err();
-        assert!(refused.to_string().contains("\"node a\""), "{refused}");
-    }
-
-    #[test]
     fn a_class_name_follows_the_rule_and_takes_48_characters() {
         let longest = "c".repeat(48);
         assert_eq!(

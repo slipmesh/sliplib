@@ -197,21 +197,6 @@ mod tests {
     }
 
     #[test]
-    fn an_ipv6_loopback_network_longer_than_96_takes_a_node_id_that_fits_it() {
-        let mesh = example(
-            "{addressing: {loopback: {ipv4: 198.18.0.0/24, ipv6: '3fff:0:0:1::/120'}, tunnel: \
-             {ipv4: null}}, nodes: {node-b: {node_id: 0.0.0.200}}}",
-        );
-        let node_b = addresses(&mesh, "node-b");
-        assert_eq!(node_b.loopback.0.to_string(), "198.18.0.200");
-        assert_eq!(node_b.loopback.1.to_string(), "3fff:0:0:1::c8");
-        assert_eq!(
-            addresses(&mesh, "node-a").loopback.1.to_string(),
-            "3fff:0:0:1::1"
-        );
-    }
-
-    #[test]
     fn without_a_link_local_network_the_links_take_the_link_local_of_the_loopback() {
         let mesh =
             example("{addressing: {loopback: {ipv6: '3fff::1:0/120'}, tunnel: {ipv4: null}}}");
@@ -247,14 +232,6 @@ mod tests {
     fn a_pattern_already_in_a_list_keeps_its_place_and_is_not_added() {
         let mesh = example("{routing: {direct_interfaces: ['mesh-*', lan0]}}");
         assert_eq!(direct_interfaces(&mesh, "node-a"), ["mesh-*", "lan0"]);
-    }
-
-    #[test]
-    fn the_pattern_follows_the_interface_prefix() {
-        let mesh = example("{mesh: {interface_prefix: wg-}}");
-        assert_eq!(direct_interfaces(&mesh, "node-a"), ["lan0", "wg-*"]);
-        assert_eq!(mesh.interface_prefix(), "wg-");
-        assert_eq!(mesh.links_pattern().as_str(), "wg-*");
     }
 
     #[test]

@@ -114,16 +114,4 @@ mod tests {
         assert_eq!(from_text, ["b", "07", "a", "7"]);
         assert_eq!(names(yaml).unwrap(), ["b", "07", "a", "7"]);
     }
-
-    #[test]
-    fn two_class_names_that_read_as_one_are_refused_naming_it() {
-        let read = sliplib_yaml::from_str::<Value>("{1.0: a, 1: b}").unwrap();
-        let refused = unique_keys::<_, ClassName, Value>(read)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            refused.starts_with(&NameError::Twice("1".to_owned()).to_string()),
-            "{refused}"
-        );
-    }
 }

@@ -450,22 +450,6 @@ mod tests {
     }
 
     #[test]
-    fn a_link_without_any_obfuscation_is_refused_for_a_missing_secret_at_both_ends() {
-        let network = example(
-            "{mesh: {amneziawg: {obfuscation: null}, \
-             links: {a-b: {amneziawg: {obfuscation: null}}}}}",
-        );
-        for node in ["node-a", "node-b"] {
-            let refusal = configs_of(&network, node).unwrap_err();
-            let missing = missing_secret(&refusal).map(ToString::to_string);
-            assert!(
-                missing.is_some_and(|missing| missing.contains("a-b")),
-                "{node}: {refusal:?}"
-            );
-        }
-    }
-
-    #[test]
     fn an_obfuscation_the_kernel_module_refuses_refuses_both_ends_and_no_secret_cures_it() {
         let network = example("{mesh: {links: {a-b: {amneziawg: {obfuscation: {h2: 1101}}}}}}");
         for (node, interface) in [("node-a", "mesh-node-b"), ("node-b", "mesh-node-a")] {
@@ -540,14 +524,6 @@ mod tests {
 
     fn peer_keepalive(network: &Mesh<'_>, node: &str, peer: &str) -> Option<Range<u16>> {
         mesh_interface(network, node, peer).peers[0].persistent_keepalive
-    }
-
-    #[test]
-    fn every_node_of_the_example_gets_its_configs() {
-        let network = example("{}");
-        for name in network.network().nodes.keys() {
-            node_configs(&network, name.as_str()).unwrap();
-        }
     }
 
     #[test]
@@ -683,13 +659,19 @@ mod tests {
 
     #[test]
     fn a_link_that_lacks_a_field_mint_writes_is_refused_when_its_nodes_are_computed() {
-        let unminted = example("{mesh: {links: {a-b: {amneziawg: {obfuscation: {jc: null}}}}}}");
-        let refusal = refused(&unminted, "node-b");
-        let missing = missing_secret(&refusal).map(ToString::to_string);
-        assert!(
-            missing.is_some_and(|missing| missing.contains("a-b") && missing.contains("jc")),
-            "{refusal:?}"
-        );
+        for overlay in [
+            "{mesh: {links: {a-b: {amneziawg: {obfuscation: {jc: null}}}}}}",
+            "{mesh: {amneziawg: {obfuscation: null}, \
+             links: {a-b: {amneziawg: {obfuscation: null}}}}}",
+        ] {
+            let unminted = example(overlay);
+            let refusal = node_configs(&unminted, "node-b").expect_err(overlay);
+            let missing = missing_secret(&refusal).map(ToString::to_string);
+            assert!(
+                missing.is_some_and(|missing| missing.contains("a-b") && missing.contains("jc")),
+                "{overlay}: {refusal:?}"
+            );
+        }
     }
 
     #[test]

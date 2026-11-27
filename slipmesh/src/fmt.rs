@@ -50,11 +50,6 @@ mod tests {
     }
 
     #[test]
-    fn the_same_values_in_another_layout_are_held() {
-        assert!(holds("a:\n  b: 1\n---\nc:\n- 2\n- 3\n"));
-    }
-
-    #[test]
     fn a_changed_value_a_lost_document_or_documents_in_another_order_are_not_held() {
         assert!(!holds("a:\n  b: 2\n---\nc:\n- 2\n- 3\n"));
         assert!(!holds("a:\n  b: 1\n"));

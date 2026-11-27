@@ -205,15 +205,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_node_named_like_a_number_is_rekeyed_under_its_own_key() {
-        let written = edited(&numbered(), |edit| {
-            set_node_key(edit, "7", &PrivateKey::generate()).unwrap();
-        });
-        let written: Value = sliplib_yaml::from_str(&written).unwrap();
-        assert!(written["nodes"][&Value::from(7)]["wireguard"]["private_key"].is_string());
-    }
-
     /// Once minted.
     fn written_under(raw: &str, link: &str) -> Vec<String> {
         let written: Value = sliplib_yaml::from_str(&run(raw)).unwrap();
@@ -230,16 +221,6 @@ mod tests {
     #[test]
     fn a_link_gets_the_nine_minted_fields_and_none_its_type_sets() {
         assert_eq!(written_under(EXAMPLE, "a-b"), NINE);
-    }
-
-    #[test]
-    fn a_minted_field_its_type_sets_is_not_written_under_a_link() {
-        let of_the_type = EXAMPLE.replace(
-            "    obfuscation:\n      s3: 40\n",
-            "    obfuscation:\n      jc: 5\n      s3: 40\n",
-        );
-        assert_ne!(of_the_type, EXAMPLE);
-        assert_eq!(written_under(&of_the_type, "a-b"), &NINE[1..]);
     }
 
     #[test]

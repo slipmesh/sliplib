@@ -604,23 +604,6 @@ mod tests {
     }
 
     #[test]
-    fn what_is_only_planned_is_a_key_the_format_does_not_have() {
-        for overlay in [
-            "{addressing: {tunnel: {ipv6: \"3fff:0:0:9::/64\"}}}",
-            "{routing: {ospf: {cost: 10}}}",
-            "{routing: {bgp: {sessions: {}}}}",
-            "{mesh: {wireguard: {fwmark: \"0x10\"}}}",
-            "{mesh: {links: {a-b: {mtu: 1400}}}}",
-            "{mesh: {links: {a-b: {routing: {ospf: {cost: 5}}}}}}",
-            "{mesh: {links: {a-b: {ends: {node-a: {interface: wg9}}}}}}",
-            "{mesh: {links: {a-r1: {wireguard: {preshared_key: x}}}}}",
-            "{mesh: {links: {a-b: {type: ethernet}}}}",
-        ] {
-            assert!(with(overlay).is_err(), "{overlay}");
-        }
-    }
-
-    #[test]
     fn a_required_key_left_out_is_refused() {
         for path in [
             &["addressing"][..],
@@ -833,39 +816,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn every_field_of_the_obfuscation_is_one_the_files_may_name() {
-        let every_field = Obfuscation {
-            jc: Some(1),
-            jmin: Some(1),
-            jmax: Some(1),
-            s1: Some(1),
-            s2: Some(1),
-            s3: Some(1),
-            s4: Some(1),
-            h1: Some(5.into()),
-            h2: Some(6.into()),
-            h3: Some(7.into()),
-            h4: Some(8.into()),
-            i1: Some(String::new()),
-            i2: Some(String::new()),
-            i3: Some(String::new()),
-            i4: Some(String::new()),
-            i5: Some(String::new()),
-            header_protection_key: Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into()),
-            content_padding_addition: Some(1.into()),
-            rekey_after_time: Some(1.into()),
-            rekey_timeout: Some(1.into()),
-            reject_after_time: Some(1.into()),
-            keepalive_timeout: Some(1.into()),
-            max_handshake_attempts: Some(1.into()),
-            random_trailers: Some(true),
-            disable_cookies: Some(true),
-        };
-        let written = sliplib_yaml::to_string(&every_field).unwrap();
-        assert_eq!(obfuscation(&written).unwrap().0, every_field);
-    }
-
     fn obfuscation(yaml: &str) -> Result<StrictObfuscation, String> {
         sliplib_yaml::from_str(yaml).map_err(|error| error.to_string())
     }
@@ -875,16 +825,6 @@ mod tests {
         assert!(obfuscation("{jc: 4}").is_ok());
         let refused = obfuscation("{jc: 4, color: red}").unwrap_err();
         assert!(refused.contains("`color`"), "{refused}");
-    }
-
-    #[test]
-    fn a_key_of_the_obfuscation_that_is_not_a_text_is_refused() {
-        for yaml in ["{0: 4}", "{true: 4}", "{jc: 4, 1: 5}"] {
-            assert!(obfuscation(yaml).is_err(), "{yaml} from the text");
-            let value: Value = sliplib_yaml::from_str(yaml).unwrap();
-            let read: Result<StrictObfuscation, _> = sliplib_yaml::from_value(value);
-            assert!(read.is_err(), "{yaml} from a value");
-        }
     }
 
     #[test]

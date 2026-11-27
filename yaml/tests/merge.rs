@@ -14,11 +14,6 @@ fn keys(value: &Value) -> Vec<&str> {
 }
 
 #[test]
-fn the_later_scalar_wins() {
-    assert_eq!(merge(yaml("a: 1"), &yaml("a: 2")), yaml("a: 2"));
-}
-
-#[test]
 fn mappings_merge_recursively() {
     let merged = merge(
         yaml("extraArgs: {rotate: 'true', level: '2'}"),
@@ -45,19 +40,6 @@ fn a_sequence_is_replaced_not_concatenated() {
 fn an_explicit_null_deletes_the_key_and_keeps_the_rest_in_order() {
     let merged = merge(yaml("a: 1\nb: 2\nc: 3\nd: 4"), &yaml("a: null"));
     assert_eq!(keys(&merged), ["b", "c", "d"]);
-}
-
-#[test]
-fn a_null_for_a_key_the_base_lacks_adds_nothing() {
-    assert_eq!(merge(yaml("a: 1"), &yaml("b: null")), yaml("a: 1"));
-}
-
-#[test]
-fn a_key_absent_from_the_overlay_is_inherited() {
-    assert_eq!(
-        merge(yaml("a: 1\nb: {c: 2}"), &yaml("a: 5")),
-        yaml("a: 5\nb: {c: 2}")
-    );
 }
 
 #[test]

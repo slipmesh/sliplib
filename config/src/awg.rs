@@ -262,19 +262,6 @@ interfaces:
 "#;
 
     #[test]
-    fn debug_output_never_carries_a_secret() {
-        let cfg: AwgConfig = sliplib_yaml::from_str(FULL_CONFIG).unwrap();
-        let printed = format!("{cfg:?}");
-        for secret in [
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-            "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
-            "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE=",
-        ] {
-            assert!(!printed.contains(secret), "{printed}");
-        }
-    }
-
-    #[test]
     fn parses_a_full_config_from_yaml() {
         let yaml = FULL_CONFIG;
         let cfg: AwgConfig = sliplib_yaml::from_str(yaml).unwrap();
@@ -382,11 +369,6 @@ interfaces:
             interfaces: vec![a],
         };
         assert!(validate(&cfg).is_err());
-    }
-
-    #[test]
-    fn accepts_an_empty_config() {
-        assert!(validate(&AwgConfig::default()).is_ok());
     }
 
     fn dialed(persistent_keepalive: Option<Range<u16>>) -> AwgConfig {

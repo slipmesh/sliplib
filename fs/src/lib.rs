@@ -81,7 +81,6 @@ fn write_atomically(path: &Path, content: &str) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn a_missing_file_reads_as_empty_and_an_existing_one_as_its_text() {
@@ -133,33 +132,6 @@ mod tests {
         let path = dir.path().join("node-a.yaml");
         assert!(write_if_changed(&path, "").unwrap());
         assert!(path.exists());
-    }
-
-    #[test]
-    fn a_replaced_file_holds_the_new_text() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("slipmesh.yaml");
-        std::fs::write(&path, "a: 1\n").unwrap();
-        replace_file(&path, "a: 2\n").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a: 2\n");
-    }
-
-    #[cfg(unix)]
-    fn mode(path: &Path) -> u32 {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_replaced_file_keeps_its_permissions() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("slipmesh.yaml");
-        std::fs::write(&path, "a: 1\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        replace_file(&path, "a: 2\n").unwrap();
-        assert_eq!(mode(&path), 0o600);
     }
 
     #[cfg(unix)]

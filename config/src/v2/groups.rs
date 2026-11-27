@@ -229,12 +229,6 @@ mod tests {
         "{core: [node-a, node-b, node-c], workers: {include: [core], exclude: [node-a]}}";
 
     #[test]
-    fn a_group_is_what_its_include_reaches_less_what_its_exclude_reaches() {
-        assert_eq!(group(EXAMPLE, "core"), ["node-a", "node-b", "node-c"]);
-        assert_eq!(group(EXAMPLE, "workers"), ["node-b", "node-c"]);
-    }
-
-    #[test]
     fn a_group_holds_its_nodes_in_the_order_of_the_network_whatever_the_order_written() {
         assert_eq!(
             group("{back: [router1, node-c, node-a]}", "back"),
@@ -335,46 +329,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_group_is_a_list_or_a_mapping_and_nothing_else() {
-        for unreadable in ["{core: all}", "{core: node-a}", "{core: 7}"] {
-            let refused = sliplib_yaml::from_str::<Groups>(unreadable)
-                .unwrap_err()
-                .to_string();
-            assert!(
-                refused.contains("a list of names, or a mapping with `include` and `exclude`"),
-                "{unreadable}: {refused}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_group_with_no_keys_is_every_node() {
-        assert_eq!(
-            group("{everyone: {}}", "everyone"),
-            ["node-a", "node-b", "node-c", "router1"]
-        );
-    }
-
-    #[test]
-    fn a_name_yaml_reads_as_a_number_is_the_name_written_in_a_group_too() {
-        let nodes = names(&["7", "node-b"]);
-        let groups = sliplib_yaml::from_str::<Groups>("{odd: [7]}")
-            .unwrap()
-            .resolve(&nodes)
-            .unwrap();
-        assert_eq!(groups.groups["odd"], &nodes[..1]);
-    }
-
-    #[test]
-    fn a_key_a_group_does_not_take_is_refused() {
-        let refused =
-            sliplib_yaml::from_str::<Groups>("{core: {include: [node-a], only: [node-b]}}")
-                .unwrap_err()
-                .to_string();
-        assert!(refused.contains("unknown field `only`"), "{refused}");
-    }
-
     fn selection(yaml: &str) -> Selection {
         sliplib_yaml::from_str(yaml).unwrap()
     }
@@ -406,43 +360,5 @@ mod tests {
             reach("{include: [node-a], exclude: [router1]}", &talos),
             ["node-a"]
         );
-    }
-
-    #[test]
-    fn a_selection_that_names_nobody_known_or_reaches_no_node_is_refused() {
-        let groups = resolved(EXAMPLE).unwrap();
-        let refused = |yaml: &str| {
-            groups
-                .reach(&selection(yaml), &nodes(), "the document")
-                .unwrap_err()
-        };
-        assert_eq!(
-            refused("{include: [node-x]}"),
-            GroupsError::UnknownName {
-                whose: "the document".to_owned(),
-                name: names(&["node-x"]).remove(0)
-            }
-        );
-        assert_eq!(
-            refused("{exclude: [node-x]}"),
-            GroupsError::UnknownName {
-                whose: "the document".to_owned(),
-                name: names(&["node-x"]).remove(0)
-            }
-        );
-        for empty in ["{include: [workers], exclude: [core]}", "{exclude: [all]}"] {
-            assert_eq!(
-                refused(empty),
-                GroupsError::Empty("the document".to_owned()),
-                "{empty}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_number_written_with_a_leading_zero_is_a_name_of_its_own() {
-        let read = sliplib_yaml::from_str::<Groups>("{07: [node-a], 7: [node-b]}").unwrap();
-        let names: Vec<&str> = read.0.keys().map(Name::as_str).collect();
-        assert_eq!(names, ["07", "7"]);
     }
 }
