@@ -315,18 +315,21 @@ With the `metrics` feature, on Linux, `metrics` serves a daemon's Prometheus end
 another service creates, and answers once it appears. `metrics::serve(listener, connections,
 pages)` answers `GET` on every path `pages` returns a renderer for, rendering on each request; any
 other request is a 404 that renders nothing, a page that fails to render is a 500, logged, and past
-`connections` at once a client waits. `Page::openmetrics(&registry)` encodes a
+`connections` at once a client waits. A connection that waits a few seconds for a request head, its
+first or its next, is cut, so an idle client holds no place. `Page::openmetrics(&registry)` encodes a
 [`prometheus-client`](https://crates.io/crates/prometheus-client) registry with the content type
 Prometheus parses it by, and `Page::text(body)` is plain text. A renderer is boxed, so each path can
 be an `async` block of its own:
 
 ```rust,no_run
+use std::num::NonZeroUsize;
+
 use prometheus_client::registry::Registry;
 use sliplib_runtime::metrics::{self, Page, Rendering};
 
 async fn run() -> anyhow::Result<()> {
     let listener = metrics::bind("192.0.2.1:9500".parse()?)?;
-    metrics::serve(listener, 16, |path: &str| -> Option<Rendering<anyhow::Error>> {
+    metrics::serve(listener, NonZeroUsize::new(16).unwrap(), |path: &str| -> Option<Rendering<anyhow::Error>> {
         match path {
             "/metrics" => Some(Box::pin(async { Ok(Page::openmetrics(&Registry::default())?) })),
             "/prefixes" => Some(Box::pin(async { Ok(Page::text("192.0.2.0/24\n".to_owned())) })),

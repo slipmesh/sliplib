@@ -4,6 +4,7 @@ use std::convert::Infallible;
 use std::fmt::Display;
 use std::future::Future;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +16,7 @@ use hyper::header::{CONTENT_TYPE, HeaderValue};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use prometheus_client::registry::Registry;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
@@ -26,9 +27,12 @@ pub const OPENMETRICS: &str = "application/openmetrics-text; version=1.0.0; char
 
 const TEXT: &str = "text/plain; charset=utf-8";
 
-/// The whole connection, keep-alive included: hyper's own timeout for reading a request head is
-/// off here.
+/// The whole connection, slow pages included.
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a connection may wait for a request head, the first or the next: an idle client holds
+/// one of the capped connections no longer.
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// A failed accept, such as one past the file limit, is retried after this rather than at once.
 const ACCEPT_RETRY: Duration = Duration::from_secs(1);
@@ -87,13 +91,13 @@ pub fn bind(listen: SocketAddr) -> std::io::Result<TcpListener> {
 /// request is a 404 that renders nothing. A page that fails to render is a 500 and is logged with
 /// `{:#}`, an `anyhow` error's whole chain: a failed scrape is the signal, and the daemon goes on.
 /// Past `connections` at once, a client waits in the listen backlog.
-pub async fn serve<P, E>(listener: TcpListener, connections: usize, pages: P)
+pub async fn serve<P, E>(listener: TcpListener, connections: NonZeroUsize, pages: P)
 where
     P: Fn(&str) -> Option<Rendering<E>> + Send + Sync + 'static,
     E: Display + 'static,
 {
     let pages = Arc::new(pages);
-    let open = Arc::new(Semaphore::new(connections));
+    let open = Arc::new(Semaphore::new(connections.get()));
     loop {
         // Fails only once closed, which nothing does.
         let Ok(permit) = Arc::clone(&open).acquire_owned().await else {
@@ -118,7 +122,10 @@ where
             });
             let served = tokio::time::timeout(
                 CONNECTION_TIMEOUT,
-                http1::Builder::new().serve_connection(TokioIo::new(stream), service),
+                http1::Builder::new()
+                    .timer(TokioTimer::new())
+                    .header_read_timeout(HEADER_READ_TIMEOUT)
+                    .serve_connection(TokioIo::new(stream), service),
             )
             .await;
             match served {

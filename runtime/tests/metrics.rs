@@ -1,6 +1,7 @@
 #![cfg(target_os = "linux")]
 
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -13,7 +14,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 /// `/metrics` with one counter, `/prefixes` as text, `/broken` failing, nothing else, at most
 /// `connections` at once; and how often a page was rendered.
-async fn serving(connections: usize) -> (SocketAddr, Arc<AtomicUsize>) {
+async fn serving(connections: NonZeroUsize) -> (SocketAddr, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let rendered = Arc::new(AtomicUsize::new(0));
@@ -59,7 +60,7 @@ async fn request(address: SocketAddr, method: &str, path: &str) -> String {
 
 #[tokio::test]
 async fn each_served_path_answers_with_its_page_and_its_content_type() {
-    let (address, _) = serving(4).await;
+    let (address, _) = serving(NonZeroUsize::new(4).unwrap()).await;
     let response = request(address, "GET", "/metrics").await;
     assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
     assert!(
@@ -79,7 +80,7 @@ async fn each_served_path_answers_with_its_page_and_its_content_type() {
 
 #[tokio::test]
 async fn another_path_or_method_is_a_404_and_renders_nothing() {
-    let (address, rendered) = serving(4).await;
+    let (address, rendered) = serving(NonZeroUsize::new(4).unwrap()).await;
     let response = request(address, "POST", "/metrics").await;
     assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
     assert_eq!(rendered.load(Ordering::SeqCst), 0);
@@ -89,7 +90,7 @@ async fn another_path_or_method_is_a_404_and_renders_nothing() {
 
 #[tokio::test]
 async fn a_page_that_fails_to_render_is_a_500() {
-    let (address, _) = serving(4).await;
+    let (address, _) = serving(NonZeroUsize::new(4).unwrap()).await;
     let response = request(address, "GET", "/broken").await;
     assert!(
         response.starts_with("HTTP/1.1 500 Internal Server Error"),
@@ -98,28 +99,27 @@ async fn a_page_that_fails_to_render_is_a_500() {
 }
 
 #[tokio::test]
-async fn a_connection_past_the_cap_waits_until_one_closes() {
-    let (address, _) = serving(1).await;
-    let mut held = TcpStream::connect(address).await.unwrap();
-    send(&mut held, "GET", "/metrics", false).await;
-    let mut buf = [0; 1024];
-    assert!(held.read(&mut buf).await.unwrap() > 0);
+async fn a_connection_past_the_cap_waits_and_an_idle_one_is_cut() {
+    let (address, _) = serving(NonZeroUsize::MIN).await;
+    let silent = TcpStream::connect(address).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     let mut waiting = TcpStream::connect(address).await.unwrap();
-    send(&mut waiting, "GET", "/metrics", true).await;
+    send(&mut waiting, "GET", "/metrics", false).await;
+    let mut buf = [0; 1];
     let early = tokio::time::timeout(Duration::from_millis(300), waiting.read(&mut buf)).await;
     assert!(early.is_err(), "served past the cap");
 
-    drop(held);
     let mut response = String::new();
     tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(10),
         waiting.read_to_string(&mut response),
     )
     .await
-    .unwrap()
+    .expect("still waiting after the silent client's header timeout")
     .unwrap();
     assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    drop(silent);
 }
 
 /// An address on no interface yet, such as a loopback another service has still to create.
