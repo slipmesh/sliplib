@@ -1,5 +1,7 @@
 //! Logging and shutdown, set up alike for every daemon and tool.
 
+#[cfg(feature = "metrics")]
+pub mod metrics;
 #[cfg(feature = "serve")]
 mod serve;
 #[cfg(feature = "serve")]
