@@ -263,11 +263,24 @@ interfaces:
       s2: 100
       s3: 60
       s4: 20
+      h1: 1101
+      h2: 2202
+      h3: 3303
+      h4: 4400-4499
       i1: "5-10"
+      i2: "<r 32>"
+      i3: "<r 8>"
+      i4: "<rc 12>"
+      i5: "<rd 6>"
       header_protection_key: "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="
       content_padding_addition: 128
       rekey_after_time: 120
+      rekey_timeout: 6
+      reject_after_time: 170
+      keepalive_timeout: 12
       max_handshake_attempts: 90
+      random_trailers: false
+      disable_cookies: false
     peers:
       - public_key: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
         allowed_ips: ["203.0.113.5/32"]

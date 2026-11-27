@@ -471,14 +471,28 @@ bypass:
     - kind: asn
       label: "some vendor"
       asns: ["AS15169"]
+    - kind: geoip
+      country: ZZ
+    - kind: dns
+      label: "some names"
+      hostnames: ["example.com"]
   exclude:
     - kind: literal
-      prefixes: [{net: "192.0.2.0/24"}]
+      prefixes: [{net: "192.0.2.0/24", label: "documentation"}, {net: "198.51.100.0/24"}]
 "#;
         let cfg: RouterConfig = sliplib_yaml::from_str(yaml).unwrap();
         validate(&cfg).unwrap();
         assert_eq!(cfg.bgp_peers.len(), 2);
-        assert_eq!(cfg.bypass.as_ref().unwrap().refresh_interval_secs, 3600);
+        let bypass = cfg.bypass.as_ref().unwrap();
+        assert_eq!(bypass.refresh_interval_secs, 3600);
+        assert_eq!(bypass.include[1].country.as_deref(), Some("ZZ"));
+        assert_eq!(bypass.include[2].label.as_deref(), Some("some names"));
+        assert_eq!(
+            bypass.include[2].hostnames,
+            Some(vec!["example.com".to_owned()])
+        );
+        let excluded = &bypass.exclude[0].prefixes.as_ref().unwrap()[0];
+        assert_eq!(excluded.label.as_deref(), Some("documentation"));
         let direct: Vec<&str> = cfg
             .direct_interfaces
             .iter()
@@ -486,10 +500,9 @@ bypass:
             .collect();
         assert_eq!(direct, ["lan0"]);
         assert_eq!(cfg.announce[0].label.as_deref(), Some("k8s-services"));
-        let written = sliplib_yaml::to_string(&cfg).unwrap();
         assert_eq!(
-            sliplib_yaml::from_str::<RouterConfig>(&written).unwrap(),
-            cfg
+            sliplib_yaml::to_value(&cfg).unwrap(),
+            sliplib_yaml::from_str::<sliplib_yaml::Value>(yaml).unwrap()
         );
     }
 
