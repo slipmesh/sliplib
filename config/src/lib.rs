@@ -3,6 +3,7 @@
 pub mod annotations;
 pub mod awg;
 mod mark;
+pub mod mesh_object;
 mod obfuscation;
 mod prefix;
 mod range;
