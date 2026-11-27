@@ -465,12 +465,13 @@ learn: ["203.0.113.0/27"]
 announce:
   - net: "203.0.113.192/26"
     label: "k8s-services"
+  - net: "203.0.113.128/26"
 bypass:
   refresh_interval_secs: 3600
   include:
     - kind: asn
       label: "some vendor"
-      asns: ["AS15169"]
+      asns: ["AS64511"]
     - kind: geoip
       country: ZZ
     - kind: dns
