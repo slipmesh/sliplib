@@ -13,6 +13,11 @@ pub fn route_proto_id(class: &str) -> String {
     format!("{NAMESPACE}route_proto_id.{class}")
 }
 
+/// The kernel routing table of the routes of `class`.
+pub fn route_table(class: &str) -> String {
+    format!("{NAMESPACE}route_table.{class}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
