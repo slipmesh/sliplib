@@ -474,8 +474,9 @@ routing:
 | `rules` | mapping | no | none | [Routing rules](#routingclassesnamerules), by name. |
 
 A class takes any [name](#names). On `talos` a node is told each class's number as the annotation
-`slipmesh.net/route_proto_id.<name>`, for whatever installs that class's routes there; without the
-class there is no such annotation. Refused, over all classes together: two classes with the same
+`slipmesh.net/route_proto_id.<name>` and its table as `slipmesh.net/route_table.<name>`, the number
+or `main`, for whatever installs that class's routes there; without the class there are no such
+annotations. Refused, over all classes together: two classes with the same
 number; `0` to `4`, the kernel's own; `200`, which the routes to the clients of roadwarriors pools
 carry. A `table` of `0`, `253`, `254` or `255` is refused too: the kernel keeps those for itself,
 `254` being `main`, which a class without the key gets.
@@ -1150,9 +1151,9 @@ documentation.
 | `vars` | | Laid for each node, and given to its router and firewall daemons. | Refused with `platform: routeros`; not served without it. |
 
 On `talos` the generator tells a node these values as annotations under `slipmesh.net/`:
-`interface_prefix.mesh`; `route_proto_id.<name>` for each route class; `endpoint`, the address or
-host name under the node's `endpoint`, none for a node without one; and `mesh_mtu`, the MTU of the
-mesh as computed.
+`interface_prefix.mesh`; `route_proto_id.<name>` and `route_table.<name>` for each route class;
+`endpoint`, the address or host name under the node's `endpoint`, none for a node without one; and
+`mesh_mtu`, the MTU of the mesh as computed.
 
 ## Example
 
