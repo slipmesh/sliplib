@@ -791,7 +791,6 @@ version = "0.27.0"
 dependencies = [
  "anyhow",
  "rand",
- "serde",
  "sliplib-config",
  "sliplib-net",
  "sliplib-secrets",

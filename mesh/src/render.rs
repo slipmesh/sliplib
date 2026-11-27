@@ -688,4 +688,78 @@ mod tests {
         let without = configs_of(&example("{routing: {bfd: null}}"), "node-a").unwrap();
         assert_eq!(without.router.bfd, None);
     }
+
+    #[test]
+    fn an_interface_holds_its_links_port_its_nodes_addresses_key_and_mtu_and_its_peer() {
+        let network = example("{}");
+        let interface = mesh_interface(&network, "node-b", "node-a");
+        assert_eq!(interface.listen_port, 51830);
+        let addresses: Vec<String> = interface
+            .addresses
+            .iter()
+            .map(|address| address.0.to_string())
+            .collect();
+        assert_eq!(addresses, ["fe80::2/64", "198.51.100.130/32"]);
+        assert_eq!(
+            interface.private_key.expose(),
+            format!("{}=", "E".repeat(43))
+        );
+        assert_eq!(interface.mtu, Some(1320));
+        let [peer] = &interface.peers[..] else {
+            panic!("{:?}", interface.peers);
+        };
+        let of_node_a = network.node("node-a").unwrap().private_key().unwrap();
+        assert_eq!(peer.public_key, of_node_a.public_key().unwrap());
+        assert_eq!(peer.name.as_deref(), Some("node-a"));
+        assert_eq!(peer.allowed_ips, None);
+    }
+
+    #[test]
+    fn a_router_config_holds_its_nodes_loopbacks_and_lists_and_the_networks_as_and_bfd() {
+        let network = example("{routing: {bfd: {min_rx_ms: 250}}}");
+        let router = configs_of(&network, "node-a").unwrap().router;
+        let loopbacks = &router.node.loopback_addresses;
+        assert_eq!(loopbacks.ipv4.0.to_string(), "198.51.100.1/32");
+        assert_eq!(loopbacks.ipv6.0.to_string(), "3fff:0:0:1::1/128");
+        assert_eq!(router.bgp_as, 64500);
+        assert_eq!(
+            router.bfd,
+            Some(BfdSettings {
+                min_rx_ms: 250,
+                min_tx_ms: 300,
+                multiplier: 5
+            })
+        );
+        assert_eq!(router.bypass, None);
+        for (node, direct, learn, announce) in [
+            (
+                "node-a",
+                &["lan0", "mesh-*"][..],
+                &["203.0.113.0/26"][..],
+                &["203.0.113.64/26"][..],
+            ),
+            // Its own lists stand in place of the network's.
+            ("router1", &["bridge-lan", "mesh-*"], &[], &[]),
+        ] {
+            let router = configs_of(&network, node).unwrap().router;
+            let written: Vec<&str> = router
+                .direct_interfaces
+                .iter()
+                .map(InterfacePattern::as_str)
+                .collect();
+            assert_eq!(written, direct, "{node}");
+            let learned: Vec<String> = router.learn.iter().map(|net| net.0.to_string()).collect();
+            assert_eq!(learned, learn, "{node}");
+            let announced: Vec<String> = router
+                .announce
+                .iter()
+                .map(|entry| entry.net.0.to_string())
+                .collect();
+            assert_eq!(announced, announce, "{node}");
+            assert!(
+                router.announce.iter().all(|entry| entry.label.is_none()),
+                "{node}"
+            );
+        }
+    }
 }
