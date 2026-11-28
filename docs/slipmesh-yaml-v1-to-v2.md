@@ -159,7 +159,10 @@ lists: what else step 6 shows comes from the conversion.
       label `k8s-services` has no place in version 2. `bfd` moves here without `enable`: where
       `enable` was `false` or absent, delete the block. `classes.egress.protocol` is
       `cluster.route_proto_id.egress`, which a file that passes step 1 always has, and its `table`
-      the table the `RoutingRuleConfig` patches look up other than `main`, if there is one. An
+      the table the `RoutingRuleConfig` patches look up other than `main`, if there is one. Where
+      the file has `roadwarriors` documents, add the class `roadwarriors` with `protocol: 151` and
+      no `table`: the operator that brings the pools back reads the number of their clients' routes
+      from it ([**Planned**](slipmesh-yaml.md#routingclasses)). An
       entry of a `direct_interfaces`, here or a node's, that is a CIDR or holds a character other
       than ASCII letters, digits, `-`, `_` and `.` before a trailing `*`, as `?` is, does not load:
       rewrite it as interface names, or prefixes and `*`.
@@ -255,6 +258,9 @@ lists: what else step 6 shows comes from the conversion.
      `slipmesh.net/endpoint` carries the bare address or name; where that port differed from the
      link's `port`, every peer's endpoint for that node, in the `awg` config and on a RouterOS peer;
    - where step 4.2 changed a network, the addresses derived from it;
+   - where step 4.3 added the class `roadwarriors`, every `talos` node's annotations
+     `slipmesh.net/route_proto_id.roadwarriors`, `151`, and `slipmesh.net/route_table.roadwarriors`,
+     `main`;
    - where a node was renamed in step 4.6, the interfaces named after it, and what refers to them;
    - where step 4.6 gave a node another `node_id`, each address derived from it that the new one
      changes, and what other nodes hold of it, the address of its iBGP sessions among them: its

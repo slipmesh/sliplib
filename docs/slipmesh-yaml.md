@@ -481,6 +481,10 @@ number; `0` to `4`, the kernel's own; `200`, which the routes to the clients of 
 carry. A `table` of `0`, `253`, `254` or `255` is refused too: the kernel keeps those for itself,
 `254` being `main`, which a class without the key gets.
 
+**Planned:** the roadwarriors agent, installing the routes to the clients of its pools under the
+class `roadwarriors`. The router's reference template learns those routes at `151` alone, whatever
+the class says, so the class takes that number.
+
 **Planned:** the router carrying a class's routes over the mesh to the other nodes, telling them
 from its other kernel routes by the number, into the class's `table`.
 
