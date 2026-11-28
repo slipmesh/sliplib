@@ -46,7 +46,7 @@ pub fn link_obfuscation(link: &str) -> String {
 #[derive(Debug, Clone, Copy)]
 pub struct Mesh<'a> {
     network: &'a Network,
-    interface_prefix: &'a InterfacePrefix,
+    pub(crate) interface_prefix: &'a InterfacePrefix,
 }
 
 /// What a node's `node_id` gives it.
