@@ -229,9 +229,10 @@ impl RtClient {
 }
 
 /// A wake-up for every change to a link, or to a route or an address of either family, an overrun
-/// of the socket included. The messages are not read: whoever wakes looks up the state again.
-/// Links too, since the kernel drops the IPv4 routes of a link that goes down without a route
-/// event.
+/// of the socket included. Nothing is taken from the messages: whoever wakes looks up the state
+/// again. Links too, since the kernel drops the IPv4 routes of a link that goes down without a
+/// route event. Each message is read and dropped as it comes, so a burst is one wake and nothing
+/// queues while the caller is busy.
 pub fn link_route_and_address_changes() -> Result<impl Stream<Item = ()> + Unpin, Error> {
     use rtnetlink::MulticastGroup;
     let (connection, _, messages) = rtnetlink::new_multicast_connection(&[
@@ -243,7 +244,27 @@ pub fn link_route_and_address_changes() -> Result<impl Stream<Item = ()> + Unpin
     ])
     .map_err(Error::Subscribe)?;
     tokio::spawn(connection);
-    Ok(messages.map(|_| ()))
+    Ok(read_as_they_come(messages.map(|_| ())))
+}
+
+/// `changes` read as they come and dropped, leaving only that one came.
+fn read_as_they_come(
+    mut changes: impl Stream<Item = ()> + Send + Unpin + 'static,
+) -> impl Stream<Item = ()> + Unpin {
+    let (came, seen) = tokio::sync::watch::channel(());
+    tokio::spawn(async move {
+        while changes.next().await.is_some() {
+            if came.send(()).is_err() {
+                break;
+            }
+        }
+    });
+    Box::pin(
+        futures::stream::unfold(seen, |mut seen| async move {
+            seen.changed().await.ok().map(|()| ((), seen))
+        })
+        .fuse(),
+    )
 }
 
 fn route_message(route: &Route, action: &'static str) -> Result<RouteMessage, Error> {
@@ -420,5 +441,29 @@ mod tests {
                 Some(route.clone())
             );
         }
+    }
+
+    /// A change not read yet, counted in `unread` until it is dropped.
+    struct Unread(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl Drop for Unread {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_burst_is_read_as_it_comes_and_wakes_once() {
+        let unread = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (tx, rx) = futures::channel::mpsc::unbounded();
+        for _ in 0..1001 {
+            unread.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tx.unbounded_send(Unread(Arc::clone(&unread))).unwrap();
+        }
+        drop(tx);
+        let changes = read_as_they_come(rx.map(drop));
+        tokio::task::yield_now().await;
+        assert_eq!(unread.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(changes.collect::<Vec<()>>().await, [()]);
     }
 }
