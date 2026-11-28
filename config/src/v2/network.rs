@@ -288,7 +288,7 @@ pub struct NodeRouting {
 }
 
 /// What every link's interface name starts with.
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(try_from = "String")]
 pub struct InterfacePrefix(String);
 

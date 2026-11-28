@@ -1,5 +1,6 @@
 //! What every platform's `awg` daemon shares of its config.
 
+use crate::v2::network::InterfacePrefix;
 use crate::{Obfuscation, Prefix, Range};
 use serde::{Deserialize, Serialize};
 use sliplib_net::mtu::MIN_IPV6_MTU;
@@ -7,8 +8,11 @@ use sliplib_net::{Ipv4Net, Ipv6Net};
 use sliplib_secrets::wireguard::PrivateKey;
 use std::collections::HashSet;
 
-#[derive(Deserialize, Serialize, Debug, Default, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct AwgConfig {
+    /// The daemon removes an `amneziawg` interface of this prefix that the config does not name, and
+    /// no other.
+    pub interface_prefix: InterfacePrefix,
     #[serde(default)]
     pub interfaces: Vec<InterfaceEntry>,
 }
@@ -178,6 +182,13 @@ mod tests {
 
     type IsTheRefusal = fn(&Invalid) -> bool;
 
+    fn awg(interfaces: Vec<InterfaceEntry>) -> AwgConfig {
+        AwgConfig {
+            interface_prefix: "mesh-".to_owned().try_into().unwrap(),
+            interfaces,
+        }
+    }
+
     fn iface(name: &str) -> InterfaceEntry {
         InterfaceEntry {
             name: name.to_string(),
@@ -197,9 +208,7 @@ mod tests {
             .map(|a| Prefix::try_from(a.to_string()).unwrap())
             .collect();
         iface.mtu = Some(mtu);
-        AwgConfig {
-            interfaces: vec![iface],
-        }
+        awg(vec![iface])
     }
 
     #[test]
@@ -231,17 +240,16 @@ mod tests {
 
     #[test]
     fn an_mtu_is_read_when_given_and_left_out_when_not() {
-        let yaml = "interfaces:\n  - name: mesh-a\n    listen_port: 51820\n    private_key: \
+        let yaml = "interface_prefix: mesh-\ninterfaces:\n  - name: mesh-a\n    listen_port: 51820\n    private_key: \
                     \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"\n    mtu: 1420\n";
         let cfg: AwgConfig = sliplib_yaml::from_str(yaml).unwrap();
         assert_eq!(cfg.interfaces[0].mtu, Some(1420));
-        let unset = AwgConfig {
-            interfaces: vec![iface("mesh-a")],
-        };
+        let unset = awg(vec![iface("mesh-a")]);
         assert!(!sliplib_yaml::to_string(&unset).unwrap().contains("mtu"));
     }
 
     const FULL_CONFIG: &str = r#"
+interface_prefix: mesh-
 interfaces:
   - name: mesh-a1b2c3d4
     listen_port: 51820
@@ -292,6 +300,9 @@ interfaces:
     fn parses_a_full_config_from_yaml() {
         let yaml = FULL_CONFIG;
         let cfg: AwgConfig = sliplib_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.interface_prefix.as_str(), "mesh-");
+        let without_prefix = yaml.replace("interface_prefix: mesh-\n", "");
+        assert!(sliplib_yaml::from_str::<AwgConfig>(&without_prefix).is_err());
         assert_eq!(cfg.interfaces.len(), 2);
         let dialed = &cfg.interfaces[0].peers[0];
         assert_eq!(dialed.name.as_deref(), Some("east"));
@@ -347,7 +358,7 @@ interfaces:
             ),
         ] {
             let yaml = format!(
-                "interfaces:\n  - name: mesh-a\n    listen_port: 51820\n    private_key: \
+                "interface_prefix: mesh-\ninterfaces:\n  - name: mesh-a\n    listen_port: 51820\n    private_key: \
                  \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"\n    {field}\n"
             );
             let err = sliplib_yaml::from_str::<AwgConfig>(&yaml)
@@ -395,18 +406,14 @@ interfaces:
             }),
         ];
         for (case, interfaces, is_the_refusal) in cases {
-            let refused = validate(&AwgConfig { interfaces }).expect_err(case);
+            let refused = validate(&awg(interfaces)).expect_err(case);
             assert!(is_the_refusal(&refused), "{case}: {refused:?}");
         }
     }
 
     #[test]
     fn a_name_fills_ifnamsiz_and_one_byte_more_is_refused() {
-        let named = |name: &str| {
-            validate(&AwgConfig {
-                interfaces: vec![iface(name)],
-            })
-        };
+        let named = |name: &str| validate(&awg(vec![iface(name)]));
         named("fifteen-bytes-1").unwrap();
         let refused = named("sixteen-bytes-16").unwrap_err();
         assert!(
@@ -424,9 +431,7 @@ interfaces:
             allowed_ips: None,
             persistent_keepalive,
         });
-        AwgConfig {
-            interfaces: vec![a],
-        }
+        awg(vec![a])
     }
 
     #[test]

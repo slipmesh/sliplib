@@ -203,6 +203,7 @@ pub(crate) fn render_awg_config(
     node: &Node,
 ) -> Result<AwgConfig> {
     Ok(AwgConfig {
+        interface_prefix: mesh.interface_prefix.clone(),
         interfaces: mesh_interfaces_for(mesh, node_name, node)?,
     })
 }
@@ -365,8 +366,9 @@ mod tests {
     }
 
     #[test]
-    fn the_interface_prefix_names_the_interfaces_and_what_ospf_runs_on() {
+    fn the_interface_prefix_goes_to_awg_and_names_the_interfaces_and_what_ospf_runs_on() {
         let configs = configs_of(&example("{mesh: {interface_prefix: wg-}}"), "node-a").unwrap();
+        assert_eq!(configs.awg.interface_prefix.as_str(), "wg-");
         let names: Vec<&str> = configs
             .awg
             .interfaces
