@@ -121,8 +121,8 @@ a roadwarriors pool with its clients.
 
 The `slipmesh rw` commands of v0.19 and before edit its pools; from v0.20.0 on there are none.
 
-**Planned:** the operators, and the command each of them has to write its resources out of a
-version 1 file, once.
+The egress operator serves the lists. **Planned:** the roadwarriors operator, which serves the
+pools, and a one-off export of the pools of a version 1 file into its resources.
 
 ## Converting a file by hand
 
@@ -140,9 +140,13 @@ lists: what else step 6 shows comes from the conversion.
    compared against.
 2. Move what the file's comments say to where it will be kept: the first write by `slipmesh` drops
    them.
-3. Have the pools and the lists written out as resources of the cluster, as
-   [What leaves the file](#what-leaves-the-file) says. **Planned:** until the operators exist, a
-   file with pools or `bypass` cannot be converted. A file with neither skips this step.
+3. Have the lists written out as egress lists of the cluster, as
+   [What leaves the file](#what-leaves-the-file) says, unless they already are: from then on the
+   egress lists, not the file, are what is edited. The pools are not written out now. They leave the
+   mesh with the converted file: a node that gets it serves them no more, and their clients
+   have no access until the roadwarriors operator serves the pools again. Keep the version 1 file in
+   the history, since the pools are exported from it then (**Planned**). A file with neither pools
+   nor `bypass` skips this step.
 4. Edit the file. A key a file of version 1 writes as `null` is deleted, not moved: version 1
    read `null` as the key left out, and version 2 lays it as deleting the key. Moved as it is, a
    node's `direct_interfaces: null`, which gave the node the cluster's list, leaves it announcing no
