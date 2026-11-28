@@ -10,7 +10,8 @@ use std::collections::HashSet;
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct AwgConfig {
-    /// The daemon removes an interface of this prefix that the config does not name, and no other.
+    /// The daemon removes an `amneziawg` interface of this prefix that the config does not name, and
+    /// no other.
     pub interface_prefix: InterfacePrefix,
     #[serde(default)]
     pub interfaces: Vec<InterfaceEntry>,
