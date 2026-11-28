@@ -183,7 +183,7 @@ reaches every component. On top of its methods:
 - with the feature `netlink`, Linux only, `route`: kernel routes by table and protocol tag in
   either family (`RtClient::route_replace`, `route_del`, `routes`), the main table's default route
   of a family and the link and addresses it leaves through (`default_route`, `uplink`), and a
-  wake-up on every link, route and address change (`link_route_and_address_changes`), read as it
+  wake-up after any link, route or address change (`link_route_and_address_changes`), read as it
   comes so that a burst is one wake and nothing queues. Another daemon's route to the same
   destination and table stays beside ours when the metrics differ; without a metric of its own a
   route takes the kernel's default, 0 for IPv4 and 1024 for IPv6;

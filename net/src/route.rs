@@ -228,7 +228,7 @@ impl RtClient {
     }
 }
 
-/// A wake-up for every change to a link, or to a route or an address of either family, an overrun
+/// A wake-up after any change to a link, or to a route or an address of either family, an overrun
 /// of the socket included. Nothing is taken from the messages: whoever wakes looks up the state
 /// again. Links too, since the kernel drops the IPv4 routes of a link that goes down without a
 /// route event. Each message is read and dropped as it comes, so a burst is one wake and nothing
